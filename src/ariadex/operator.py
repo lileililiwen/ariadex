@@ -286,6 +286,40 @@ def run_doctor(project_dir: Path) -> tuple[list[DoctorCheck], dict]:
                     False,
                 )
             )
+    from . import companion as companion_mod
+
+    desktop = companion_mod.detect_desktop()
+    try:
+        companion_hotkey = companion_mod.configured_hotkey()
+        companion_mod.parse_hotkey(companion_hotkey)
+        hotkey_note = f"hotkey `{companion_hotkey}`"
+    except companion_mod.CompanionError as exc:
+        companion_hotkey = companion_mod.DEFAULT_HOTKEY
+        hotkey_note = f"hotkey invalid ({exc}); default `{companion_hotkey}` applies"
+    if desktop.supported and companion_mod.tkinter_available():
+        checks.append(
+            DoctorCheck(
+                "companion",
+                True,
+                f"desktop {desktop.session}, Tkinter present, {hotkey_note}",
+                False,
+            )
+        )
+    else:
+        reasons = []
+        if not desktop.supported:
+            reasons.append(desktop.detail)
+        if not companion_mod.tkinter_available():
+            reasons.append("Tkinter is not installed")
+        checks.append(
+            DoctorCheck(
+                "companion",
+                False,
+                f"floating controls unavailable: {'; '.join(reasons)}; "
+                f"{hotkey_note}; terminal controls apply",
+                False,
+            )
+        )
     summary = {
         "ok": all(c.ok or not c.required for c in checks),
         "checks": [c.to_dict() for c in checks],

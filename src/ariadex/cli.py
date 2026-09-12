@@ -13,6 +13,7 @@ import os
 import sys
 from pathlib import Path
 
+from . import companion as companion_mod
 from . import concurrency as concurrency_mod
 from . import config as config_mod
 from . import control as control_mod
@@ -138,6 +139,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="emit stable JSON instead of human-readable text",
+    )
+    companion_parser = sub.add_parser(
+        "companion",
+        help="launch the floating yield control (Linux X11 + Tkinter)",
+    )
+    companion_parser.add_argument(
+        "--hotkey",
+        default=None,
+        help="global hotkey for this session (default: per-user config or Ctrl+Esc)",
+    )
+    companion_parser.add_argument(
+        "--editor",
+        default=None,
+        help="editor command for the companion Editor button (default: $EDITOR)",
     )
     admin_parser = sub.add_parser(
         "admin",
@@ -1129,6 +1144,7 @@ def cmd_stop(project_dir: Path, as_json: bool = False) -> int:
 
 
 ADMIN_COMMANDS = (
+    "companion",
     "doctor",
     "preview",
     "queue",
@@ -1152,6 +1168,26 @@ ADMIN_COMMANDS = (
     "pause",
     "resume",
 )
+
+
+def cmd_companion(
+    project_dir: Path, hotkey: str | None = None, editor: str | None = None
+) -> int:
+    """Launch the opt-in floating yield control. Fail-closed off-desktop.
+
+    Refuses with a repair action on unsupported sessions or without
+    Tkinter; a daemon that is merely unreachable is shown in the widget
+    as a failure view instead of being fabricated. Sends no input itself.
+    """
+    if _load_config(project_dir) is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    try:
+        return companion_mod.run_companion(project_dir, hotkey=hotkey, editor=editor)
+    except companion_mod.CompanionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
 
 
 def cmd_admin(project_dir: Path, admin_argv: list[str], no_auto_install: bool) -> int:
@@ -1550,6 +1586,11 @@ def main(argv: list[str] | None = None) -> int:
         "resume": lambda: cmd_resume(project_dir, as_json=getattr(args, "json", False)),
         "start": lambda: cmd_start(project_dir, as_json=getattr(args, "json", False)),
         "stop": lambda: cmd_stop(project_dir, as_json=getattr(args, "json", False)),
+        "companion": lambda: cmd_companion(
+            project_dir,
+            hotkey=getattr(args, "hotkey", None),
+            editor=getattr(args, "editor", None),
+        ),
         "admin": lambda: cmd_admin(
             project_dir,
             list(getattr(args, "admin_argv", []) or []),

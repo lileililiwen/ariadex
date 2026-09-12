@@ -100,6 +100,31 @@ on durable state locally. Advanced inspection and repair commands keep
 working at the top level and are also grouped under `admin`
 (e.g. `ariadex admin doctor`).
 
+## Floating companion (opt-in)
+
+On Linux X11 with Tkinter installed, `ariadex companion` opens a small
+always-on-top mini-player near the middle-right edge: a text status
+indicator, the current work label, and compact Play/Yield/Stop controls.
+Expanding the widget reveals full status text, a hotkey field, and
+Reconcile/Editor/Session controls. Every daemon mutation goes through the
+same typed local IPC as the terminal commands; the companion never writes
+state, touches the lease or tmux, or injects keystrokes into your editor.
+
+Manual-yield workflow: press the global hotkey (default `Ctrl+Esc`) while
+the agent works — the daemon yields to PAUSE at the safe cancellation
+boundary. Edit freely, then press Play: the daemon resynchronizes handoff,
+git, specs, queue, lease, and session state before any new provider input.
+Stop always asks for confirmation; hiding or quitting the companion never
+stops the daemon.
+
+Configuration is per user in `$XDG_CONFIG_HOME/ariadex/companion.json`
+(`~/.config/ariadex/companion.json` by default): `hotkey` (e.g. `Alt+F9`)
+and the last window position `x`/`y`. `--hotkey` overrides the hotkey for
+one session; `--editor` overrides `$EDITOR` for the Editor button. Wayland,
+macOS, and Windows report unsupported instead of pretending — use
+`ariadex pause` / `ariadex resume` there. `ariadex doctor` reports the
+desktop session, Tkinter presence, and effective hotkey.
+
 A typical session:
 
 ```bash
@@ -154,13 +179,14 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | `init`             | Create `.ariadex/` defaults without overwriting existing files |
 | `start [--json]`   | Start the resident daemon (idempotent; refuses live leases)    |
 | `stop [--json]`    | Bounded graceful shutdown; durable state kept for `recover`    |
+| `companion [--hotkey] [--editor]` | Opt-in floating yield control (Linux X11 + Tkinter) |
 | `status [--json]`  | Daemon-mediated when healthy, otherwise local durable state    |
 | `pause [--json]`   | Daemon-mediated when healthy; no new scheduling, safe cancel   |
 | `resume [--json]`  | Daemon-mediated when healthy; resync, back to manual control   |
-| `admin <command>`  | Advanced namespace: `doctor preview queue history resolve`     |
-|                    | `defer reopen reprioritize recover prune-logs export-logs`     |
-|                    | `events export-events evidence preflight run auto attach`      |
-|                    | `takeover status pause resume` (top-level aliases unchanged)   |
+| `admin <command>`  | Advanced namespace: `companion doctor preview queue history`   |
+|                    | `resolve defer reopen reprioritize recover prune-logs`         |
+|                    | `export-logs events export-events evidence preflight run auto` |
+|                    | `attach takeover status pause resume` (top-level aliases stay) |
 | `run [--yes] [--preview]` | Execute the next action from durable state (needs `AUTO`) |
 | `auto [--yes] [--preview]` | Resync, enter `AUTO`, and resume scheduling            |
 | `attach`           | Attach your terminal to the live tmux Coding CLI session       |
@@ -225,7 +251,7 @@ instead of silently substituting another spec.
 ```bash
 pip install -e ".[dev]"                              # pinned QA toolchain
 ariadex preflight                                    # paths/versions: python, package, pip-audit, build, providers, tmux
-python -m unittest discover -s tests                 # 555 tests, stdlib only
+python -m unittest discover -s tests                 # 620 tests, stdlib only
 openspec validate --changes --strict --no-interactive
 ruff check src tests
 ruff format --check src tests
