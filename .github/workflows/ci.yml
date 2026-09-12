@@ -56,6 +56,7 @@ jobs:
       - run: mypy src/ariadex
       - run: coverage run -m unittest discover -s tests
       - run: coverage report
+      - run: python3 scripts/check_coverage.py
 
   security:
     name: security (pip-audit)

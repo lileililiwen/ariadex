@@ -125,7 +125,8 @@ def write_fake_provider(directory: Path | str, name: str = "fake-provider") -> P
 
 
 def _run_probe(command: list[str], timeout_s: int = DEFAULT_TIMEOUT_S) -> str:
-    proc = subprocess.run(
+    # Fixed `--version`/`--help` probe argv from the smoke scenario only.
+    proc = subprocess.run(  # noqa: S603
         command,
         capture_output=True,
         text=True,

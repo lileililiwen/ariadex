@@ -274,7 +274,9 @@ class CommandSink(ExportSink):
 
     def send(self, payload: dict) -> None:
         try:
-            proc = subprocess.run(
+            # Opt-in command sink: argv from operator configuration, no shell,
+            # payload delivered on stdin (never interpolated into the command).
+            proc = subprocess.run(  # noqa: S603
                 self.argv,
                 input=json.dumps(payload, sort_keys=True),
                 capture_output=True,
@@ -303,14 +305,16 @@ class WebhookSink(ExportSink):
 
     def send(self, payload: dict) -> None:
         body = json.dumps(payload, sort_keys=True).encode("utf-8")
-        request = urllib.request.Request(
+        # Operator-configured webhook URL; redacted JSON POST, HTTPS expected.
+        request = urllib.request.Request(  # noqa: S310
             self.url,
             data=body,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+            # Same operator-configured endpoint; response status checked below.
+            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:  # noqa: S310
                 status = getattr(response, "status", 200)
         except Exception as exc:
             raise ExportError(f"webhook sink failed (`{self.url}`): {exc}") from exc

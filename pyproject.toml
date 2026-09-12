@@ -61,10 +61,27 @@ target-version = "py311"
 [tool.ruff.lint]
 # E/F: syntax, unused, undefined. I: import order. UP: py311 idioms.
 # B: likely bugs. SIM105/SIM117: mechanical simplifications. C4/RUF: safe
-# modernizations. Bandit (S), pylint (PL) and blind-except (BLE) families
-# are intentionally out: they demand behavior-affecting changes and are
-# deferred to a hardening pass.
-select = ["B", "C4", "E", "F", "I", "RUF", "SIM", "UP", "W"]
+# modernizations. S: subprocess/shell/URL/secret handling, with two
+# documented carve-outs below. S607 (partial executable path) stays out:
+# host tools (tmux, provider CLIs, package managers) are PATH-resolved by
+# design, and fixed paths are used where resolution matters (local-tmux
+# wrapper, `require_tmux`). PL and BLE families stay out: they demand
+# behavior-affecting changes.
+select = ["B", "C4", "E", "F", "I", "RUF", "S", "SIM", "UP", "W"]
+ignore = [
+  # Scenario and test assertions are intentional fail-closed probes;
+  # removing them would weaken the evidence harness.
+  "S101",
+  # Host tools (tmux, provider CLIs, package managers) are PATH-resolved
+  # by design; see the S607 note above.
+  "S607",
+]
+[tool.ruff.lint.per-file-ignores]
+# Test fixtures pass "/tmp" workdirs and fixed argv vectors
+# (sys.executable, git with literal args) to fakes; no user input reaches
+# subprocess and no predictable temp files are created (real temp usage
+# goes through `tempfile`). S103/S108/S603 stay enforced on src/.
+"tests/*" = ["S103", "S108", "S603"]
 
 [tool.mypy]
 python_version = "3.11"
