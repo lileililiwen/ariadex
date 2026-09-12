@@ -345,6 +345,14 @@ class RobotWatcher:
         self.phase = PAUSED
         return "paused: no new input; the provider session keeps running"
 
+    def request_resume(self) -> str:
+        """Resume observation; do not inject input just because of resume."""
+        self._paused = False
+        self.block_reason = ""
+        self.stable_polls = 0
+        self.phase = WORKING if self.initial_sent else ATTACHED
+        return "resumed: watcher is observing the provider session"
+
     def request_quit(self) -> str:
         """Stop watching; the user-owned session is left attachable."""
         self._quit = True

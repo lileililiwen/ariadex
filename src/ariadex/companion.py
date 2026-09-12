@@ -1037,6 +1037,9 @@ class CompanionWindow:
         self.work_label.configure(text=str(model.get("work_label", "")))
         actions = model.get("actions", {})
         self.pause_button.configure(
+            text="Resume" if model.get("indicator") == "paused" else "Pause"
+        )
+        self.pause_button.configure(
             state="normal" if actions.get("pause") else "disabled"
         )
         self.play_button.configure(
@@ -1103,7 +1106,8 @@ def build_robot_view_model(status: dict) -> dict:
         "work_label": work_label,
         "failure": reason if indicator == "blocked" else None,
         "actions": {
-        "pause": indicator in ("watching", "working", "waiting"),
+            "pause": indicator in ("watching", "working", "waiting"),
+            "resume": indicator == "paused",
             "quit": indicator != "stopped",
         },
     }
@@ -1137,6 +1141,9 @@ class RobotWindow:
         status_fn: Callable[[], dict],
         on_pause: Callable[[], str],
         on_quit: Callable[[], str],
+        on_resume: Callable[[], str] | None = None,
+        hotkey_adapter: HotkeyAdapter | None = None,
+        hotkey: str = DEFAULT_HOTKEY,
         poll_interval_s: float = POLL_INTERVAL_S,
     ) -> None:
         import tkinter as tk
@@ -1144,7 +1151,10 @@ class RobotWindow:
         self.root = root
         self.status_fn = status_fn
         self.on_pause = on_pause
+        self.on_resume = on_resume
         self.on_quit = on_quit
+        self.hotkey_adapter = hotkey_adapter
+        self.hotkey = hotkey
         self.poll_interval_ms = max(1, int(poll_interval_s * 1000))
         self.model: dict = build_robot_view_model({})
         self._poll_after: str | None = None
@@ -1205,17 +1215,29 @@ class RobotWindow:
             command=self._on_quit,
         )
         self.quit_button.pack(side="left", expand=True, fill="x")
+        if self.hotkey_adapter is not None:
+            self.hotkey_adapter.register(self.hotkey, self._on_hotkey)
         self._refresh()
         self._schedule_poll()
 
     def _on_pause(self) -> None:
         with contextlib.suppress(Exception):
-            self.on_pause()
+            if self.model.get("indicator") == "paused" and self.on_resume:
+                self.on_resume()
+            else:
+                self.on_pause()
         self._refresh()
+
+    def _on_hotkey(self) -> None:
+        """Marshal the X11 callback onto Tk's UI thread."""
+        with contextlib.suppress(Exception):
+            self.root.after(0, self._on_pause)  # type: ignore[attr-defined]
 
     def _on_quit(self) -> None:
         with contextlib.suppress(Exception):
             self.on_quit()
+        if self.hotkey_adapter is not None:
+            self.hotkey_adapter.unregister()
         self._cancel_poll()
         self.root.destroy()  # type: ignore[attr-defined]
 
@@ -1255,7 +1277,14 @@ class RobotWindow:
         self.identity_label.configure(text=str(model.get("work_label", "")))
         actions = model.get("actions", {})
         self.pause_button.configure(
-            state="normal" if actions.get("pause") else "disabled"
+            text="Resume" if model.get("indicator") == "paused" else "Pause"
+        )
+        self.pause_button.configure(
+            state=(
+                "normal"
+                if actions.get("pause") or actions.get("resume")
+                else "disabled"
+            )
         )
         self.quit_button.configure(
             state="normal" if actions.get("quit") else "disabled"
@@ -1277,6 +1306,13 @@ def run_robot_widget(watcher: object, *, poll_interval_s: float = 2.0) -> int:
         raise CompanionError("robot widget unavailable: Tkinter is not installed")
     import tkinter as tk
 
+    try:
+        hotkey = configured_hotkey()
+        parse_hotkey(hotkey)
+        hotkey_adapter = adapter_for_session(info.session)
+    except CompanionError as exc:
+        raise CompanionError(f"robot widget unavailable: {exc}") from exc
+
     root = tk.Tk()
     status_fn = getattr(watcher, "status_view")
     on_pause = getattr(watcher, "request_pause")
@@ -1285,7 +1321,10 @@ def run_robot_widget(watcher: object, *, poll_interval_s: float = 2.0) -> int:
         root,
         status_fn=status_fn,
         on_pause=on_pause,
+        on_resume=getattr(watcher, "request_resume"),
         on_quit=on_quit,
+        hotkey_adapter=hotkey_adapter,
+        hotkey=hotkey,
         poll_interval_s=poll_interval_s,
     )
     root.protocol("WM_DELETE_WINDOW", window._on_quit)
@@ -1296,7 +1335,14 @@ def run_robot_widget(watcher: object, *, poll_interval_s: float = 2.0) -> int:
 
     thread = threading.Thread(target=run_watch, name="ariadex-robot-watch", daemon=True)
     thread.start()
-    root.mainloop()
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        print(getattr(watcher, "request_quit")())
+        with contextlib.suppress(Exception):
+            root.destroy()
+    finally:
+        hotkey_adapter.unregister()
     return 0
 
 

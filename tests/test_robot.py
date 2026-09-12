@@ -383,6 +383,24 @@ class WatcherStateTest(unittest.TestCase):
         self.assertEqual(driver.sent_inputs("agent"), [])
         self.assertIn("agent", driver.sessions)
 
+    def test_resume_returns_to_observation_without_input(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": BUSY,
+            "workdir": "/t",
+        }
+        watcher = make_watcher(project, driver)
+        watcher.request_pause()
+
+        result = watcher.request_resume()
+
+        self.assertIn("resumed", result)
+        self.assertFalse(watcher.paused)
+        self.assertEqual(watcher.phase, robot_mod.ATTACHED)
+        self.assertEqual(driver.sent_inputs("agent"), [])
+
     def test_quit_leaves_session_untouched(self) -> None:
         project = make_project(self._tmp)
         driver = FakeDriver()
@@ -978,6 +996,109 @@ class RobotWidgetTest(unittest.TestCase):
         )
         self.assertEqual(window.state_label.options["text"], "UNREACHABLE")
 
+    def test_robot_window_toggle_calls_pause_then_resume(self) -> None:
+        from ariadex import companion as companion_mod
+
+        calls: list[str] = []
+        paused = {"value": False}
+
+        def status_fn():
+            return {
+                "phase": "paused" if paused["value"] else "working",
+                "paused": paused["value"],
+                "provider": "opencode",
+                "session": "agent",
+            }
+
+        def pause():
+            calls.append("pause")
+            paused["value"] = True
+            return "paused"
+
+        def resume():
+            calls.append("resume")
+            paused["value"] = False
+            return "resumed"
+
+        window = companion_mod.RobotWindow(
+            FakeTkRoot(), status_fn, on_pause=pause, on_resume=resume,
+            on_quit=lambda: "stopped",
+        )
+        window.pause_button.invoke()
+        window._refresh()
+        self.assertEqual(window.pause_button.options["text"], "Resume")
+        window.pause_button.invoke()
+        self.assertEqual(calls, ["pause", "resume"])
+
+    def test_robot_widget_registers_ctrl_escape_and_interrupts_cleanly(self) -> None:
+        from ariadex import companion as companion_mod
+
+        class Hotkey:
+            def __init__(self):
+                self.registered = None
+                self.unregistered = False
+
+            def register(self, hotkey, callback):
+                self.registered = (hotkey, callback)
+
+            def unregister(self):
+                self.unregistered = True
+
+        class Watcher:
+            adapter = type("Adapter", (), {"provider_name": "opencode"})()
+            config = type("Config", (), {"session": "agent"})()
+            paused = False
+
+            def status_view(self):
+                return {"phase": "working", "provider": "opencode", "session": "agent"}
+
+            def request_pause(self):
+                return "paused"
+
+            def request_resume(self):
+                return "resumed"
+
+            def request_quit(self):
+                self.quit_requested = True
+                return "stopped: watcher exited"
+
+            def run(self):
+                return None
+
+        class TestTk(FakeTkRoot):
+            last = None
+
+            def __init__(self):
+                super().__init__()
+                TestTk.last = self
+
+            def protocol(self, *_args):
+                return None
+
+            def mainloop(self):
+                raise KeyboardInterrupt
+
+        hotkey = Hotkey()
+        watcher = Watcher()
+        with (
+            unittest.mock.patch.object(
+                companion_mod, "detect_desktop",
+                return_value=types.SimpleNamespace(supported=True, session="x11"),
+            ),
+            unittest.mock.patch.object(companion_mod, "adapter_for_session", return_value=hotkey),
+            unittest.mock.patch.object(companion_mod, "configured_hotkey", return_value="Ctrl+Esc"),
+            unittest.mock.patch.object(companion_mod, "parse_hotkey"),
+            unittest.mock.patch.object(companion_mod, "tkinter_available", return_value=True),
+        ):
+            # The imported tkinter module is supplied by install_fake_tk.
+            import tkinter
+            tkinter.Tk = TestTk
+            companion_mod.run_robot_widget(watcher, poll_interval_s=0.01)
+        self.assertEqual(hotkey.registered[0], "Ctrl+Esc")
+        self.assertTrue(hotkey.unregistered)
+        self.assertTrue(watcher.quit_requested)
+        self.assertTrue(TestTk.last.destroyed)
+
 
 class WatchCliTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -1229,6 +1350,30 @@ class WatchCliTest(unittest.TestCase):
                     session="agent",
                     initial_prompt="go",
                     provider="opencode",
+                )
+        self.assertEqual(code, 0)
+        self.assertIn("stopped", buf.getvalue())
+
+    def test_widget_keyboard_interrupt_quits_cleanly(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        self.driver.sessions["agent"] = {
+            "command": [],
+            "output": "",
+            "workdir": "/t",
+        }
+        with unittest.mock.patch.object(
+            self.cli.companion_mod, "run_robot_widget", side_effect=KeyboardInterrupt
+        ):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = self.cli.cmd_watch(
+                    self._project(),
+                    session="agent",
+                    initial_prompt="go",
+                    provider="opencode",
+                    widget=True,
                 )
         self.assertEqual(code, 0)
         self.assertIn("stopped", buf.getvalue())

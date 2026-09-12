@@ -195,7 +195,9 @@ Behavior:
   prompt is sent.
 - The robot widget is minimal: fixed middle-right, provider/session
   identity plus robot state, Pause (no new input, session keeps running),
-  and Quit (watcher exits, session left attachable).
+  and Quit (watcher exits, session left attachable). On Linux X11,
+  `Ctrl+Esc` globally toggles Pause/Resume. `Ctrl+C` cleanly stops the watch
+  process and closes the widget without a Python traceback.
 
 ## Durable project files
 

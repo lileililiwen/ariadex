@@ -307,7 +307,9 @@ no active OpenSpec work remains, the robot stops and reports completion
 without sending another prompt. The robot widget is a minimal
 middle-right control showing provider/session identity and robot state,
 with Pause (stops new input, session keeps running) and Quit (stops
-watching, session left attachable).
+watching, session left attachable). On Linux X11, `Ctrl+Esc` globally toggles
+Pause/Resume. `Ctrl+C` cleanly stops the watcher and closes the widget without
+a Python traceback.
 
 ## User deployment (opt-in)
 

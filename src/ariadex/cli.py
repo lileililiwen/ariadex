@@ -1654,6 +1654,9 @@ def cmd_watch(
             return companion_mod.run_robot_widget(
                 watcher, poll_interval_s=max(poll_interval, 0.1)
             )
+        except KeyboardInterrupt:
+            print(watcher.request_quit())
+            return EXIT_OK
         except companion_mod.CompanionError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return EXIT_ERROR
