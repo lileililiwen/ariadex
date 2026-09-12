@@ -3,8 +3,9 @@
 # Tag the release commit as `ariadex-v<version>` (must equal
 # `ariadex.__version__`; a mismatch fails the workflow). Live evidence
 # runs with `--gate`, so any skipped or blocked scenario fails the
-# release instead of silently passing. PyPI upload stays manual (see
-# CHANGELOG.md release guidance); built artifacts are retained here.
+# release instead of silently passing. Publication uses PyPI trusted
+# publishing scoped to this repository and workflow (configure the
+# pending publisher on PyPI first); built artifacts are retained here.
 #
 # Protection: grant this workflow the `release` environment in the repo
 # settings with required reviewers, so tags alone cannot ship.
@@ -20,6 +21,9 @@ jobs:
     name: verify and retain artifacts
     runs-on: ubuntu-latest
     environment: release
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -48,7 +52,7 @@ jobs:
       - name: live evidence release gate (no skips allowed)
         run: python -m ariadex evidence --gate --timeout 180
       - run: python -m build
-      - name: release readiness dry run (identity, tag, security, artifacts)
+      - name: release readiness dry run (identity, remote, tag, security, artifacts)
         run: python -m ariadex.release --tag "${GITHUB_REF_NAME}"
       - name: verify artifacts and record hashes
         run: |
@@ -64,6 +68,18 @@ jobs:
           rm -rf .ariadex
           /tmp/releasevenv/bin/ariadex init
           /tmp/releasevenv/bin/ariadex status
+      - name: publish to PyPI (trusted publisher, gated on every step above)
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: verify installation from the package index
+        run: |
+          VERSION="$(python -c 'import ariadex; print(ariadex.__version__)')"
+          python -m venv /tmp/pypi-venv
+          /tmp/pypi-venv/bin/pip install "ariadex==${VERSION}"
+          /tmp/pypi-venv/bin/ariadex --version
+          mkdir -p /tmp/ariadex-pypi-smoke && cd /tmp/ariadex-pypi-smoke
+          rm -rf .ariadex
+          /tmp/pypi-venv/bin/ariadex init
+          /tmp/pypi-venv/bin/ariadex status
       - uses: actions/upload-artifact@v4
         with:
           name: ariadex-${{ github.ref_name }}

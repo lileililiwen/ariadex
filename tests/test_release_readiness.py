@@ -14,11 +14,13 @@ from ariadex.release import (
     CANONICAL_ISSUES_URL,
     CANONICAL_REPO_URL,
     check_artifacts,
+    check_canonical_remote,
     check_metadata_urls,
     check_security_route,
     check_version_tag,
     dry_run,
     main,
+    resolve_origin_remote,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -101,6 +103,59 @@ class SecurityRouteTests(unittest.TestCase):
         self.assertIn(CANONICAL_ISSUES_URL, result.detail)
 
 
+class CanonicalRemoteTests(unittest.TestCase):
+    def test_canonical_https_passes(self):
+        result = check_canonical_remote(CANONICAL_REPO_URL)
+        self.assertTrue(result.ok, result.detail)
+
+    def test_canonical_git_suffix_and_slash_pass(self):
+        for url in (
+            CANONICAL_REPO_URL + ".git",
+            CANONICAL_REPO_URL + "/",
+            CANONICAL_REPO_URL + ".git/",
+        ):
+            with self.subTest(url=url):
+                result = check_canonical_remote(url)
+                self.assertTrue(result.ok, result.detail)
+
+    def test_canonical_ssh_forms_pass(self):
+        for url in (
+            "git@github.com:lileililiwen/ariadex.git",
+            "git@github.com:lileililiwen/ariadex",
+            "ssh://git@github.com/lileililiwen/ariadex.git",
+        ):
+            with self.subTest(url=url):
+                result = check_canonical_remote(url)
+                self.assertTrue(result.ok, result.detail)
+
+    def test_missing_remote_fails_with_add_command(self):
+        for url in ("", "   "):
+            with self.subTest(url=repr(url)):
+                result = check_canonical_remote(url)
+                self.assertFalse(result.ok)
+                self.assertIn("git remote add origin", result.detail)
+                self.assertIn(CANONICAL_REPO_URL, result.detail)
+
+    def test_foreign_remote_rejected(self):
+        result = check_canonical_remote("https://github.com/anomalyco/opencode.git")
+        self.assertFalse(result.ok)
+        self.assertIn("anomalyco/opencode", result.detail)
+
+    def test_placeholder_remote_rejected(self):
+        result = check_canonical_remote("https://example.com/<repo>.git")
+        self.assertFalse(result.ok)
+        self.assertIn("placeholder", result.detail)
+
+    def test_non_canonical_remote_rejected(self):
+        result = check_canonical_remote("https://github.com/someone-else/ariadex.git")
+        self.assertFalse(result.ok)
+        self.assertIn(CANONICAL_REPO_URL, result.detail)
+
+    def test_resolve_origin_returns_empty_without_remote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(resolve_origin_remote(Path(tmp)), "")
+
+
 class VersionTagTests(unittest.TestCase):
     def test_matching_tag_passes(self):
         result = check_version_tag(
@@ -152,10 +207,24 @@ class DryRunTests(unittest.TestCase):
     def test_dry_run_passes_on_ready_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._write_root(Path(tmp))
-            results = dry_run(Path(tmp), f"ariadex-v{ariadex.__version__}")
+            results = dry_run(
+                Path(tmp),
+                f"ariadex-v{ariadex.__version__}",
+                remote_url=CANONICAL_REPO_URL,
+            )
             self.assertTrue(all(r.ok for r in results), results)
             self.assertEqual(
-                main(["--root", tmp, "--tag", f"ariadex-v{ariadex.__version__}"]), 0
+                main(
+                    [
+                        "--root",
+                        tmp,
+                        "--tag",
+                        f"ariadex-v{ariadex.__version__}",
+                        "--remote-url",
+                        CANONICAL_REPO_URL,
+                    ]
+                ),
+                0,
             )
 
     def test_dry_run_fails_closed_without_publishing(self):
@@ -165,9 +234,70 @@ class DryRunTests(unittest.TestCase):
                 "Report at <https://github.com/anomalyco/opencode/issues>.\n",
                 encoding="utf-8",
             )
-            results = dry_run(Path(tmp), "ariadex-v9.9.9")
+            results = dry_run(
+                Path(tmp), "ariadex-v9.9.9", remote_url=CANONICAL_REPO_URL
+            )
             self.assertFalse(all(r.ok for r in results))
-            self.assertEqual(main(["--root", tmp, "--tag", "ariadex-v9.9.9"]), 1)
+            self.assertEqual(
+                main(
+                    [
+                        "--root",
+                        tmp,
+                        "--tag",
+                        "ariadex-v9.9.9",
+                        "--remote-url",
+                        CANONICAL_REPO_URL,
+                    ]
+                ),
+                1,
+            )
+
+    def test_dry_run_fails_closed_without_remote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_root(Path(tmp))
+            results = dry_run(
+                Path(tmp), f"ariadex-v{ariadex.__version__}", remote_url=""
+            )
+            names = [r.name for r in results]
+            self.assertIn("canonical-remote", names)
+            remote = next(r for r in results if r.name == "canonical-remote")
+            self.assertFalse(remote.ok)
+            self.assertIn("git remote add origin", remote.detail)
+            self.assertFalse(all(r.ok for r in results))
+
+
+class ReleaseWorkflowTests(unittest.TestCase):
+    """The tag-triggered workflow gates and observes publication."""
+
+    def _workflow_text(self) -> str:
+        return (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+
+    def test_trusted_publisher_with_oidc_and_release_environment(self):
+        text = self._workflow_text()
+        self.assertIn("pypa/gh-action-pypi-publish", text)
+        self.assertIn("id-token: write", text)
+        self.assertIn("environment: release", text)
+
+    def test_publication_is_gated_on_evidence_and_readiness(self):
+        text = self._workflow_text()
+        gate = text.index("evidence --gate")
+        readiness = text.index("ariadex.release --tag")
+        publish = text.index("pypa/gh-action-pypi-publish")
+        self.assertLess(gate, publish, "live evidence gate must precede publication")
+        self.assertLess(
+            readiness, publish, "readiness dry run must precede publication"
+        )
+
+    def test_published_install_is_verified_from_the_index(self):
+        text = self._workflow_text()
+        publish = text.index("pypa/gh-action-pypi-publish")
+        tail = text[publish:]
+        self.assertIn('pip install "ariadex==', tail)
+        self.assertIn("ariadex --version", tail)
+        self.assertIn("ariadex init", tail)
+        self.assertIn("ariadex status", tail)
 
 
 if __name__ == "__main__":
