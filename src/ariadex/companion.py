@@ -1054,7 +1054,15 @@ class CompanionWindow:
         self.status_text.configure(state="disabled")
 
 
-ROBOT_INDICATORS = ("watching", "working", "paused", "blocked", "completed", "stopped")
+ROBOT_INDICATORS = (
+    "watching",
+    "working",
+    "waiting",
+    "paused",
+    "blocked",
+    "completed",
+    "stopped",
+)
 
 
 def build_robot_view_model(status: dict) -> dict:
@@ -1075,6 +1083,8 @@ def build_robot_view_model(status: dict) -> dict:
         indicator = "completed"
     elif phase in ("blocked",):
         indicator = "blocked"
+    elif phase in ("waiting",):
+        indicator = "waiting"
     elif paused or phase in ("paused",):
         indicator = "paused"
     elif phase in ("attached", "unknown"):
@@ -1093,7 +1103,7 @@ def build_robot_view_model(status: dict) -> dict:
         "work_label": work_label,
         "failure": reason if indicator == "blocked" else None,
         "actions": {
-            "pause": indicator in ("watching", "working"),
+        "pause": indicator in ("watching", "working", "waiting"),
             "quit": indicator != "stopped",
         },
     }
@@ -1250,6 +1260,44 @@ class RobotWindow:
         self.quit_button.configure(
             state="normal" if actions.get("quit") else "disabled"
         )
+
+
+def run_robot_widget(watcher: object, *, poll_interval_s: float = 2.0) -> int:
+    """Run a floating robot window around a watcher running in a worker thread.
+
+    The Tk process is a desktop window, not a tmux pane. The watcher owns
+    provider observation; the window only reads its status and invokes pause
+    or quit callbacks. Closing the window never terminates the provider
+    session.
+    """
+    info = detect_desktop()
+    if not info.supported:
+        raise CompanionError(f"robot widget unavailable: {info.detail}")
+    if not tkinter_available():
+        raise CompanionError("robot widget unavailable: Tkinter is not installed")
+    import tkinter as tk
+
+    root = tk.Tk()
+    status_fn = getattr(watcher, "status_view")
+    on_pause = getattr(watcher, "request_pause")
+    on_quit = getattr(watcher, "request_quit")
+    window = RobotWindow(
+        root,
+        status_fn=status_fn,
+        on_pause=on_pause,
+        on_quit=on_quit,
+        poll_interval_s=poll_interval_s,
+    )
+    root.protocol("WM_DELETE_WINDOW", window._on_quit)
+
+    def run_watch() -> None:
+        with contextlib.suppress(Exception):
+            getattr(watcher, "run")()
+
+    thread = threading.Thread(target=run_watch, name="ariadex-robot-watch", daemon=True)
+    thread.start()
+    root.mainloop()
+    return 0
 
 
 def run_companion(

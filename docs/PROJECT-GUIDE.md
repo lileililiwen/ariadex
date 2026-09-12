@@ -149,10 +149,28 @@ ariadex watch --session agent --provider opencode \
   --initial-prompt "Please implement the active spec."
 ```
 
+Use `--widget` for the independent desktop robot window:
+
+```bash
+ariadex watch --widget --session agent --provider opencode \
+  --initial-prompt "Read HANDOFF.md and finish the remaining work."
+```
+
+If you already typed the first request inside the provider, use attach mode:
+
+```bash
+ariadex watch --widget --attach --session agent --provider opencode
+```
+
+Attach mode never sends an initial prompt. It only watches the current
+conversation and continues after a verified completion boundary.
+
 Behavior:
 
 - While the provider shows active output, a running tool, an approval
-  request, or an error, the robot sends nothing.
+  request, or an error, the robot sends nothing. Approval and confirmation
+  requests are non-terminal waiting states; the watcher continues polling
+  until the provider resumes or the user pauses/quits.
 - A finished conversation is recognized only when the provider-specific
   input-ready signal is stable for `--debounce` polls (default 3) with no
   approval, tool, or error state present.

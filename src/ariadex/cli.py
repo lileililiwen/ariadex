@@ -238,7 +238,12 @@ def build_parser() -> argparse.ArgumentParser:
     watch_parser.add_argument(
         "--initial-prompt",
         default=None,
-        help="prompt sent once to the attached ready conversation",
+        help="prompt sent once to the attached ready conversation (omit to attach without sending)",
+    )
+    watch_parser.add_argument(
+        "--attach",
+        action="store_true",
+        help="observe the existing conversation without sending an initial prompt",
     )
     watch_parser.add_argument(
         "--continuation-prompt",
@@ -272,6 +277,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--create",
         action="store_true",
         help="explicit fallback: create the session when missing",
+    )
+    watch_parser.add_argument(
+        "--widget",
+        action="store_true",
+        help="show the independent floating robot widget",
     )
     sub.add_parser(
         "takeover",
@@ -1506,12 +1516,14 @@ def cmd_watch(
     list_sessions: bool = False,
     provider: str | None = None,
     initial_prompt: str | None = None,
+    attach: bool = False,
     continuation_prompt: str | None = None,
     finished_change: str = "",
     debounce: int = 3,
     poll_interval: float = 5.0,
     max_polls: int = 0,
     create: bool = False,
+    widget: bool = False,
     auto_install: bool = True,
 ) -> int:
     """Supervise an existing provider session and continue durable work.
@@ -1566,9 +1578,12 @@ def cmd_watch(
             file=sys.stderr,
         )
         return EXIT_ERROR
-    if initial_prompt is None:
+    if attach:
+        initial_prompt = ""
+    elif initial_prompt is None:
         print(
-            "error: no initial prompt supplied; pass `--initial-prompt TEXT`",
+            "error: no initial prompt supplied; pass `--initial-prompt TEXT` "
+            "or use `--attach`",
             file=sys.stderr,
         )
         return EXIT_ERROR
@@ -1627,6 +1642,14 @@ def cmd_watch(
         f"watching: {resolved_provider} @ {session} "
         f"(debounce {debounce}, interval {poll_interval}s)"
     )
+    if widget:
+        try:
+            return companion_mod.run_robot_widget(
+                watcher, poll_interval_s=max(poll_interval, 0.1)
+            )
+        except companion_mod.CompanionError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
     try:
         report = watcher.run()
     except KeyboardInterrupt:
@@ -2153,12 +2176,14 @@ def main(argv: list[str] | None = None) -> int:
             list_sessions=getattr(args, "list_sessions", False),
             provider=getattr(args, "provider", None),
             initial_prompt=getattr(args, "initial_prompt", None),
+            attach=getattr(args, "attach", False),
             continuation_prompt=getattr(args, "continuation_prompt", None),
             finished_change=getattr(args, "finished_change", "") or "",
             debounce=getattr(args, "debounce", 3),
             poll_interval=getattr(args, "poll_interval", 5.0),
             max_polls=getattr(args, "max_polls", 0),
             create=getattr(args, "create", False),
+            widget=getattr(args, "widget", False),
             auto_install=auto_install,
         ),
         "dev": lambda: (

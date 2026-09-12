@@ -126,11 +126,11 @@ class ConfigTest(unittest.TestCase):
                 robot_mod.RobotConfig(session="s", provider="wat", initial_prompt="go")
             )
 
-    def test_missing_initial_prompt_refused(self) -> None:
-        with self.assertRaises(robot_mod.RobotError):
-            robot_mod.validate_config(
-                robot_mod.RobotConfig(session="s", initial_prompt="  ")
-            )
+    def test_empty_initial_prompt_is_attach_mode(self) -> None:
+        config = robot_mod.validate_config(
+            robot_mod.RobotConfig(session="s", initial_prompt="  ")
+        )
+        self.assertEqual(config.initial_prompt, "  ")
 
     def test_empty_continuation_refused(self) -> None:
         with self.assertRaises(robot_mod.RobotError):
@@ -330,7 +330,7 @@ class WatcherStateTest(unittest.TestCase):
         watcher.poll()
         self.assertEqual(driver.sent_inputs("agent"), ["please start"])
 
-    def test_approval_is_blocked_without_input(self) -> None:
+    def test_approval_waits_without_input(self) -> None:
         project = make_project(self._tmp)
         driver = FakeDriver()
         driver.sessions["agent"] = {
@@ -339,8 +339,12 @@ class WatcherStateTest(unittest.TestCase):
             "workdir": "/t",
         }
         watcher = make_watcher(project, driver, debounce_polls=1)
-        self.assertEqual(watcher.poll(), "blocked")
+        self.assertEqual(watcher.poll(), robot_mod.WAITING)
         self.assertIn("approval", watcher.block_reason)
+        self.assertEqual(driver.sent_inputs("agent"), [])
+
+        driver.sessions["agent"]["output"] = BUSY
+        self.assertEqual(watcher.poll(), "attached")
         self.assertEqual(driver.sent_inputs("agent"), [])
 
     def test_error_is_blocked_without_input(self) -> None:

@@ -90,6 +90,7 @@ FINISHED_CANDIDATE = "finished-candidate"
 VERIFIED_BOUNDARY = "verified-boundary"
 NEW_CONVERSATION = "new-conversation"
 CONTINUING = "continuing"
+WAITING = "waiting"
 BLOCKED = "blocked"
 PAUSED = "paused"
 DONE = "done"
@@ -161,8 +162,8 @@ def validate_config(config: RobotConfig) -> RobotConfig:
             f"unsupported robot provider `{config.provider}`; "
             f"robot supports: {', '.join(SUPPORTED_ROBOT_PROVIDERS)}"
         )
-    if not config.initial_prompt.strip():
-        raise RobotError("no initial prompt supplied; pass `--initial-prompt TEXT`")
+    # An empty initial prompt is attach mode: the existing conversation is
+    # already in progress and must be observed without injecting input.
     if not config.continuation_prompt.strip():
         raise RobotError("continuation prompt must not be empty")
     if config.debounce_polls < 1:
@@ -324,7 +325,9 @@ class RobotWatcher:
         self.adapter = adapter
         self.phase = ATTACHED
         self.stable_polls = 0
-        self.initial_sent = False
+        # Empty initial prompt means attach to the current conversation and
+        # never inject a synthetic first request.
+        self.initial_sent = not self.config.initial_prompt.strip()
         self.prompts_sent = 0
         self.last_classification = CLASS_UNKNOWN
         self.block_reason = ""
@@ -383,11 +386,13 @@ class RobotWatcher:
         observed = classify_capture(self.adapter.provider_name, capture)
         self.last_classification = observed
         if observed == CLASS_APPROVAL:
-            self.phase = BLOCKED
+            # Approval/confirmation belongs to the provider conversation. The
+            # user may answer it later; it must not terminate the watcher or
+            # cause the initial prompt to be resent.
+            self.phase = WAITING
             self.stable_polls = 0
             self.block_reason = (
-                "provider waits for approval; answer in the session, "
-                "then resume watching"
+                "provider waits for approval; watcher continues observing"
             )
             return self.phase
         if observed == CLASS_ERROR:

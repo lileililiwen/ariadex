@@ -270,10 +270,28 @@ ariadex watch --session agent --provider opencode \
   --initial-prompt "Please implement the active spec."
 ```
 
+Add `--widget` to show the independent always-on-top robot window at the
+middle-right while switching between terminals, tmux, the editor, and the
+provider:
+
+```bash
+ariadex watch --widget --session agent --provider opencode \
+  --initial-prompt "Read HANDOFF.md and finish the remaining work."
+```
+
+If the provider conversation is already in progress and you typed its first
+request yourself, use `--attach` so Ariadex sends no initial prompt:
+
+```bash
+ariadex watch --widget --attach \
+  --session agent --provider opencode
+```
+
 Full flags: `--session`, `--provider`, `--initial-prompt`,
 `--continuation-prompt`, `--finished-change` (tasks.md gate),
 `--debounce` (default 3), `--poll-interval` (default 5.0s),
-`--max-polls` (0 = unbounded), `--list-sessions`, and `--create`
+`--max-polls` (0 = unbounded), `--list-sessions`, `--create`, `--attach`, and
+`--widget`
 (explicit fallback only).
 
 The robot waits for the provider's stable input-ready signal (debounced,
@@ -281,8 +299,9 @@ default 3 polls), sends the initial prompt once, then verifies the
 durable boundary — handoff, task markers, git state, active OpenSpec
 list — before opening a new conversation and sending the continuation
 prompt (default `Please read the HANDOFF.md, and implement the next
-spec.`; override with `--continuation-prompt`). Approval requests and
-provider errors pause with the exact reason instead of advancing. When
+spec.`; override with `--continuation-prompt`). Approval requests are a
+non-terminal waiting state: the watcher keeps polling and sends no input.
+Provider errors pause with the exact reason instead of advancing. When
 no active OpenSpec work remains, the robot stops and reports completion
 without sending another prompt. The robot widget is a minimal
 middle-right control showing provider/session identity and robot state,
