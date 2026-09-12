@@ -344,9 +344,12 @@ class LifecycleCommandTest(unittest.TestCase):
             ),
         )
         try:
-            code, out, _ = run_cli(self.root, "start")
+            with mock.patch.object(
+                cli, "_repair_live_runtime", return_value=0
+            ) as repair:
+                code, _out, _ = run_cli(self.root, "start")
             self.assertEqual(code, 0)
-            self.assertIn("already running", out)
+            repair.assert_called_once()
             record = daemon.read_record(self.root)
             assert record is not None
             self.assertEqual(record.pid, os.getpid())

@@ -133,6 +133,16 @@ minimal middle-right robot widget (watching state, Pause, Quit). No
 duplicate queue, no provider LLM API calls, no input while the agent
 works, and no implicit session creation or termination.
 
+## Planned: idempotent managed runtime and minimal CLI
+
+`2026-09-13-managed-runtime-upsert-and-minimal-cli` is planning-only and
+targets the remaining lifecycle gap: `ariadex start` must reconcile one
+project into one daemon, one provider session, one supervisor, and one widget;
+rerunning it after a widget crash must reuse the daemon/session and recreate
+only the widget. The same change reduces the normal user workflow to
+`ariadex init` and `ariadex start`, with lifecycle controls provided by the
+provider terminal and widget and only a small admin diagnostic surface.
+
 ## Deferred V2 capabilities
 
 ## Planned: managed start and unified prerequisites

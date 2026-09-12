@@ -301,6 +301,7 @@ def daemon_status_view(project_dir: Path) -> dict:
     from . import config as config_mod
     from . import handoff as handoff_mod
     from . import state as state_mod
+    from . import widget_runtime as widget_runtime_mod
 
     record = read_record(project_dir)
     diagnosis = concurrency_mod.diagnose(project_dir)
@@ -318,6 +319,7 @@ def daemon_status_view(project_dir: Path) -> dict:
         blocked_count = sum(1 for i in handoff.unresolved if i.status == "BLOCKED")
     except Exception:
         next_action, open_count, blocked_count = "unknown", 0, 0
+    widget_record = widget_runtime_mod.read_record(project_dir)
     return {
         "daemon": record.to_dict() if record else None,
         "alive": daemon_alive(record),
@@ -328,6 +330,11 @@ def daemon_status_view(project_dir: Path) -> dict:
         "next_action": next_action,
         "open_count": open_count,
         "blocked_count": blocked_count,
+        "widget": {
+            "recorded": widget_record is not None,
+            "healthy": widget_runtime_mod.is_healthy(project_dir, widget_record),
+            "pid": widget_record.pid if widget_record else None,
+        },
     }
 
 

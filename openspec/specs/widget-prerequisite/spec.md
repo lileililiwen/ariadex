@@ -6,7 +6,7 @@ with an explicit interactive sudo prompt while preserving safe automation.
 ## Requirements
 ### Requirement: Interactive widget installation may prompt for sudo
 
-When `ariadex widget` is run interactively and Tkinter is missing, Ariadex
+When managed `ariadex start` is run interactively and Tkinter is missing, Ariadex
 MUST request explicit consent and MAY invoke normal `sudo` so the terminal can
 prompt for the user's password. `--yes` MUST remain non-interactive and use
 passwordless behavior only.
@@ -20,6 +20,6 @@ passwordless behavior only.
 
 #### Scenario: Automated invocation lacks passwordless sudo
 
-- **WHEN** `ariadex widget --yes` cannot run `sudo -n`
+- **WHEN** managed `ariadex start` cannot run `sudo -n` in non-interactive mode
 - **THEN** Ariadex reports the manual install command and does not claim that
   the widget is running

@@ -18,11 +18,11 @@ loop and MUST use the project ownership lease to prevent concurrent daemons.
 - **THEN** one daemon is started, its endpoint and lifecycle are persisted,
   and it begins observing durable state
 
-#### Scenario: Duplicate start
+#### Scenario: Idempotent start
 
 - **WHEN** `ariadex start` is requested while a healthy daemon owns the project
-- **THEN** the command reports the existing daemon and MUST NOT create a second
-  scheduler or provider session
+- **THEN** the command reuses the existing daemon and MUST NOT create a second
+  scheduler, provider session, supervisor, or widget
 
 ### Requirement: Simple lifecycle controls
 
@@ -90,4 +90,3 @@ unresolved work.
 - **WHEN** the daemon exits during an uncertain phase
 - **THEN** the next start or recovery operation reports the interruption,
   preserves the phase and evidence, and reconciles before continuing
-

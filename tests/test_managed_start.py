@@ -420,12 +420,13 @@ class ReconcileTest(unittest.TestCase):
             mock.patch.object(cli.daemon_mod, "read_record", return_value=sentinel),
             mock.patch.object(cli.daemon_mod, "daemon_alive", return_value=True),
             mock.patch.object(cli, "_daemon_ipc_or_none", return_value={"ok": True}),
+            mock.patch.object(cli, "_repair_live_runtime", return_value=0) as repair,
         ):
             out = io.StringIO()
             with redirect_stdout(out):
                 code = cli.cmd_start(self.root)
         self.assertEqual(code, 0)
-        self.assertIn("already running", out.getvalue())
+        repair.assert_called_once()
         self.assertEqual(harness.calls, [])
 
 

@@ -202,29 +202,21 @@ queue is empty. `--agent`, `--first-prompt`, and `--continuation-prompt`
 override the configuration for one run. A duplicate `start` reports the
 live owner and creates nothing.
 
-`ariadex start` opens the independent widget automatically when the desktop
-supports it. Direct widget launches are a maintainer path:
-`ariadex admin widget` uses the
-current directory by default, preserves existing `.ariadex/` files, checks
-Tkinter before starting the daemon, starts the daemon idempotently, and opens
-the always-on-top widget near the middle-right edge. If Tkinter is missing,
-the command asks before installing the required OS package; use
-`ariadex admin widget --yes` for a non-interactive explicit confirmation (this
-requires passwordless sudo). In an interactive terminal, normal sudo may ask
-for your password. To launch it from elsewhere, pass `--project PATH`.
+`ariadex start` also repairs the managed runtime. If the daemon and provider
+session are healthy but the widget crashed, rerun `ariadex start`: it reuses
+the daemon and session and recreates only the widget. It never creates a
+second daemon, session, supervisor, or prompt.
 
 During an interactive install, package-manager output is shown directly in
 the terminal, including apt progress and errors.
 
-The daemon owns scheduling, persistence, and local control requests. When
-it is running, `status`, `pause`, and `resume` are answered by the daemon
-over a project-scoped Unix socket (`.ariadex/daemon.sock`, owner-only
-permissions, typed JSON requests); without a daemon the same commands act
-on durable state locally. Advanced inspection and repair commands keep
-working at the top level and are also grouped under `admin`
-(e.g. `ariadex admin doctor`).
+The daemon owns scheduling, persistence, and local control requests. The
+normal user does not need lifecycle commands: Ctrl+C in the provider or the
+widget buttons control the run. Administrative diagnosis remains available
+through `ariadex admin doctor`, `ariadex admin status`, and
+`ariadex admin recover`.
 
-## Floating companion (opt-in)
+## Floating widget
 
 On Linux X11 with Tkinter installed, `ariadex start` opens a small
 always-on-top mini-player near the middle-right edge: a text status
@@ -245,29 +237,24 @@ Configuration is per user in `$XDG_CONFIG_HOME/ariadex/companion.json`
 (`~/.config/ariadex/companion.json` by default): `hotkey` (e.g. `Alt+F9`)
 and the last window position `x`/`y`. `--hotkey` overrides the hotkey for
 one session; `--editor` overrides `$EDITOR` for the Editor button. Wayland,
-macOS, and Windows report unsupported instead of pretending — use
-`ariadex pause` / `ariadex resume` there. `ariadex doctor` reports the
-desktop session, Tkinter presence, and effective hotkey.
+macOS, and Windows report unsupported instead of pretending; the managed
+provider remains available through its terminal. Use `ariadex admin doctor`
+for desktop, Tkinter, and hotkey diagnostics.
 
 A typical session:
 
 ```bash
-./ariadex start         # managed workflow; duplicate starts report the owner
-./ariadex pause         # no new scheduling; in-flight work is cancelled safely
-./ariadex resume        # resync, back to manual control
-./ariadex stop          # bounded graceful shutdown; state left for `recover`
-./ariadex run           # execute the next durable action (requires AUTO)
-./ariadex takeover      # stop automatic input, keep observing (MANUAL)
-# ... edit code yourself, in tmux or your editor ...
-./ariadex auto          # resync your edits, verify, resume scheduling
-./ariadex pause         # stop new scheduling, leave the CLI running
-./ariadex resume        # leave PAUSE, back to manual control
+./ariadex init
+./ariadex start
+# ... work in the provider editor ...
+# Ctrl+C or the widget controls manage the lifecycle
 ```
 
 ## Robot supervisor
 
 `ariadex start` is the normal path: it owns the session, prompts, widget,
-and supervision. `ariadex watch` remains for recovery and expert use — it
+and supervision. `ariadex admin recover` is the normal recovery path. The
+lower-level `watch` implementation remains for maintainer use — it
 supervises an already-open coding-agent conversation in a
 user-selected existing tmux session (OpenCode, Codex, or CodeBuddy) and
 continues durable OpenSpec work across conversations. It sends no input
@@ -427,10 +414,11 @@ The current widget does not expose an `AUTO`/`MANUAL` mode switch. To resume
 automatic scheduling after reconciliation, use `ariadex auto`; to stop
 automatic input while continuing observation, use `ariadex takeover`.
 
-The widget is optional. Terminal equivalents are `start`, `stop`, `status`,
-`auto`, `takeover`, `pause`, and `resume`. `install` is separate and only
-creates user-scoped launchers and login integration; it is not required for a
-one-time widget launch.
+The widget is part of the managed `start` lifecycle when the desktop
+prerequisites are available. If it crashes while the daemon and provider
+session remain healthy, rerun `ariadex start` to recreate the widget without
+duplicating the runtime. `install` remains a separate deployment command for
+creating user-scoped launchers and login integration.
 
 ```text
 Spec -> AI Session -> Handoff -> Fresh Session -> Next Spec
@@ -470,41 +458,15 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | Command            | Effect                                                        |
 | ------------------ | ------------------------------------------------------------- |
 | `init [--force] [--yes]` | First-run provider/prompt setup; refuses when initialized |
-| `start [--agent A] [--first-prompt T] [--continuation-prompt T] [--json]` | Managed workflow: prerequisites, daemon, provider session, widget, attach, supervision |
-| `stop [--json]`    | Bounded graceful shutdown; durable state kept for `recover`    |
+| `start [--agent A] [--first-prompt T] [--continuation-prompt T]` | Idempotent managed workflow; reuses or repairs the runtime |
 | `install [--yes] [--no-dependency-install] [--json]` | User-scoped launchers + service integration (no root) |
 | `uninstall [--purge] [--yes] [--json]` | Remove owned integration; state kept |
-| `status [--json]`  | Daemon-mediated when healthy, otherwise local durable state    |
-| `pause [--json]`   | Daemon-mediated when healthy; no new scheduling, safe cancel   |
-| `resume [--json]`  | Daemon-mediated when healthy; resync, back to manual control   |
-| `admin <command>`  | Advanced namespace: `companion install uninstall doctor`       |
-|                    | `preview queue history resolve defer reopen reprioritize`      |
-|                    | `recover prune-logs export-logs events export-events evidence` |
-|                    | `preflight run auto attach takeover status pause resume`       |
-|                    | (top-level aliases stay)                                       |
-| `run [--yes] [--preview]` | Execute the next action from durable state (needs `AUTO`) |
-| `watch --session --initial-prompt` | Supervise an existing provider session; continue specs |
-| `auto [--yes] [--preview]` | Resync, enter `AUTO`, and resume scheduling            |
-| `attach`           | Attach your terminal to the live tmux Coding CLI session       |
-| `doctor [--json]`  | Preflight config, provider, tmux, specs, verification, lock    |
-| `preview [--json]` | Show the exact next action and gate; sends no input            |
-| `queue [--status] [--json]` | List unresolved items and history counts            |
-| `history <id> [--json]` | Show an item and its transitions                       |
-| `resolve <id>`     | Mark an item RESOLVED (keeps history)                          |
-| `defer <id> --to --reason` | Mark an item DEFERRED with target and reason         |
-| `reopen <id>`      | Return an item to OPEN (keeps history)                         |
-| `reprioritize <id> --priority` | Change an item priority (keeps history)          |
-| `recover [--json]` | Reconcile state, handoff, lock, and tmux after interruption    |
-| `prune-logs [--yes] [--json]` | Enforce retention/size bounds on telemetry       |
-| `export-logs --out [--json]` | Copy telemetry (`runs/` + `metrics.jsonl`)      |
-| `events [--limit] [--json]` | Show aggregate summary and recent attention events |
-| `export-events --out [--json]` | Write the versioned export snapshot to a file  |
-| `evidence [--gate] [--release-gate]`| Run opt-in live runtime evidence (passed/skipped/blocked) |
-| `preflight [--tmux-bin PATH]` | Report toolchain paths/versions for release evidence |
-| `pause`            | Enter `PAUSE`; the CLI session keeps running                   |
-| `resume`           | Leave `PAUSE` (valid only from `PAUSE`)                        |
-| `takeover`         | Enter `MANUAL`; automatic input stops, logs continue           |
-| `--no-auto-install`| Never install tmux automatically; stop if it is missing        |
+| `admin doctor`     | Diagnose prerequisites, ownership, widget, and scheduling state |
+| `admin status`     | Inspect the managed runtime without changing it                 |
+| `admin recover`    | Reconcile stale or uncertain runtime state                       |
+| `admin logs ...`   | Bounded diagnostic log inspection                                |
+| `admin export-logs ...` | Bounded diagnostic log inspection                         |
+| `--help`, `--version` | Show the small public command surface or version             |
 
 ## Configuration
 

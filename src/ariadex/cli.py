@@ -35,6 +35,7 @@ from . import state as state_mod
 from . import status as status_mod
 from . import terminal as terminal_mod
 from . import tmux_setup as tmux_setup_mod
+from . import widget_runtime as widget_runtime_mod
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -77,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-auto-install",
         action="store_true",
-        help="do not install a missing tmux automatically; stop instead",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "-V",
@@ -164,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
     start_parser.add_argument(
         "--json",
         action="store_true",
-        help="emit stable JSON instead of human-readable text",
+        help=argparse.SUPPRESS,
     )
     stop_parser = sub.add_parser(
         "stop", help="request graceful daemon shutdown (bounded)"
@@ -506,6 +507,13 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--yes", "-y", action="store_true")
     setup_parser.add_argument("--no-dependency-install", action="store_true")
     setup_parser.add_argument("--json", action="store_true")
+    # Keep compatibility aliases parseable for scripts and recovery, but keep
+    # the ordinary product surface focused on init/start/admin.
+    visible_commands = {"init", "start", "admin"}
+    sub.metavar = "{init,start,admin}"
+    sub._choices_actions = [
+        action for action in sub._choices_actions if action.dest in visible_commands
+    ]
     return parser
 
 
@@ -1438,10 +1446,13 @@ def _child_env() -> dict:
     return child_env
 
 
-def _spawn_widget_process(project_dir: Path):
+def _spawn_widget_process(project_dir: Path, token: str = ""):
     """Start the independent widget in a detached child process."""
     import subprocess
 
+    child_env = _child_env()
+    if token:
+        child_env["ARIADEX_WIDGET_TOKEN"] = token
     return subprocess.Popen(  # noqa: S603
         [
             sys.executable,
@@ -1457,7 +1468,7 @@ def _spawn_widget_process(project_dir: Path):
         stderr=subprocess.DEVNULL,
         start_new_session=True,
         cwd=str(project_dir),
-        env=_child_env(),
+        env=child_env,
     )
 
 
@@ -1482,6 +1493,41 @@ def _stop_widget_process(proc, name: str = "widget") -> None:
             proc.kill()
         except Exception as exc:
             print(f"warning: {name} shutdown failed: {exc}", file=sys.stderr)
+
+
+def _repair_live_runtime(project_dir: Path, cfg, st, as_json: bool = False) -> int:
+    """Reconcile a live daemon without creating a second runtime."""
+    try:
+        _widget_process, created = widget_runtime_mod.ensure_widget(
+            project_dir, cfg, st
+        )
+    except Exception as exc:
+        print(f"error: managed widget repair failed: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if created:
+        print("widget: repaired managed widget")
+    else:
+        print("managed runtime already running; reusing daemon, session, and widget")
+    session = terminal_mod.session_name_for(st.session_id)
+    try:
+        driver = terminal_mod.TmuxDriver()
+        if not driver.session_alive(session):
+            print(
+                f"error: managed provider session `{session}` is missing; "
+                "run `ariadex admin recover` before retrying",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        if _has_terminal():
+            return _attach_session(driver.attach_command(session))
+    except terminal_mod.TerminalError as exc:
+        print(f"error: managed session reconciliation failed: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if as_json:
+        print('{"ok": true, "reused": true}')
+    else:
+        print("managed provider session remains running")
+    return EXIT_OK
 
 
 def _has_terminal() -> bool:
@@ -1579,6 +1625,7 @@ def _shutdown_managed_session(
                 file=sys.stderr,
             )
     _stop_widget_process(widget_proc)
+    widget_runtime_mod.clear_record(project_dir)
     try:
         response = daemon_mod.send_request(project_dir, "stop")
     except daemon_mod.DaemonError as exc:
@@ -1649,7 +1696,19 @@ def run_managed_start(
         _shutdown_managed_session(project_dir, adapter, session, None, "launch")
         return EXIT_ERROR
     print(f"provider: {provider} session ready")
-    spawn_widget = spawn_widget_fn or _spawn_widget_process
+    if spawn_widget_fn is not None:
+        spawn_widget = spawn_widget_fn
+    else:
+
+        def spawn_widget(project: Path):
+            process, _created = widget_runtime_mod.ensure_widget(
+                project,
+                cfg,
+                st,
+                spawn=_spawn_widget_process,
+            )
+            return process
+
     widget_proc = None
     if widget_ready:
         try:
@@ -1763,7 +1822,7 @@ def cmd_start(
         return EXIT_ERROR
     provider, first, continuation = resolved
     if _live_owner(project_dir, as_json):
-        return EXIT_OK
+        return _repair_live_runtime(project_dir, cfg, st, as_json)
     try:
         interactive = sys.stdin.isatty()
     except Exception:
@@ -1964,6 +2023,8 @@ ADMIN_COMMANDS = (
     "pause",
     "resume",
 )
+
+ADMIN_PUBLIC_COMMANDS = ("doctor", "status", "recover", "export-logs")
 
 
 def cmd_companion(
@@ -2313,10 +2374,7 @@ def cmd_admin(project_dir: Path, admin_argv: list[str], no_auto_install: bool) -
     forwards to the same handlers so scripts can migrate gradually.
     """
     if not admin_argv or admin_argv[0] in ("-h", "--help"):
-        print(
-            "advanced commands (also available at top level): "
-            + ", ".join(ADMIN_COMMANDS)
-        )
+        print("diagnostic commands: " + ", ".join(ADMIN_PUBLIC_COMMANDS))
         return EXIT_OK
     if admin_argv[0] == "admin":
         print("error: nested `admin admin` is refused", file=sys.stderr)

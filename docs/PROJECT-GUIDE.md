@@ -43,19 +43,17 @@ confirms, then removes only `.ariadex/` and reinitializes.
 lifecycle below. `--agent`, `--first-prompt`, and `--continuation-prompt`
 override the configuration for one run.
 
-The current directory is the project. Maintainers can launch the widget flow
-directly with `ariadex admin widget --project /path/to/project`; it
-initializes, starts, and opens the middle-right widget.
+The current directory is the project. The managed `start` command owns the
+widget lifecycle. Maintainers can diagnose the widget through
+`ariadex admin doctor` and repair it by rerunning `ariadex start`.
 
 `ariadex init` never overwrites existing configuration, handoff, or state.
-The widget command therefore preserves existing work when it is run again.
+The managed `start` command preserves existing work when it is run again.
 
-On Linux X11, Tkinter is required for the window. In an interactive terminal,
-`ariadex admin widget` asks before running the host package-manager command and lets
-normal `sudo` prompt for a password. The package-manager output is visible.
-`ariadex admin widget --yes` confirms the prerequisite non-interactively and requires
-passwordless sudo. Use the manual `python3-tk` install shown by the error when
-the host cannot grant sudo access.
+On Linux X11, Tkinter is required for the window. `ariadex start` coordinates
+that prerequisite automatically when possible and gives a focused recovery
+message when host installation cannot be completed. The lower-level widget
+entrypoint remains internal and is not part of the normal workflow.
 
 ## The daemon lifecycle
 
@@ -68,7 +66,8 @@ prompt once the provider is ready, and supervises verified continuation
 until the queue is empty. `--agent`, `--first-prompt`, and
 `--continuation-prompt` override the configuration for one run; session
 names and watcher options are never user inputs. A duplicate `start`
-reports the live owner and creates nothing.
+reuses the live owner; if only the widget is unhealthy it recreates that widget
+and creates no second daemon, provider session, supervisor, or prompt.
 
 The managed startup sequence is:
 
@@ -90,22 +89,23 @@ bounded runner cycle. That cycle may connect to or start the configured tmux
 session, send provider input, capture the result, run verification commands,
 and persist the outcome. The daemon itself remains provider-neutral.
 
-The daemon exits cleanly after `ariadex stop`, the widget close button, or a
+The daemon exits cleanly after the widget close button or a
 terminal stop request. Stop is graceful: an already-running bounded cycle is
 allowed to reach its safe cancellation boundary before the daemon exits.
 
-Useful lifecycle commands:
+The normal lifecycle is intentionally small:
 
 ```bash
-ariadex start       # managed workflow: prerequisites, daemon, session, widget
-ariadex status      # inspect daemon, mode, session, and next action
-ariadex stop        # request graceful shutdown
-ariadex attach      # reattach to the active provider session after a detach
+ariadex init         # first-run configuration
+ariadex start        # create, reuse, or repair the managed runtime
 ```
 
-Detaching from the provider terminal leaves the workflow running; `stop`
-ends it. Starting an already-running project is idempotent. It reports the
-existing daemon instead of creating a second scheduler, session, or widget.
+Starting an already-running project is idempotent. It reuses the existing
+daemon and provider session, recreates only a crashed widget, and attaches the
+current terminal to the existing session. Ctrl+C in the provider and the
+widget controls handle normal lifecycle actions. Use `ariadex admin status`,
+`ariadex admin doctor`, or `ariadex admin recover` only for diagnosis and
+recovery.
 
 ## Modes and control
 
@@ -117,19 +117,10 @@ Mode is durable state in `.ariadex/state.json`:
 | `MANUAL` | prohibited | observed only | Ariadex records state but does not send automatic input |
 | `PAUSE` | prohibited | prohibited | no new scheduling; in-flight work is cancelled at a safe boundary |
 
-Commands:
-
-```bash
-ariadex auto       # reconcile repository/spec/handoff state, then enable AUTO
-ariadex takeover   # enter MANUAL; keep observation and logs
-ariadex pause      # enter PAUSE and coordinate cancellation
-ariadex resume     # leave PAUSE, resync, and return to MANUAL
-```
-
-`resume` intentionally returns to `MANUAL`; it does not silently restart
-automatic provider input. Use `auto` when automatic scheduling is wanted.
-Returning to AUTO always resynchronizes git state, handoff, active specs, and
-the unresolved queue first.
+Normal control is through provider Ctrl+C and the widget buttons. The hidden
+lifecycle aliases remain only for compatibility and diagnosis; `ariadex admin
+doctor`, `ariadex admin status`, and `ariadex admin recover` are the supported
+diagnostic/recovery entrypoints.
 
 ## Widget controls
 
@@ -144,16 +135,15 @@ runtime state directly and does not inject keystrokes into an editor.
 - expanded controls: reconcile status, open the configured editor, and attach
   to the provider session.
 
-To start or resume automatic work, use `ariadex auto` in a terminal. The
-current widget has no AUTO/MANUAL selector; adding that selector would require
-a separate product change because AUTO has a deliberate resynchronization
-boundary.
+The widget’s Play/Yield/Stop controls are the normal lifecycle controls. The
+provider terminal’s Ctrl+C stops the managed provider; the daemon observes the
+exit and reconciles the widget and durable state.
 
 ## Robot supervisor
 
 `ariadex start` is the normal path and owns the session, prompts, widget,
-and supervision described above. `ariadex watch` remains for recovery and
-expert use: it is the provider-neutral observer that attaches to a
+and supervision described above. The lower-level `ariadex watch` remains an
+internal recovery/expert path: it is the provider-neutral observer that attaches to a
 user-selected existing tmux session (never one it created, unless `--create`
 is passed explicitly) and supervises the already-open OpenCode, Codex, or
 CodeBuddy conversation there.

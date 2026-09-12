@@ -2,8 +2,8 @@
 
 ## Current state
 
-- Implemented, verified, and archived: all five MVP changes, `tmux-auto-install`, all eight post-MVP changes, all six audit fixes (`active-spec-discovery-and-archive-isolation` as `78f6375`, `bounded-run-completion-and-cycle-limit` as `6c83615`, `takeover-cancellation-and-scheduler-coordination` as `814f2d7`, `canonical-spec-and-doc-governance` as `c1373cd`, `real-provider-live-validation` as `a8080f7`, `repository-identity-security-and-release-readiness` as `40494ef`), all three follow-up changes (`release-publication-and-remote-verification`, `reproducible-release-and-security-evidence`, `quality-gate-hardening`), all three daemon UX changes (`daemon-first-runtime-and-simple-cli`, `human-yield-hotkey-and-floating-control`, and `local-install-and-user-deployment`, see Verification evidence below), `companion-prerequisite-auto-install` (commit `4d447a7`), `tagged-version-pypi-release-alignment` (commit `8e879ab`), `dev-environment-bootstrap`, `daemon-widget-command`, `robot-agent-supervisor`, `provider-auto-continuation` (commit `1890950`), `robot-widget-runtime` (commit `dd0a8d4`), `robot-watch-stability` (commit `5829174`), `robot-boundary-evidence` (commit `e49f3db`), `robot-interrupt-and-hotkey` (commit `dc0efff`), `configurable-handoff-file` (commit `c0fc6a7`), and `2026-09-13-init-prompt-config` (commit `93f20ef`), `2026-09-13-prerequisite-coordinator` (commit `21ff82e`), and `2026-09-13-managed-start-facade` (commit `59966c6`). All 47 canonical purposes under `openspec/specs` are complete. `ariadex 0.1.0` is published on PyPI. No active changes remain.
-- Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 889 tests OK, 0 failures (stdlib only; runtime requires PyYAML). Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (no publishing).
+- Implemented, verified, and archived: all previously recorded changes plus `2026-09-13-managed-runtime-upsert-and-minimal-cli`. All 47 canonical purposes under `openspec/specs` are complete. `ariadex 0.1.0` is published on PyPI. The managed runtime now has one idempotent `start` owner per project: it reuses the daemon, provider session, supervisor, and healthy widget, and repairs only a missing or crashed widget on rerun. Normal help exposes `init`, `start`, and `admin`; lifecycle aliases remain hidden compatibility plumbing.
+- Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 894 tests OK, 0 failures (stdlib only; runtime requires PyYAML). Strict change and canonical-spec validation both pass. Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (no publishing).
 - Follow-up `simple-widget-workflow` is implemented and archived: `widget` checks Tkinter before daemon startup, supports explicit `--yes` prerequisite installation, and hides the historical `companion` command from normal help.
 - Added [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md), a detailed user/developer reference for the current daemon, widget controls, modes, durable files, cycle flow, and troubleshooting. It explicitly separates the implemented runtime from deferred arbitrary-agent observation behavior.
 - Quality gates: ruff check/format clean (S security family enforced with justified suppressions), mypy clean on `src/ariadex`, coverage 86% (gate 82 met) plus per-module floors via `scripts/check_coverage.py` (wired into CI quality job), `tests/test_workflows.py` pins or reviews every action reference; strict OpenSpec validation reports no active changes.
@@ -93,10 +93,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active changes remain. All three managed-start planning changes are
-implemented, verified, and archived (commits `93f20ef`, `21ff82e`, and
-`59966c6`; see Verification evidence below). Select the next change with
-`openspec list` when new work is proposed.
+No active change remains. The next feature must be proposed as a new OpenSpec
+change before implementation.
 
 ## Latest verification evidence
 

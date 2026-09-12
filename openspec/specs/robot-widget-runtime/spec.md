@@ -2,8 +2,10 @@
 
 ## Purpose
 
-Keep the robot watcher alive during provider approval waits and expose its
+Keep the managed watcher alive during provider approval waits and expose its
 controls through an independent always-on-top middle-right desktop widget.
+The widget is created and repaired by `ariadex start`; its lower-level launch
+entrypoint is internal compatibility plumbing, not a normal user workflow.
 ## Requirements
 ### Requirement: Approval waits do not stop watching
 
@@ -41,7 +43,7 @@ finishes and its durable boundary is verified.
 - **WHEN** attach mode finds active provider output or a waiting operation
 - **THEN** it keeps watching and sends no prompt
 
-### Requirement: Independent robot widget
+### Requirement: Independent managed widget
 
 The robot MUST expose a separate desktop window that stays always-on-top and
 at the middle-right of the screen throughout watching, regardless of which

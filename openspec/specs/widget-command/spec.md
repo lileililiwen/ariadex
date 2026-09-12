@@ -1,9 +1,9 @@
 # widget-command Specification
 
 ## Purpose
-Provide an advanced entry point for initializing a project,
-starting its resident daemon, and opening Ariadex's middle-right floating
-widget.
+Provide an internal compatibility entry point for the floating widget. The
+normal user workflow is the managed `start` command, which owns widget
+creation, reuse, repair, and shutdown.
 ## Requirements
 ### Requirement: Launch the widget from a project directory
 

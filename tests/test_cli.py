@@ -84,10 +84,11 @@ class WidgetCommandTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIsNone(re.search(r"^\s+widget(\s|$)", out, re.MULTILINE))
 
-    def test_widget_stays_available_via_admin(self):
+    def test_widget_is_internal_to_managed_start(self):
         code, out, _ = run_cli(self.root, "admin")
         self.assertEqual(code, 0)
-        self.assertIn("widget", out)
+        self.assertNotIn("widget", out)
+        self.assertIn("doctor", out)
 
     def test_widget_defaults_to_current_directory(self):
         with (
