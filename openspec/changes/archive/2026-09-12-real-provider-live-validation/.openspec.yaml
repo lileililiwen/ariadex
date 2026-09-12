@@ -1,0 +1,5 @@
+depends_on:
+  - active-spec-discovery-and-archive-isolation
+  - bounded-run-completion-and-cycle-limit
+  - takeover-cancellation-and-scheduler-coordination
+

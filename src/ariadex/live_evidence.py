@@ -7,8 +7,12 @@ gate pass `gate=True` (CLI `--gate`) and receive a non-zero exit when
 anything did not pass.
 
 No provider LLM API is called. Provider smoke checks only run local
-`--version`/`--help` probes. Package installation is only exercised
-against mocked managers; this module never installs anything on the host.
+`--version`/`--help` probes. Real-provider lifecycle scenarios start the
+configured CLI in tmux and send only startup-gate answers (update-skip,
+trust-confirm for a harness-created directory) and a `/help` probe that
+performs no model call; they never submit free-form prompts. Package
+installation is only exercised against mocked managers; this module never
+installs anything on the host.
 """
 
 from __future__ import annotations
@@ -567,6 +571,385 @@ def scenario_provider_smoke(timeout_s: int = DEFAULT_TIMEOUT_S) -> EvidenceResul
     )
 
 
+AUTH_FAILURE_MARKERS = (
+    "not logged in",
+    "please log in",
+    "please login",
+    "authentication required",
+    "invalid api key",
+    "missing api key",
+    "no api key",
+)
+
+_MAX_GATE_RESPONSES = 6
+_DIAGNOSTIC_BOUND = 2000
+
+
+@dataclasses.dataclass(frozen=True)
+class _RealProviderProbe:
+    """Isolated lifecycle definition for one real Coding CLI."""
+
+    scenario: str
+    binary: str
+    ready_markers: tuple[str, ...]
+    gate_responses: tuple[tuple[str, str], ...]
+    probe_input: str
+    response_markers: tuple[str, ...]
+    reset_mode: str  # "soft" (in-session reset) or "hard" (restart)
+
+
+def _redacted_diagnostics(capture: str) -> str:
+    """Bounded diagnostics: secrets redacted, length capped, count noted."""
+    from .logging import redact_with_report
+
+    redacted, count = redact_with_report(capture or "")
+    out = redacted[-_DIAGNOSTIC_BOUND:]
+    if count:
+        out += f"\n[redactions: {count}]"
+    return out
+
+
+def _await_markers(adapter, markers: tuple[str, ...], deadline_s: float) -> str:
+    """Return the last capture; callers test marker presence themselves.
+
+    Returns "" only when capture itself failed. Always returns the most
+    recent capture on timeout so diagnostics stay informative.
+    """
+    deadline = time.monotonic() + deadline_s
+    last = ""
+    while time.monotonic() < deadline:
+        try:
+            last = adapter.capture_output()
+        except Exception:
+            return ""
+        if any(marker in last for marker in markers):
+            return last
+        time.sleep(0.5)
+    return last
+
+
+def _await_ready(
+    adapter, probe: _RealProviderProbe, timeout_s: float
+) -> tuple[str, int, bool, str]:
+    """Drive startup gates until a ready marker appears.
+
+    Returns (capture, gate_responses_sent, refused, error). `refused` is
+    True when the CLI reports unavailable credentials or refused startup;
+    callers classify that as SKIPPED, never as passed or failed.
+    """
+    deadline = time.monotonic() + timeout_s
+    gates = 0
+    last = ""
+    answered: dict[int, str] = {}
+    while time.monotonic() < deadline:
+        try:
+            last = adapter.capture_output()
+        except Exception as exc:
+            return "", gates, False, f"capture failed during startup: {exc}"
+        if any(marker in last for marker in probe.ready_markers):
+            return last, gates, False, ""
+        if any(marker in last.lower() for marker in AUTH_FAILURE_MARKERS):
+            return last, gates, True, ""
+        for index, (marker, response) in enumerate(probe.gate_responses):
+            if (
+                marker in last
+                and answered.get(index) != last
+                and gates < _MAX_GATE_RESPONSES
+            ):
+                try:
+                    adapter.send(response)
+                except Exception as exc:
+                    return last, gates, False, f"startup gate input failed: {exc}"
+                answered[index] = last
+                gates += 1
+                break
+        time.sleep(0.5)
+    if any(marker in last.lower() for marker in AUTH_FAILURE_MARKERS):
+        return last, gates, True, ""
+    return last, gates, False, ""
+
+
+def _run_real_provider_lifecycle(
+    probe: _RealProviderProbe,
+    adapter_cls,
+    timeout_s: int = DEFAULT_TIMEOUT_S,
+    executable: str = "tmux",
+    driver_factory=None,
+) -> EvidenceResult:
+    """Shared isolated lifecycle: start, gate, probe, interrupt, reset,
+    terminate, restart. PASSED only when the real CLI performs each step.
+    """
+    from . import terminal as terminal_mod
+
+    tmux_path, note = resolve_tmux(executable)
+    if tmux_path is None:
+        if executable == "tmux":
+            return EvidenceResult(
+                name=probe.scenario,
+                status=SKIPPED,
+                reason="tmux binary not on PATH; install tmux to run live sessions",
+                diagnostics="prerequisite: `tmux` on PATH",
+            )
+        return EvidenceResult(
+            name=probe.scenario,
+            status=BLOCKED,
+            reason=f"explicit tmux binary unusable: {note}",
+            diagnostics=note,
+        )
+    if shutil.which(probe.binary) is None:
+        return EvidenceResult(
+            name=probe.scenario,
+            status=SKIPPED,
+            reason=(
+                f"`{probe.binary}` not on PATH; install it to validate this provider"
+            ),
+            diagnostics=f"prerequisite: `{probe.binary}` on PATH",
+        )
+    driver = (
+        driver_factory()
+        if driver_factory is not None
+        else terminal_mod.TmuxDriver(executable=tmux_path)
+    )
+    name = unique_session_name(probe.scenario)
+    with tempfile.TemporaryDirectory(prefix=f"ariadex-{probe.scenario}-") as tmp:
+        adapter = adapter_cls(driver, name, tmp)
+        try:
+            try:
+                adapter.start()
+            except Exception as exc:
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason=f"`{probe.binary}` startup failed: {exc}",
+                    diagnostics=_redacted_diagnostics(str(exc)),
+                )
+            capture, gates, refused, error = _await_ready(adapter, probe, timeout_s)
+            if error:
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason=error,
+                    diagnostics=_redacted_diagnostics(capture),
+                )
+            if refused:
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=SKIPPED,
+                    reason=(
+                        f"`{probe.binary}` refused startup (credentials or "
+                        "access unavailable); configure access and rerun "
+                        f"`ariadex evidence --only {probe.scenario}`"
+                    ),
+                    diagnostics=_redacted_diagnostics(capture),
+                )
+            if not any(m in capture for m in probe.ready_markers):
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason=(
+                        f"`{probe.binary}` showed no ready prompt within "
+                        f"{timeout_s}s; rerun `ariadex evidence "
+                        f"--only {probe.scenario}` to retry"
+                    ),
+                    diagnostics=_redacted_diagnostics(capture),
+                )
+            try:
+                adapter.send(probe.probe_input)
+            except Exception as exc:
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason=f"input delivery to `{probe.binary}` failed: {exc}",
+                    diagnostics=_redacted_diagnostics(str(exc)),
+                )
+            echoed = _await_markers(adapter, probe.response_markers, timeout_s)
+            if not any(m in echoed for m in probe.response_markers):
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason="sent probe produced no visible response in pane capture",
+                    diagnostics=_redacted_diagnostics(echoed),
+                )
+            try:
+                adapter.interrupt()
+                alive = driver.session_alive(name)
+                adapter.capture_output()
+            except Exception as exc:
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason=f"interrupt destabilized `{probe.binary}`: {exc}",
+                    diagnostics=_redacted_diagnostics(str(exc)),
+                )
+            if not alive:
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason="provider session died on interrupt",
+                    diagnostics="session ended after interrupt input",
+                )
+            if probe.reset_mode == "soft":
+                try:
+                    adapter.new_session()
+                except Exception as exc:
+                    return EvidenceResult(
+                        name=probe.scenario,
+                        status=BLOCKED,
+                        reason=f"soft reset of `{probe.binary}` failed: {exc}",
+                        diagnostics=_redacted_diagnostics(str(exc)),
+                    )
+                rested, reset_gates, reset_refused, reset_error = _await_ready(
+                    adapter, probe, timeout_s
+                )
+                reset_detail = "soft reset"
+            else:
+                try:
+                    adapter.terminate()
+                    adapter.start()
+                except Exception as exc:
+                    return EvidenceResult(
+                        name=probe.scenario,
+                        status=BLOCKED,
+                        reason=f"hard reset of `{probe.binary}` failed: {exc}",
+                        diagnostics=_redacted_diagnostics(str(exc)),
+                    )
+                rested, reset_gates, reset_refused, reset_error = _await_ready(
+                    adapter, probe, timeout_s
+                )
+                reset_detail = "hard reset (restart)"
+            gates += reset_gates
+            if (
+                reset_error
+                or reset_refused
+                or not any(m in rested for m in probe.ready_markers)
+            ):
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason=(
+                        reset_error
+                        or f"`{probe.binary}` showed no ready prompt after reset; "
+                        "rerun `ariadex evidence "
+                        f"--only {probe.scenario}` to retry"
+                    ),
+                    diagnostics=_redacted_diagnostics(rested),
+                )
+            try:
+                adapter.terminate()
+                terminated = not driver.session_alive(name)
+            except Exception as exc:
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason=f"termination of `{probe.binary}` failed: {exc}",
+                    diagnostics=_redacted_diagnostics(str(exc)),
+                )
+            if not terminated:
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason="provider session survived terminate; cleanup failed",
+                    diagnostics=f"session `{name}` still alive",
+                )
+            try:
+                adapter.start()
+                again, restart_gates, restart_refused, restart_error = _await_ready(
+                    adapter, probe, timeout_s
+                )
+            except Exception as exc:
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason=f"restart of `{probe.binary}` failed: {exc}",
+                    diagnostics=_redacted_diagnostics(str(exc)),
+                )
+            gates += restart_gates
+            if (
+                restart_error
+                or restart_refused
+                or not any(m in again for m in probe.ready_markers)
+            ):
+                return EvidenceResult(
+                    name=probe.scenario,
+                    status=BLOCKED,
+                    reason=(
+                        restart_error
+                        or f"`{probe.binary}` showed no ready prompt after restart"
+                    ),
+                    diagnostics=_redacted_diagnostics(again),
+                )
+        finally:
+            with contextlib.suppress(Exception):
+                driver.terminate(name)
+    gate_detail = f"; answered {gates} startup gate(s)" if gates else ""
+    return EvidenceResult(
+        name=probe.scenario,
+        status=PASSED,
+        reason=(
+            f"real `{probe.binary}` startup, probe/capture, interrupt, "
+            f"{reset_detail}, termination, and restart all behaved{gate_detail}"
+        ),
+    )
+
+
+def scenario_opencode_lifecycle(
+    timeout_s: int = DEFAULT_TIMEOUT_S,
+    executable: str = "tmux",
+    driver_factory=None,
+) -> EvidenceResult:
+    """Real OpenCode startup, `/help` probe, interrupt, `/new` reset,
+    termination, and restart in an isolated tmux session.
+
+    `/help` opens the local help overlay (or echoes); both prove prompt
+    delivery and capture without any model call.
+    """
+    from .providers import OpenCodeAdapter
+
+    probe = _RealProviderProbe(
+        scenario="opencode-lifecycle",
+        binary="opencode",
+        ready_markers=("Ask anything", "tab agents"),
+        gate_responses=(),
+        probe_input="/help",
+        response_markers=(
+            "/help",
+            "Press ctrl+p to see all available actions",
+            "esc/enter",
+        ),
+        reset_mode="soft",
+    )
+    return _run_real_provider_lifecycle(
+        probe, OpenCodeAdapter, timeout_s, executable, driver_factory
+    )
+
+
+def scenario_codex_lifecycle(
+    timeout_s: int = DEFAULT_TIMEOUT_S,
+    executable: str = "tmux",
+    driver_factory=None,
+) -> EvidenceResult:
+    """Real Codex startup (answering only its update-skip and directory-trust
+    gates), `/help` probe, interrupt, hard-reset restart, termination, and
+    restart in an isolated tmux session."""
+    from .providers import CodexAdapter
+
+    probe = _RealProviderProbe(
+        scenario="codex-lifecycle",
+        binary="codex",
+        ready_markers=("OpenAI Codex", "Ask Codex to do anything"),
+        gate_responses=(
+            ("Update available!", "2"),
+            ("Do you trust the contents", "1"),
+        ),
+        probe_input="/help",
+        response_markers=("/help",),
+        reset_mode="hard",
+    )
+    return _run_real_provider_lifecycle(
+        probe, CodexAdapter, timeout_s, executable, driver_factory
+    )
+
+
 SCENARIOS: tuple[tuple[str, Callable[..., EvidenceResult]], ...] = (
     ("tmux-lifecycle", scenario_tmux_lifecycle),
     ("provider-startup", scenario_provider_startup),
@@ -575,7 +958,30 @@ SCENARIOS: tuple[tuple[str, Callable[..., EvidenceResult]], ...] = (
     ("takeover-resync", scenario_takeover_resync),
     ("install-fixture", scenario_install_fixture),
     ("provider-smoke", scenario_provider_smoke),
+    ("opencode-lifecycle", scenario_opencode_lifecycle),
+    ("codex-lifecycle", scenario_codex_lifecycle),
 )
+
+
+TMUX_BACKED_SCENARIOS = (
+    "tmux-lifecycle",
+    "opencode-lifecycle",
+    "codex-lifecycle",
+)
+
+
+def _wants_tmux(only: list[str] | None) -> bool:
+    """Whether the selected scenarios need a tmux binary at all."""
+    return only is None or any(name in only for name in TMUX_BACKED_SCENARIOS)
+
+
+def _selected_tmux_backed(only: list[str] | None) -> list[str]:
+    """Tmux-backed scenario names covered by this run, in suite order."""
+    return [
+        name
+        for name, _ in SCENARIOS
+        if name in TMUX_BACKED_SCENARIOS and (only is None or name in only)
+    ]
 
 
 def provision_tmux() -> tuple[str | None, str]:
@@ -642,7 +1048,7 @@ def run_all(
     executable = tmux_bin or "tmux"
     local_dir: tempfile.TemporaryDirectory | None = None
     try:
-        if local_tmux and (only is None or "tmux-lifecycle" in only):
+        if local_tmux and _wants_tmux(only):
             from . import tmux_setup as setup_mod
 
             try:
@@ -654,15 +1060,16 @@ def run_all(
                 )
             except setup_mod.TmuxSetupError as exc:
                 skip_tmux = True
-                results.append(
-                    EvidenceResult(
-                        name="tmux-lifecycle",
-                        status=BLOCKED,
-                        reason=f"local tmux fetch failed: {exc}",
-                        diagnostics=str(exc)[:2000],
+                for backed in _selected_tmux_backed(only):
+                    results.append(
+                        EvidenceResult(
+                            name=backed,
+                            status=BLOCKED,
+                            reason=f"local tmux fetch failed: {exc}",
+                            diagnostics=str(exc)[:2000],
+                        )
                     )
-                )
-        if provision and not skip_tmux and (only is None or "tmux-lifecycle" in only):
+        if provision and not skip_tmux and _wants_tmux(only):
             from .tmux_setup import TmuxSetupError
 
             provision_attempted = True
@@ -673,21 +1080,26 @@ def run_all(
                     provision_note = "tmux was missing; provisional install performed"
             except TmuxSetupError as exc:
                 skip_tmux = True
-                results.append(
-                    EvidenceResult(
-                        name="tmux-lifecycle",
-                        status=BLOCKED,
-                        reason=f"provisioning failed: {exc}",
-                        diagnostics=str(exc)[:2000],
+                for backed in _selected_tmux_backed(only):
+                    results.append(
+                        EvidenceResult(
+                            name=backed,
+                            status=BLOCKED,
+                            reason=f"provisioning failed: {exc}",
+                            diagnostics=str(exc)[:2000],
+                        )
                     )
-                )
         for name, func in SCENARIOS:
             if only and name not in only:
                 continue
-            if name == "tmux-lifecycle" and skip_tmux:
+            if name in TMUX_BACKED_SCENARIOS and skip_tmux:
                 continue  # already classified above
             try:
-                if name == "tmux-lifecycle":
+                if name in (
+                    "tmux-lifecycle",
+                    "opencode-lifecycle",
+                    "codex-lifecycle",
+                ):
                     results.append(func(timeout_s=timeout_s, executable=executable))
                 elif name == "provider-smoke":
                     results.append(func(timeout_s=timeout_s))
@@ -716,7 +1128,9 @@ def run_all(
                 )
         if local_dir is not None:
             local_dir.cleanup()  # unpath the temporary tmux: full uninstall
-            if any(r.name == "tmux-lifecycle" and r.status == PASSED for r in results):
+            if any(
+                r.name in TMUX_BACKED_SCENARIOS and r.status == PASSED for r in results
+            ):
                 results.append(
                     EvidenceResult(
                         name="tmux-provision",

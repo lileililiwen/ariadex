@@ -1,10 +1,11 @@
 """OpenCode and Codex adapters over the terminal driver.
 
-Capability notes (declared, pending live-session verification because no
-tmux server is available in this environment yet):
+Capability notes (verified live by `ariadex evidence --only
+opencode-lifecycle,codex-lifecycle`: real startup, `/help` probe,
+interrupt, reset, termination, and restart in isolated tmux sessions):
 - OpenCode runs its attachable TUI by default (`opencode [project]`) and
   accepts `/new` as its new-session input, so `soft_reset` is declared.
-- Codex runs its interactive CLI by default with no verified in-session
+- Codex runs its interactive CLI by default with no in-session
   new-session key, so `soft_reset` is NOT declared and the runner must use
   hard reset (terminate and restart) for it.
 - Neither adapter can read provider token usage from the terminal pane, so

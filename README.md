@@ -16,8 +16,8 @@ single-runner concurrency and recovery, log data governance, spec
 dependency and execution governance, metrics export and notifications,
 active-spec discovery and archive isolation, bounded run completion and
 cycle limit, and takeover cancellation and scheduler coordination
-(393 tests, stdlib only). An audit remediation queue remains active
-(four of six changes archived); see [ROADMAP.md](ROADMAP.md) and
+(408 tests, stdlib only). An audit remediation queue remains active
+(five of six changes archived); see [ROADMAP.md](ROADMAP.md) and
 [HANDOFF.md](HANDOFF.md).
 
 ## Requirements
@@ -196,7 +196,7 @@ instead of silently substituting another spec.
 
 ```bash
 pip install -e ".[dev]"                              # pinned QA toolchain
-python -m unittest discover -s tests                 # 393 tests, stdlib only
+python -m unittest discover -s tests                 # 408 tests, stdlib only
 openspec validate --changes --strict --no-interactive
 ruff check src tests
 ruff format --check src tests
