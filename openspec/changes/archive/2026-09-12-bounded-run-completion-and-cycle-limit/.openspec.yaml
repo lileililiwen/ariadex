@@ -1,0 +1,3 @@
+depends_on:
+  - active-spec-discovery-and-archive-isolation
+

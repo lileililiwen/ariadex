@@ -961,6 +961,20 @@ def _run_guarded(
         concurrency_mod.release(project_dir)
 
 
+def exit_for_cycles(cycles: list) -> int:
+    """Map a finished run to its process exit code.
+
+    Success is a stopped idle tail only. Every other stopped outcome
+    (blocked, failed, mode-guard, `cycle-limit` exhaustion, ...) is a
+    non-zero result; an unstopped tail or an empty run never reads as
+    success either.
+    """
+    last = cycles[-1] if cycles else None
+    if last is not None and last.stopped and last.stop_reason in ("idle",):
+        return EXIT_OK
+    return EXIT_ERROR
+
+
 def _run_loop(
     project_dir: Path,
     cfg: config_mod.Config,
@@ -999,10 +1013,7 @@ def _run_loop(
     cycles = runner.run()
     for cycle in cycles:
         print(f"{cycle.kind}: {cycle.action} -> {cycle.outcome} ({cycle.detail})")
-    last = cycles[-1] if cycles else None
-    if last is not None and last.stopped and last.stop_reason not in ("idle",):
-        return EXIT_ERROR
-    return EXIT_OK
+    return exit_for_cycles(cycles)
 
 
 def cmd_run(

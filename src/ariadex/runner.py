@@ -38,6 +38,7 @@ ACTION_ADVANCE_SPEC = "advance-spec"
 ACTION_START_SPEC = "start-spec"
 ACTION_STOP = "stop"
 ACTION_IDLE = "idle"
+ACTION_CYCLE_LIMIT = "cycle-limit"
 
 
 @dataclasses.dataclass
@@ -803,9 +804,79 @@ class Runner:
         return False
 
     def run(self, max_cycles: int = 10) -> list[CycleResult]:
-        """Loop cycles until stop. Bounded so an unverified loop cannot spin."""
+        """Loop cycles until stop. Bounded so an unverified loop cannot spin.
+
+        Exhausting the budget while work remains appends an explicit
+        stopped `cycle-limit` result instead of returning an unstopped
+        tail that reads as success. A zero (or negative) budget sends no
+        provider input and returns the explicit incomplete result.
+        """
+        if max_cycles <= 0:
+            return [self._cycle_limit_exhausted(budget=max_cycles, ran=0)]
         while len(self.cycles) < max_cycles:
             result = self.run_once()
             if result.stopped:
                 break
+        if not self.cycles or not self.cycles[-1].stopped:
+            self.cycles.append(
+                self._cycle_limit_exhausted(budget=max_cycles, ran=len(self.cycles))
+            )
         return self.cycles
+
+    def _cycle_limit_exhausted(self, *, budget: int, ran: int) -> CycleResult:
+        """Report an exhausted cycle budget without claiming completion.
+
+        Recomputes and persists the remaining next action so a restart
+        resumes from durable state. Sends no provider input, advances no
+        spec, and resolves no issue: per-cycle verified completions stand,
+        but the run itself is reported incomplete (`cycle-limit`).
+        """
+        started = logging_mod.now_iso()
+        self._ctx = {
+            "input": "",
+            "output": "",
+            "exit_code": None,
+            "validation": "unavailable",
+            "reset": None,
+            "retries": 0,
+        }
+        try:
+            handoff = self._load()
+        except handoff_mod.HandoffError as exc:
+            self._ctx["output"] = str(exc)
+            result = CycleResult(
+                kind=ACTION_CYCLE_LIMIT,
+                action="none — cycle limit reached",
+                outcome="cycle-limit",
+                detail=f"cycle budget exhausted ({ran}/{budget}); {exc}",
+                stopped=True,
+                stop_reason="cycle-limit",
+            )
+            self._observe(result, started)
+            self._announce(result)
+            return result
+        if budget <= 0:
+            action = "none — no execution budget"
+            detail = (
+                f"no execution budget (max_cycles={budget}); no provider input sent"
+            )
+        else:
+            action = self._plan_next(handoff)
+            detail = (
+                f"cycle budget exhausted ({ran}/{budget}); "
+                f"remaining work preserved as `{action}`"
+            )
+        handoff.next_action = action
+        self._ctx["output"] = detail
+        self._save(handoff)
+        result = CycleResult(
+            kind=ACTION_CYCLE_LIMIT,
+            action=action,
+            outcome="cycle-limit",
+            detail=detail,
+            stopped=True,
+            stop_reason="cycle-limit",
+        )
+        self._observe(result, started)
+        self._announce(result)
+        return result
