@@ -12,6 +12,7 @@ import os
 import sys
 from pathlib import Path
 
+from . import concurrency as concurrency_mod
 from . import config as config_mod
 from . import control as control_mod
 from . import handoff as handoff_mod
@@ -178,6 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--priority", required=True, help="high, medium, or low"
     )
     reprioritize_parser.add_argument("--note", default="", help="decision note")
+    recover_parser = sub.add_parser(
+        "recover",
+        help="reconcile state, handoff, lock, and tmux after interruption",
+    )
+    recover_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
     evidence = sub.add_parser(
         "evidence",
         help="run opt-in live runtime evidence (passed/skipped/blocked)",
@@ -497,6 +505,57 @@ def _confirm_scheduling(confirmed: bool) -> bool:
     return True
 
 
+def cmd_recover(project_dir: Path, as_json: bool = False) -> int:
+    """Reconcile after interruption. Works in every mode; sends no input."""
+    import json as json_mod
+
+    if _load_config(project_dir) is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    report = concurrency_mod.recover_project(project_dir)
+    if as_json:
+        print(json_mod.dumps(report.to_dict(), sort_keys=True, indent=2))
+    else:
+        print(concurrency_mod.format_recovery_text(report))
+    if report.lock_state == "active-refused":
+        return EXIT_ERROR
+    return EXIT_OK
+
+
+def _acquire_schedule_lease(project_dir: Path, session_id: str) -> bool:
+    """Claim the single-scheduler lease before any provider input.
+
+    Returns True when this process owns the lease. On a live or stale
+    owner, reports actionable diagnostics (owner details, `recover` and
+    `doctor` hints) and returns False without sending work or deleting
+    anything.
+    """
+    try:
+        concurrency_mod.acquire(project_dir, session_id)
+    except concurrency_mod.ActiveLockError as exc:
+        print(f"error: refused: {exc}", file=sys.stderr)
+        print(
+            "another scheduler owns this project; "
+            "no provider input sent "
+            "(see `ariadex doctor` for owner details)",
+            file=sys.stderr,
+        )
+        return False
+    except concurrency_mod.StaleLockError as exc:
+        print(f"error: stale owner: {exc}", file=sys.stderr)
+        print(
+            "run `ariadex recover` to reconcile state, handoff, lock, "
+            "and tmux before retrying; no provider input sent",
+            file=sys.stderr,
+        )
+        return False
+    except concurrency_mod.LockError as exc:
+        print(f"error: scheduling lease unavailable: {exc}", file=sys.stderr)
+        return False
+    return True
+
+
 def _log_mode_event(
     project_dir: Path, st: state_mod.State, action: str, note: str
 ) -> None:
@@ -646,9 +705,45 @@ def cmd_auto(
         return EXIT_OK
     if not _confirm_scheduling(confirmed):
         return EXIT_ERROR
-    return _run_loop(
+    return _run_guarded(
         project_dir, cfg, state_mod.read(project_dir), auto_install=auto_install
     )
+
+
+def _run_guarded(
+    project_dir: Path,
+    cfg: config_mod.Config,
+    st: state_mod.State,
+    auto_install: bool = True,
+) -> int:
+    """Acquire the single-scheduler lease, run, heartbeat, release.
+
+    The lease is claimed after mode/preview/confirmation checks and before
+    any provider input. It is released on normal exit, error, keyboard
+    interrupt, and SIGTERM. A second owner is refused without sending work
+    and without deleting anything.
+    """
+    import contextlib
+    import signal
+
+    if not _acquire_schedule_lease(project_dir, st.session_id):
+        return EXIT_ERROR
+    old_term = signal.getsignal(signal.SIGTERM)
+
+    def _release_on_term(signum, frame) -> None:  # pragma: no cover - signal path
+        concurrency_mod.release(project_dir)
+        signal.signal(signal.SIGTERM, old_term)
+        os.kill(os.getpid(), signum)
+
+    with contextlib.suppress(OSError, ValueError):
+        signal.signal(signal.SIGTERM, _release_on_term)
+    try:
+        return _run_loop(project_dir, cfg, st, auto_install=auto_install)
+    finally:
+        with contextlib.suppress(OSError, ValueError):
+            signal.signal(signal.SIGTERM, old_term)
+        concurrency_mod.heartbeat(project_dir)
+        concurrency_mod.release(project_dir)
 
 
 def _run_loop(
@@ -731,7 +826,7 @@ def cmd_run(
         return EXIT_OK
     if not _confirm_scheduling(confirmed):
         return EXIT_ERROR
-    return _run_loop(project_dir, cfg, st, auto_install=auto_install)
+    return _run_guarded(project_dir, cfg, st, auto_install=auto_install)
 
 
 def cmd_attach(project_dir: Path, auto_install: bool = True) -> int:
@@ -826,6 +921,9 @@ def main(argv: list[str] | None = None) -> int:
             args.item_id,
             args.priority,
             getattr(args, "note", ""),
+        ),
+        "recover": lambda: cmd_recover(
+            project_dir, as_json=getattr(args, "json", False)
         ),
         "evidence": lambda: cmd_evidence(
             project_dir,

@@ -287,6 +287,9 @@ class Runner:
                 stopped=True,
                 stop_reason="handoff-error",
             )
+        unreconciled = self._unreconciled_interruption()
+        if unreconciled is not None:
+            return unreconciled
         repo = inspect_repository(self.project_dir, self.config.spec_dir)
         if repo.missing_spec_dir:
             handoff_mod.add_item(
@@ -339,10 +342,48 @@ class Runner:
             return result
         return self._execute(handoff, kind, target)
 
+    def _unreconciled_interruption(self) -> CycleResult | None:
+        """Stop when a prior attempt died mid-delivery without recovery.
+
+        A persisted uncertain phase means restart cannot prove whether
+        provider input or verification completed. The runner sends nothing
+        and requires explicit `ariadex recover` first; recovery records the
+        blocker. Never guesses delivery complete.
+        """
+        from . import concurrency as concurrency_mod
+
+        try:
+            cycle = concurrency_mod.read_cycle(self.project_dir)
+        except Exception:
+            return None
+        if cycle is None or cycle.phase not in concurrency_mod.UNCERTAIN_PHASES:
+            return None
+        self._ctx["output"] = (
+            f"unreconciled interruption in phase `{cycle.phase}`"
+            f"{f' for `{cycle.action}`' if cycle.action else ''}; "
+            "run `ariadex recover` before retrying"
+        )
+        return CycleResult(
+            kind=ACTION_STOP,
+            action="none — unreconciled interruption",
+            outcome="interrupted",
+            detail=(
+                f"interrupted in phase `{cycle.phase}`; "
+                "explicit recovery required before retrying"
+            ),
+            stopped=True,
+            stop_reason="interrupted",
+        )
+
     def _execute(
         self, handoff: handoff_mod.Handoff, kind: str, target: str
     ) -> CycleResult:
+        from . import concurrency as concurrency_mod
+
         action = f"{kind} {target}"
+        concurrency_mod.write_cycle(
+            self.project_dir, concurrency_mod.PHASE_BEFORE_SEND, action
+        )
         try:
             self.adapter.start()
         except StartupError as exc:
@@ -354,6 +395,7 @@ class Runner:
             )
             result = self._stop_for_blocker(handoff, "provider startup failed")
             self.cycles.append(result)
+            concurrency_mod.clear_cycle(self.project_dir)
             return result
         prompt = (
             f"Ariadex next action [{kind}]: {target}\n"
@@ -363,7 +405,13 @@ class Runner:
         )
         try:
             self.adapter.send(prompt)
+            concurrency_mod.write_cycle(
+                self.project_dir, concurrency_mod.PHASE_SENT, action
+            )
             output = self.adapter.capture_output()
+            concurrency_mod.write_cycle(
+                self.project_dir, concurrency_mod.PHASE_CAPTURED, action
+            )
         except AdapterError as exc:
             handoff_mod.add_item(
                 handoff,
@@ -373,8 +421,12 @@ class Runner:
             )
             result = self._stop_for_blocker(handoff, "adapter failure")
             self.cycles.append(result)
+            concurrency_mod.clear_cycle(self.project_dir)
             return result
 
+        concurrency_mod.write_cycle(
+            self.project_dir, concurrency_mod.PHASE_VERIFYING, action
+        )
         verdict = self.verifier.verify(action, output)
         self._ctx["input"] = prompt
         self._ctx["output"] = output
@@ -386,7 +438,12 @@ class Runner:
         else:
             self._ctx["validation"] = "failed"
         if verdict.passed:
-            return self._complete(handoff, kind, target, action)
+            concurrency_mod.write_cycle(
+                self.project_dir, concurrency_mod.PHASE_COMPLETING, action
+            )
+            result = self._complete(handoff, kind, target, action)
+            concurrency_mod.clear_cycle(self.project_dir)
+            return result
         if isinstance(self.verifier, UnavailableVerifier):
             handoff.status = "in-progress"
             handoff.next_action = action
@@ -400,8 +457,11 @@ class Runner:
                 stop_reason="verification-unavailable",
             )
             self.cycles.append(result)
+            concurrency_mod.clear_cycle(self.project_dir)
             return result
-        return self._retry_or_persist(handoff, kind, target, action, verdict.detail)
+        result = self._retry_or_persist(handoff, kind, target, action, verdict.detail)
+        concurrency_mod.clear_cycle(self.project_dir)
+        return result
 
     def _failure_item(
         self,

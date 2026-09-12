@@ -131,6 +131,61 @@ def run_doctor(project_dir: Path) -> tuple[list[DoctorCheck], dict]:
                     True,
                 )
             )
+        from . import concurrency as concurrency_mod
+
+        diagnosis = concurrency_mod.diagnose(project_dir)
+        lock_state = diagnosis.get("state", "free")
+        owner = diagnosis.get("owner")
+        if lock_state == "free":
+            checks.append(DoctorCheck("lock", True, "no active scheduler", True))
+        elif lock_state == "active":
+            info = concurrency_mod.lock_from_dict(owner or {})
+            detail = (
+                concurrency_mod.describe_owner(info)
+                if info
+                else "scheduling lease held by an active owner"
+            )
+            checks.append(DoctorCheck("lock", False, f"{detail}; no input sent", True))
+        elif lock_state == "stale":
+            info = concurrency_mod.lock_from_dict(owner or {})
+            detail = (
+                concurrency_mod.describe_owner(info)
+                if info
+                else "stale scheduling lease present"
+            )
+            checks.append(
+                DoctorCheck(
+                    "lock",
+                    False,
+                    f"{detail}; run `ariadex recover` before retrying",
+                    True,
+                )
+            )
+        else:
+            checks.append(
+                DoctorCheck(
+                    "lock",
+                    False,
+                    f"scheduling lock unreadable ({lock_state}); inspect "
+                    "`runner.lock` manually; refusing to delete it",
+                    True,
+                )
+            )
+        cycle = concurrency_mod.read_cycle(project_dir)
+        if cycle is not None and cycle.phase in concurrency_mod.UNCERTAIN_PHASES:
+            checks.append(
+                DoctorCheck(
+                    "interruption",
+                    False,
+                    f"unreconciled interruption in phase `{cycle.phase}`; "
+                    "run `ariadex recover` before retrying",
+                    True,
+                )
+            )
+        else:
+            checks.append(
+                DoctorCheck("interruption", True, "no unreconciled cycle", True)
+            )
     summary = {
         "ok": all(c.ok or not c.required for c in checks),
         "checks": [c.to_dict() for c in checks],
@@ -222,8 +277,35 @@ def build_preview(project_dir: Path) -> dict:
             next_action = "none — unreadable handoff"
         else:
             prerequisites.setdefault("handoff", True)
+        from . import concurrency as concurrency_mod
+
+        diagnosis = concurrency_mod.diagnose(project_dir)
+        lock_state = diagnosis.get("state", "free")
+        lock_owner = diagnosis.get("owner")
+        prerequisites["lock"] = lock_state == "free"
+        if lock_state != "free":
+            info = concurrency_mod.lock_from_dict(lock_owner or {})
+            detail = (
+                concurrency_mod.describe_owner(info)
+                if info
+                else f"scheduling lock {lock_state}"
+            )
+            blockers.append(
+                f"scheduling lease {lock_state}: {detail}; "
+                "run `ariadex recover` before retrying"
+            )
+        cycle = concurrency_mod.read_cycle(project_dir)
+        if cycle is not None and cycle.phase in concurrency_mod.UNCERTAIN_PHASES:
+            prerequisites["interruption"] = False
+            blockers.append(
+                f"unreconciled interruption in phase `{cycle.phase}`; "
+                "run `ariadex recover` before retrying"
+            )
+        else:
+            prerequisites["interruption"] = True
     else:
         next_action = "none — invalid configuration"
+        lock_state, lock_owner = "unknown", None
 
     can_schedule = not blockers and mode == "AUTO"
     return {
@@ -238,6 +320,7 @@ def build_preview(project_dir: Path) -> dict:
         "prerequisites": prerequisites,
         "blockers": blockers,
         "can_schedule": can_schedule,
+        "lock": {"state": lock_state, "owner": lock_owner},
     }
 
 
@@ -269,6 +352,9 @@ def format_preview_text(preview: dict) -> str:
             f"{name}={'ok' if ok else 'MISSING'}" for name, ok in prereqs.items()
         )
         lines.append(f"prerequisites: {rendered}")
+    lock = preview.get("lock") or {}
+    if lock.get("state"):
+        lines.append(f"lock: {lock.get('state')}")
     if preview["blockers"]:
         for blocker in preview["blockers"]:
             lines.append(f"blocker: {blocker}")
