@@ -57,46 +57,40 @@
 - Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (358 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
 - Live proof on this host: ruff check/format clean, mypy clean on 21 files, coverage 82% (gate met), `openspec validate --changes --strict --no-interactive` 1 passed before archiving, no active changes after archiving.
 - All post-MVP changes are implemented, verified, and archived. No active changes remain.
+- `active-spec-discovery-and-archive-isolation` implemented, verified, and archived as `2026-09-12-active-spec-discovery-and-archive-isolation` (commit `78f6375`).
+- New boundary in `src/ariadex/spec_graph.py`: `ARCHIVE_DIRNAME = "archive"`, `is_active_change_name` (rejects `archive` and `.`-hidden names), `discover_active_changes` (sorted active names plus operator-visible ignore reasons for archived/hidden/non-directory entries; `archive/` descendants excluded via the reserved top-level directory). `load_graph` builds over active changes only.
+- `runner.py`: `inspect_repository` shares the same discovery (`specs` active only, new `ignored_specs` diagnostics); `select_next_action` unchanged and returns idle when only `archive` remains, never `start-spec archive`. `operator.py` `_spec_dir_ok` shares the same discovery and reports `no active changes` plus ignored-entry reasons, so doctor/preview/resync cannot disagree with the runner.
+- Tests: `tests/test_active_discovery.py` (8 tests: archive/hidden/file exclusion, graph/inspection exclusion, all-archived idle, doctor zero-active, preview idle, resync idle, empty-after-archive CLI smoke).
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (366 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
+- Live proof on this host: ruff check/format clean, mypy clean on 21 files, `openspec validate --changes --strict --no-interactive` 6 passed before archiving, 5 passed after archiving.
 
 ## Next change
 
-No active changes remain (`openspec list` is empty). All eight post-MVP changes plus the MVP sequence are implemented, verified, and archived. Do not start new work without an explicit new change.
+Select `bounded-run-completion-and-cycle-limit` next with `openspec list`.
 
-## Feature-to-change sequence
+## Audit remediation sequence
 
-| Order | OpenSpec change | Requirement features | Depends on |
+| Order | OpenSpec change | Finding covered | Depends on |
 | --- | --- | --- | --- |
-| 1 | `project-foundation-and-cli` | project layout, `.ariadex` configuration, durable state, CLI contract | none |
-| 2 | `agent-adapters-and-tmux-driver` | `AgentAdapter`, capabilities, OpenCode, Codex, tmux lifecycle | 1 |
-| 3 | `state-driven-runner-and-handoff` | state-driven loop, handoff schema, unresolved queue, reset policy | 1, 2 |
-| 4 | `verification-logging-and-observability` | shell verification, bounded retries, logs, metrics, status display | 1, 3 |
-| 5 | `human-control-and-resync` | AUTO/MANUAL/PAUSE, takeover, resume, git/spec/handoff resync | 1, 2, 3, 4 |
-| 6 | `tmux-auto-install` | unattended tmux installation with opt-out | 1, 2 |
-
-## Recommended post-MVP change sequence
-
-| Order | OpenSpec change | Focus | Depends on |
-| --- | --- | --- | --- |
-| 1 | `live-runtime-evidence` | real tmux/provider and restart evidence | MVP |
-| 2 | `packaging-and-distribution` | installable package and release metadata | MVP |
-| 3 | `ci-quality-security-gates` | CI/CD, quality, coverage, security, artifacts | 1, 2 |
-| 4 | `human-supervision-ergonomics` | humane CLI, preview, queue, doctor, structured status | MVP |
-| 5 | `single-runner-concurrency-and-recovery` | locking, crash recovery, reconciliation | 1, 4 |
-| 6 | `log-data-governance` | retention, redaction, permissions, export/deletion | 4 |
-| 7 | `spec-dependency-and-execution-governance` | dependency graph and scheduling eligibility | 4, 5 |
-| 8 | `metrics-export-and-notifications` | metrics export and operator attention | 3, 5, 6 |
+| 1 | `active-spec-discovery-and-archive-isolation` | Archived changes are incorrectly scheduled as active work | none |
+| 2 | `bounded-run-completion-and-cycle-limit` | Cycle-limit exhaustion can return CLI success with unfinished work | 1 |
+| 3 | `takeover-cancellation-and-scheduler-coordination` | MANUAL/PAUSE does not cancel an already-running cycle immediately | 2 |
+| 4 | `canonical-spec-and-doc-governance` | Canonical specs contain `TBD`; HANDOFF/docs contain contradictory current-state claims | 1, 2, 3 |
+| 5 | `real-provider-live-validation` | Real OpenCode/Codex lifecycle behavior is not proven by fake-provider/version-only evidence | 1, 2, 3 |
+| 6 | `repository-identity-security-and-release-readiness` | Package and security links point to the OpenCode repository | 4, 5 |
 
 The implementation sequence is:
 
 ```text
-project-foundation-and-cli
-  -> agent-adapters-and-tmux-driver
-  -> state-driven-runner-and-handoff
-  -> verification-logging-and-observability
-  -> human-control-and-resync
+active-spec-discovery-and-archive-isolation
+  -> bounded-run-completion-and-cycle-limit
+  -> takeover-cancellation-and-scheduler-coordination
+  -> canonical-spec-and-doc-governance
+  -> real-provider-live-validation
+  -> repository-identity-security-and-release-readiness
 ```
 
-Do not implement deferred V2 capabilities until this sequence is complete and its evidence is recorded. Preserve the product boundary: no IDE, provider LLM API, or replacement Coding CLI.
+All six packages are planning-only until implemented, tested, verified, archived, and recorded below. Preserve the product boundary: no IDE, provider LLM API, or replacement Coding CLI.
 
 ## Change selection rule
 
@@ -117,6 +111,9 @@ Use `openspec list` and select only the earliest incomplete change in the sequen
 Incomplete or blocked work must not be claimed complete. Record the exact failed command and the next action in this file.
 
 ## Verification evidence
+
+- Audit baseline: 358 unit tests passed with 1 expected tmux skip; ruff, format, mypy, coverage threshold, and strict OpenSpec validation passed. Confirmed gaps are tracked by the six active remediation changes above.
+- Current environment blockers: tmux live evidence is blocked by unavailable DNS/package download; `pip-audit` is not installed in this environment; real provider lifecycle evidence remains pending.
 
 - `PYTHONPATH=src python3 -m unittest discover -s tests`: 164 tests ran, OK (1 skipped: live tmux lifecycle, `tmux` binary unavailable).
 - `openspec validate --changes --strict --no-interactive`: 1 passed, 0 failed (before archiving; archive generated `openspec/specs/human-control/spec.md` and `openspec/specs/resync/spec.md`). No active changes remain.
