@@ -420,7 +420,7 @@ class WidgetSmokeTest(unittest.TestCase):
                 "pause-button",
                 "stop-button",
                 "expand-button",
-                "hide-button",
+                "close-button",
                 "status-text",
             ):
                 found = root.nametowidget(f".!frame.!{widget_name}")
@@ -763,12 +763,11 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.window._drag_stop(event)
         self.assertIsNotNone(self.window._save_after)
 
-    def test_hide_and_quit(self):
-        self.window._hide()
-        self.assertTrue(self.root.iconified)
-        self.assertFalse(self.root.destroyed)
-        self.window._quit()
+    def test_close_button_stops_daemon_and_exits_widget(self):
+        self.assertEqual(self.window.close_button.options.get("text"), "×")
+        self.window.close_button.invoke()
         self.assertTrue(self.root.destroyed)
+        self.assertEqual(self.client.calls, ["stop"])
         self.assertEqual(self.adapter.unregistered, 1)
 
     def test_poll_loops_bounded(self):

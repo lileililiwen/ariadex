@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+goal: Make the middle-right daemon widget usable from a project directory with
+  ariadex widget

@@ -55,6 +55,15 @@ class MappingTest(unittest.TestCase):
         self.assertIn("python3-tk", cmd)
         self.assertNotIn("tmux", cmd)
 
+    def test_interactive_install_command_allows_sudo_prompt(self):
+        with (
+            mock.patch.object(deploy.shutil, "which", return_value="/usr/bin/sudo"),
+            mock.patch("ariadex.tmux_setup.needs_sudo", return_value=True),
+        ):
+            cmd = deploy.tkinter_install_command("apt-get", interactive_sudo=True)
+        self.assertEqual(cmd[:2], ["sudo", "apt-get"])
+        self.assertNotIn("-n", cmd)
+
     def test_install_command_unsupported_raises(self):
         with self.assertRaises(deploy.DeployError):
             deploy.tkinter_install_command("brew")
@@ -148,6 +157,32 @@ class EnsureTest(unittest.TestCase):
             )
         self.assertEqual(result.state, "installed")
         self.assertTrue(any("python3-tk" in c for c in calls))
+
+    def test_interactive_install_streams_package_manager_output(self):
+        kwargs_seen: list[dict] = []
+
+        def runner(argv, **kwargs):
+            kwargs_seen.append(kwargs)
+            return ok_proc(argv)
+
+        with (
+            mock.patch.object(companion_mod, "tkinter_available", return_value=False),
+            mock.patch("ariadex.tmux_setup.detect_manager", return_value="apt-get"),
+            mock.patch("ariadex.tmux_setup.needs_sudo", return_value=True),
+            mock.patch.object(deploy.shutil, "which", return_value="/usr/bin/sudo"),
+            mock.patch.object(
+                deploy, "verify_tkinter_with_interpreter", return_value=True
+            ),
+        ):
+            result = deploy.ensure_companion_dependencies(
+                allow_install=True,
+                confirmed=True,
+                interactive_sudo=True,
+                runner=runner,
+                tkinter_probe=lambda: False,
+            )
+        self.assertEqual(result.state, "installed")
+        self.assertEqual([item["capture_output"] for item in kwargs_seen], [False, False])
 
     def test_failed_install_is_blocked_with_command(self):
         def runner(argv, **kwargs):

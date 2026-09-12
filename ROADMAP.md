@@ -1,5 +1,8 @@
 # Ariadex roadmap
 
+For the detailed current user/developer behavior reference, see
+[docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md).
+
 ## Current target: MVP and post-MVP foundations — complete
 
 All five MVP changes are implemented, tested, archived, and committed
@@ -108,6 +111,14 @@ committed (see `HANDOFF.md` for per-change evidence):
    duplicate-version rejection), exact fresh-index verification against
    the tag, release summary evidence, and immutable-version failure
    handling.
+
+## Complete: one-command widget workflow
+
+`daemon-widget-command` adds `ariadex widget` as the simple project-directory
+entry point. It uses the current directory by default, preserves existing
+state, starts the daemon idempotently, and opens the existing middle-right
+floating widget. An optional `--project PATH` supports launching from outside
+the supervised project.
 
 ## Deferred V2 capabilities
 

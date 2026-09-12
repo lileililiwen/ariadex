@@ -162,15 +162,28 @@ interpreter before the autostart entry is claimed; failures stay
 See [CHANGELOG.md](CHANGELOG.md) for release notes and
 [SECURITY.md](SECURITY.md) for the security contact.
 
+For the complete user/developer explanation of the daemon, modes, widget
+controls, durable files, cycle flow, and troubleshooting, see
+[docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md).
+
 ## Quickstart
 
 ```bash
 git clone https://github.com/lileililiwen/ariadex.git && cd ariadex
-./ariadex init          # create .ariadex/ defaults, never overwrites
-./ariadex start         # start the resident daemon (idempotent)
-./ariadex status        # daemon state, mode, spec, session, queue, next
-./ariadex attach        # watch the live Coding CLI in tmux
+./ariadex widget        # initialize, start, and open the widget
 ```
+
+Run `ariadex widget` from the project you want Ariadex to supervise. It uses
+the current directory by default, preserves existing `.ariadex/` files, checks
+Tkinter before starting the daemon, starts the daemon idempotently, and opens
+the always-on-top widget near the middle-right edge. If Tkinter is missing,
+the command asks before installing the required OS package; use
+`ariadex widget --yes` for a non-interactive explicit confirmation (this
+requires passwordless sudo). In an interactive terminal, normal sudo may ask
+for your password. To launch it from elsewhere, pass `--project PATH`.
+
+During an interactive install, package-manager output is shown directly in
+the terminal, including apt progress and errors.
 
 The daemon owns scheduling, persistence, and local control requests. When
 it is running, `status`, `pause`, and `resume` are answered by the daemon
@@ -182,7 +195,7 @@ working at the top level and are also grouped under `admin`
 
 ## Floating companion (opt-in)
 
-On Linux X11 with Tkinter installed, `ariadex companion` opens a small
+On Linux X11 with Tkinter installed, `ariadex widget` opens a small
 always-on-top mini-player near the middle-right edge: a text status
 indicator, the current work label, and compact Play/Yield/Stop controls.
 Expanding the widget reveals full status text, a hotkey field, and
@@ -194,8 +207,8 @@ Manual-yield workflow: press the global hotkey (default `Ctrl+Esc`) while
 the agent works — the daemon yields to PAUSE at the safe cancellation
 boundary. Edit freely, then press Play: the daemon resynchronizes handoff,
 git, specs, queue, lease, and session state before any new provider input.
-Stop always asks for confirmation; hiding or quitting the companion never
-stops the daemon.
+The top-right close button stops the daemon and exits Ariadex. The Stop action
+in the expanded controls remains separately confirmation-gated.
 
 Configuration is per user in `$XDG_CONFIG_HOME/ariadex/companion.json`
 (`~/.config/ariadex/companion.json` by default): `hotkey` (e.g. `Alt+F9`)
@@ -258,6 +271,59 @@ missing prerequisites are never presented as ready.
 
 ## How it works
 
+### Product behavior
+
+Ariadex is a project-scoped runtime for repeatedly executing verified coding
+work from durable repository state. It is not a chat window. Its durable
+inputs are the project configuration, `.ariadex/handoff.md`, active OpenSpec
+changes, git state, the unresolved-work queue, and configured verification
+commands.
+
+The normal lifecycle is:
+
+1. `ariadex init` creates missing `.ariadex/` configuration, handoff, and
+   state files without overwriting existing files.
+2. `ariadex start` starts one resident daemon for the project. The daemon does
+   not open a visible terminal; it owns the background scheduling loop.
+3. In `AUTO`, the daemon selects the next durable action, starts or connects
+   to the configured provider through tmux, sends the provider prompt,
+   captures the result, runs every configured verifier, and persists the
+   outcome before the next cycle.
+4. A verified cycle can advance the current spec, resolve an unresolved item,
+   or start the next eligible spec. A failed or uncertain cycle is recorded
+   with its reason and is never silently discarded.
+5. The daemon stops when the queue is idle/complete, a blocker needs human
+   attention, the cycle limit is reached, or the operator changes the mode.
+
+`AUTO` means Ariadex may schedule and send provider input through its
+configured agent adapter and tmux session. Provider text alone never proves
+completion; configured verification must pass. `MANUAL` means Ariadex keeps
+observing and logging but sends no automatic provider input. `PAUSE` means no
+new scheduling begins and in-flight work is cancelled at the safe boundary.
+Returning to `AUTO` reconciles durable state before scheduling resumes.
+
+### Widget behavior
+
+`ariadex widget` initializes the project, prepares Tkinter when necessary,
+starts the daemon, and opens an always-on-top status window at the
+middle-right of the screen. It does not provide a chat interface or replace
+the provider terminal.
+
+The widget displays the daemon mode, next action, queue counts, verification
+or failure text, and hotkey state. Its controls are daemon requests, not
+direct tmux commands. `Play` resynchronizes and returns a paused project to
+`MANUAL`; `Yield` enters `PAUSE`; and `Stop` requests graceful daemon
+shutdown. The top-right `×` requests daemon shutdown and then exits the widget.
+
+The current widget does not expose an `AUTO`/`MANUAL` mode switch. To resume
+automatic scheduling after reconciliation, use `ariadex auto`; to stop
+automatic input while continuing observation, use `ariadex takeover`.
+
+The widget is optional. Terminal equivalents are `start`, `stop`, `status`,
+`auto`, `takeover`, `pause`, and `resume`. `install` is separate and only
+creates user-scoped launchers and login integration; it is not required for a
+one-time widget launch.
+
 ```text
 Spec -> AI Session -> Handoff -> Fresh Session -> Next Spec
 ```
@@ -295,7 +361,7 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | `init`             | Create `.ariadex/` defaults without overwriting existing files |
 | `start [--json]`   | Start the resident daemon (idempotent; refuses live leases)    |
 | `stop [--json]`    | Bounded graceful shutdown; durable state kept for `recover`    |
-| `companion [--hotkey] [--editor]` | Opt-in floating yield control (Linux X11 + Tkinter) |
+| `widget [--project PATH] [--yes]` | Initialize, prepare, start, and open the middle-right widget |
 | `install [--yes] [--no-dependency-install] [--json]` | User-scoped launchers + service integration (no root) |
 | `uninstall [--purge] [--yes] [--json]` | Remove owned integration; state kept |
 | `status [--json]`  | Daemon-mediated when healthy, otherwise local durable state    |

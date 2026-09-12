@@ -142,19 +142,31 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit stable JSON instead of human-readable text",
     )
-    companion_parser = sub.add_parser(
-        "companion",
-        help="launch the floating yield control (Linux X11 + Tkinter)",
+    widget_parser = sub.add_parser(
+        "widget",
+        aliases=["companion"],
+        help="initialize, start, and open the middle-right daemon widget",
     )
-    companion_parser.add_argument(
+    widget_parser.add_argument(
         "--hotkey",
         default=None,
         help="global hotkey for this session (default: per-user config or Ctrl+Esc)",
     )
-    companion_parser.add_argument(
+    widget_parser.add_argument(
         "--editor",
         default=None,
-        help="editor command for the companion Editor button (default: $EDITOR)",
+        help="editor command for the widget Editor button (default: $EDITOR)",
+    )
+    widget_parser.add_argument(
+        "--project",
+        type=Path,
+        default=None,
+        help="project directory (default: current directory)",
+    )
+    widget_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm installation of a missing Tkinter OS prerequisite",
     )
     install_parser = sub.add_parser(
         "install",
@@ -1270,6 +1282,48 @@ def cmd_companion(
         return EXIT_ERROR
 
 
+def cmd_widget(
+    project_dir: Path,
+    hotkey: str | None = None,
+    editor: str | None = None,
+    confirmed: bool = False,
+) -> int:
+    """Run the common init, daemon, and floating-widget workflow."""
+    if cmd_init(project_dir) != EXIT_OK:
+        return EXIT_ERROR
+    if not companion_mod.tkinter_available():
+        manager = tmux_setup_mod.detect_manager()
+        hint = deploy_mod.tkinter_manual_hint(manager)
+        if manager is None or deploy_mod.tkinter_package_for_manager(manager) is None:
+            print(
+                f"error: Tkinter is not installed and automatic installation is "
+                f"unavailable; install it manually with `{hint}`",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        if not _confirm_dependency(
+            confirmed, f"Tkinter is missing. Install `{hint}`? [y/N] "
+        ):
+            print(
+                f"error: widget unavailable until Tkinter is installed; run `{hint}` "
+                "or rerun `ariadex widget --yes`",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        dependency = deploy_mod.ensure_companion_dependencies(
+            allow_install=True,
+            confirmed=True,
+            interactive_sudo=not confirmed,
+        )
+        print(f"dependency: {dependency.detail}")
+        if dependency.state != "installed":
+            print(f"error: {dependency.detail}", file=sys.stderr)
+            return EXIT_ERROR
+    if cmd_start(project_dir) != EXIT_OK:
+        return EXIT_ERROR
+    return cmd_companion(project_dir, hotkey=hotkey, editor=editor)
+
+
 def _confirm_dependency(confirmed: bool, prompt: str) -> bool:
     """Explicit approval for OS package mutation.
 
@@ -1786,6 +1840,16 @@ def main(argv: list[str] | None = None) -> int:
             project_dir,
             hotkey=getattr(args, "hotkey", None),
             editor=getattr(args, "editor", None),
+        ),
+        "widget": lambda: cmd_widget(
+            (
+                getattr(args, "project", None).expanduser().resolve()
+                if getattr(args, "project", None) is not None
+                else project_dir
+            ),
+            hotkey=getattr(args, "hotkey", None),
+            editor=getattr(args, "editor", None),
+            confirmed=getattr(args, "yes", False),
         ),
         "install": lambda: cmd_install(
             project_dir,

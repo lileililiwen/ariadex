@@ -30,7 +30,8 @@ DEFAULT_HOTKEY = "Ctrl+Esc"
 POLL_INTERVAL_S = 2.0
 
 #: Collapsed mini-player target width in pixels.
-WIDGET_WIDTH = 280
+WIDGET_WIDTH = 360
+WIDGET_COLLAPSED_HEIGHT = 116
 
 HOTKEY_MODIFIERS = ("Ctrl", "Shift", "Alt", "Super")
 
@@ -596,7 +597,7 @@ class CompanionWindow:
     """Tkinter mini-player. All daemon mutations go through CompanionClient.
 
     Collapsed: status indicator (text + color), work label, play/pause/stop.
-    Expanded: full text status, hotkey field, reconcile/editor/session/hide/quit.
+    Expanded: full text status, hotkey field, reconcile/editor/session/quit.
     The window never grabs focus, never captures input beyond its own
     buttons, and polls on a bounded interval (refreshing after every command).
     """
@@ -629,7 +630,7 @@ class CompanionWindow:
         root.title("Ariadex")
         root.overrideredirect(True)
         root.attributes("-topmost", True)
-        root.geometry(f"{WIDGET_WIDTH}x84")
+        root.geometry(f"{WIDGET_WIDTH}x{WIDGET_COLLAPSED_HEIGHT}")
         try:
             position = self._restored_geometry(root)
         except Exception:
@@ -640,14 +641,34 @@ class CompanionWindow:
             )
         root.geometry(f"+{position[0]}+{position[1]}")
 
-        self.frame = tk.Frame(root, borderwidth=1, relief="solid", padx=8, pady=6)
+        self.frame = tk.Frame(
+            root,
+            background="#20242b",
+            borderwidth=1,
+            relief="solid",
+            padx=10,
+            pady=9,
+        )
         self.frame.pack(fill="both", expand=True)
 
-        self.titlebar = tk.Frame(self.frame)
+        self.titlebar = tk.Frame(self.frame, background="#20242b")
         self.titlebar.pack(fill="x")
-        self.dot = tk.Label(self.titlebar, text="●", width=2)
+        self.dot = tk.Label(
+            self.titlebar,
+            text="●",
+            width=2,
+            background="#20242b",
+            foreground="#7dd3a8",
+        )
         self.dot.pack(side="left")
-        self.state_label = tk.Label(self.titlebar, text="STARTING", anchor="w")
+        self.state_label = tk.Label(
+            self.titlebar,
+            text="STARTING",
+            anchor="w",
+            background="#20242b",
+            foreground="#f3f4f6",
+            font=("TkDefaultFont", 10, "bold"),
+        )
         self.state_label.pack(side="left", fill="x", expand=True)
         for widget in (self.titlebar, self.state_label):
             widget.bind("<ButtonPress-1>", self._drag_start)
@@ -662,15 +683,20 @@ class CompanionWindow:
             command=self._toggle_expanded,
         )
         self.toggle_button.pack(side="right")
-        self.hide_button = tk.Button(
+        self.close_button = tk.Button(
             self.titlebar,
-            text="-",
+            text="×",
             width=2,
-            name="hide-button",
+            name="close-button",
             takefocus=True,
-            command=self._hide,
+            background="#20242b",
+            foreground="#f3f4f6",
+            activebackground="#9b3d52",
+            activeforeground="#ffffff",
+            relief="flat",
+            command=self._on_close,
         )
-        self.hide_button.pack(side="right")
+        self.close_button.pack(side="right")
 
         self.work_label = tk.Label(
             self.frame,
@@ -678,31 +704,42 @@ class CompanionWindow:
             anchor="w",
             justify="left",
             wraplength=WIDGET_WIDTH - 20,
+            background="#20242b",
+            foreground="#c9d1d9",
         )
         self.work_label.pack(fill="x")
 
-        controls = tk.Frame(self.frame)
+        controls = tk.Frame(self.frame, background="#20242b")
         controls.pack(fill="x", pady=(4, 0))
         self.play_button = tk.Button(
             controls,
-            text="▶ Play",
+            text="Play",
             name="play-button",
+            width=8,
+            padx=6,
+            pady=5,
             takefocus=True,
             command=self._on_play,
         )
         self.play_button.pack(side="left", expand=True, fill="x")
         self.pause_button = tk.Button(
             controls,
-            text="⏸ Yield",
+            text="Yield",
             name="pause-button",
+            width=8,
+            padx=6,
+            pady=5,
             takefocus=True,
             command=self._on_pause,
         )
         self.pause_button.pack(side="left", expand=True, fill="x")
         self.stop_button = tk.Button(
             controls,
-            text="⏹ Stop",
+            text="Stop",
             name="stop-button",
+            width=8,
+            padx=6,
+            pady=5,
             takefocus=True,
             command=self._on_stop,
         )
@@ -768,7 +805,7 @@ class CompanionWindow:
         self.session_button.pack(side="left", expand=True, fill="x")
         self.quit_button = tk.Button(
             self.details,
-            text="Quit companion (daemon keeps running)",
+            text="Close Ariadex",
             name="quit-button",
             takefocus=True,
             command=self._quit,
@@ -928,7 +965,9 @@ class CompanionWindow:
         else:
             self.details.pack_forget()
             self.toggle_button.configure(text="▾")
-            self.root.geometry(f"{WIDGET_WIDTH}x84")  # type: ignore[attr-defined]
+            self.root.geometry(  # type: ignore[attr-defined]
+                f"{WIDGET_WIDTH}x{WIDGET_COLLAPSED_HEIGHT}"
+            )
 
     def _hide(self) -> None:
         # Hidden, not stopped: the daemon keeps scheduling; the hotkey stays
@@ -936,10 +975,17 @@ class CompanionWindow:
         self.root.iconify()  # type: ignore[attr-defined]
 
     def _quit(self) -> None:
-        # Quits only the companion; the daemon is untouched.
+        # Close only this Tk process; callers decide whether the daemon also
+        # needs to be stopped before invoking this cleanup path.
         self._cancel_poll()
         self.adapter.unregister()
         self.root.destroy()  # type: ignore[attr-defined]
+
+    def _on_close(self) -> None:
+        """Stop the daemon, then exit the widget process."""
+        with contextlib.suppress(CompanionError):
+            self.client.stop()
+        self._quit()
 
     # -- polling / rendering -------------------------------------------
     def _schedule_poll(self) -> None:

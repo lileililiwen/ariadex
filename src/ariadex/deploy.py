@@ -172,12 +172,17 @@ def tkinter_manual_hint(manager: str | None) -> str:
     )
 
 
-def tkinter_install_command(manager: str, package: str | None = None) -> list[str]:
+def tkinter_install_command(
+    manager: str,
+    package: str | None = None,
+    *,
+    interactive_sudo: bool = False,
+) -> list[str]:
     """Full argv to install the Tkinter package with `manager`.
 
     Mirrors the tmux prerequisite policy: non-interactive, passwordless
-    `sudo -n` only when required, never a hidden password prompt. Raises
-    DeployError for unsupported managers.
+    `sudo -n` only when required, unless `interactive_sudo` explicitly allows
+    a foreground password prompt. Raises DeployError for unsupported managers.
     """
     from . import tmux_setup as tmux_setup_mod
 
@@ -195,7 +200,7 @@ def tkinter_install_command(manager: str, package: str | None = None) -> list[st
         )
     cmd = [manager, *table[manager], package]
     if tmux_setup_mod.needs_sudo() and shutil.which("sudo") is not None:
-        cmd = ["sudo", "-n", *cmd]
+        cmd = ["sudo", *(["-n"] if not interactive_sudo else []), *cmd]
     return cmd
 
 
@@ -237,6 +242,7 @@ def ensure_companion_dependencies(
     confirmed: bool = False,
     runner=None,
     tkinter_probe=None,
+    interactive_sudo: bool = False,
 ) -> ArtifactResult:
     """Detect and optionally install the missing Tkinter OS prerequisite.
 
@@ -282,9 +288,14 @@ def ensure_companion_dependencies(
     if manager == "apt-get":
         update = ["apt-get", "update"]
         if tmux_setup_mod.needs_sudo() and shutil.which("sudo") is not None:
-            update = ["sudo", "-n", *update]
+            update = ["sudo", *(["-n"] if not interactive_sudo else []), *update]
         try:
-            proc = runner(update, capture_output=True, text=True, timeout=600)
+            proc = runner(
+                update,
+                capture_output=not interactive_sudo,
+                text=True,
+                timeout=600,
+            )
         except (OSError, subprocess.SubprocessError) as exc:
             return ArtifactResult(
                 "companion-dependencies",
@@ -301,12 +312,19 @@ def ensure_companion_dependencies(
                 f"(`{' '.join(update)}`): {detail}; run `{hint}` manually",
             )
     try:
-        cmd = tkinter_install_command(manager, package)
+        cmd = tkinter_install_command(
+            manager, package, interactive_sudo=interactive_sudo
+        )
     except DeployError as exc:
         return ArtifactResult("companion-dependencies", "manual", str(exc))
     try:
         # Fixed argv from the pinned manager table; no shell, no user input.
-        proc = runner(cmd, capture_output=True, text=True, timeout=600)
+        proc = runner(
+            cmd,
+            capture_output=not interactive_sudo,
+            text=True,
+            timeout=600,
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         return ArtifactResult(
             "companion-dependencies",

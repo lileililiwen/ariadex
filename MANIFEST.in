@@ -1,2 +1,3 @@
 include LICENSE CHANGELOG.md SECURITY.md README.md pyproject.toml
+include docs/PROJECT-GUIDE.md
 global-exclude __pycache__ *.py[cod] *.egg-info

@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 from ariadex import cli, config, state
 
@@ -56,6 +57,73 @@ class InitTest(unittest.TestCase):
         before = state.read(self.root).session_id
         run_cli(self.root, "init")
         self.assertEqual(state.read(self.root).session_id, before)
+
+
+class WidgetCommandTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.tkinter = mock.patch(
+            "ariadex.cli.companion_mod.tkinter_available", return_value=True
+        )
+        self.tkinter.start()
+        self.addCleanup(self.tkinter.stop)
+
+    def test_widget_is_listed_in_help(self):
+        code, out, _ = run_cli(self.root, "--help")
+        self.assertEqual(code, 0)
+        self.assertIn("widget", out)
+
+    def test_widget_defaults_to_current_directory(self):
+        with (
+            mock.patch("ariadex.cli.cmd_init", return_value=0) as init,
+            mock.patch("ariadex.cli.cmd_start", return_value=0) as start,
+            mock.patch("ariadex.cli.cmd_companion", return_value=0) as companion,
+        ):
+            code, _, _ = run_cli(self.root, "widget")
+        self.assertEqual(code, 0)
+        init.assert_called_once_with(self.root)
+        start.assert_called_once_with(self.root)
+        companion.assert_called_once_with(self.root, hotkey=None, editor=None)
+
+    def test_widget_accepts_optional_project_path(self):
+        project = self.root / "project"
+        with (
+            mock.patch("ariadex.cli.cmd_init", return_value=0) as init,
+            mock.patch("ariadex.cli.cmd_start", return_value=0) as start,
+            mock.patch("ariadex.cli.cmd_companion", return_value=0) as companion,
+        ):
+            code, _, _ = run_cli(self.root, "widget", "--project", str(project))
+        self.assertEqual(code, 0)
+        init.assert_called_once_with(project)
+        start.assert_called_once_with(project)
+        companion.assert_called_once_with(project, hotkey=None, editor=None)
+
+    def test_widget_stops_when_daemon_start_fails(self):
+        with (
+            mock.patch("ariadex.cli.cmd_init", return_value=0) as init,
+            mock.patch("ariadex.cli.cmd_start", return_value=1) as start,
+            mock.patch("ariadex.cli.cmd_companion", return_value=0) as companion,
+        ):
+            code, _, _ = run_cli(self.root, "widget")
+        self.assertEqual(code, 1)
+        init.assert_called_once_with(self.root)
+        start.assert_called_once_with(self.root)
+        companion.assert_not_called()
+
+    def test_widget_does_not_start_daemon_when_tkinter_is_missing(self):
+        with (
+            mock.patch("ariadex.cli.cmd_init", return_value=0) as init,
+            mock.patch("ariadex.cli.companion_mod.tkinter_available", return_value=False),
+            mock.patch("ariadex.cli.tmux_setup_mod.detect_manager", return_value=None),
+            mock.patch("ariadex.cli.cmd_start", return_value=0) as start,
+        ):
+            code, _, err = run_cli(self.root, "widget")
+        self.assertEqual(code, 1)
+        init.assert_called_once_with(self.root)
+        start.assert_not_called()
+        self.assertIn("Tkinter is not installed", err)
 
 
 class StatusTest(unittest.TestCase):
