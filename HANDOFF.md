@@ -49,11 +49,18 @@
 - Tests: `tests/test_spec_graph.py` (27 tests: metadata/absent/alias/malformed/self, linear/branching/missing/cyclic/self-cycle/completed, explicit valid/invalid selection, auto-select over directory order, all-complete idle, no-input + durable cycle/missing/incomplete blockers, no-duplicate blockers, unaffected-spec scheduling, deferred/blocked predecessors still block, verification gate still required); `tests/test_runner.py` updated (true idle is empty spec dir; eligible spec auto-selects without an explicit target).
 - Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (328 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
 - Live proof on this host: ruff check/format clean, mypy clean on 20 files, coverage 82% (gate met), `openspec validate --changes --strict --no-interactive` 2 passed before archiving, 1 passed after archiving.
-- No implementation work for the remaining post-MVP change has started; the queue below is planning-only.
+- `metrics-export-and-notifications` implemented, verified, and archived as `2026-09-12-metrics-export-and-notifications` (commit `5f3f2fe`).
+- New module `src/ariadex/observability.py`: versioned events (`EVENT_SCHEMA_VERSION = 1`, `.ariadex/events.jsonl`) for blocker/verification-failed/stale-session/completed plus export-failed/notification-failed, all redacted via `redact_with_report` before persistence; `summarize_metrics` (outcome counts, retries total/max, cycle duration min/max/avg/last, usage available/unavailable, validation results); provider-neutral sinks (`FileSink` local-only default, `CommandSink` no-shell stdin JSON, `WebhookSink` stdlib POST) with per-sink results and local failure events, never raising into scheduling; `notify_event` with dedup keys and sliding-window rate limiting over bounded persisted state (`notify_state.json`, 200-key cap); `announce` records locally always, delivers only when opt-in.
+- Config: `notifications_enabled` (default false), `notification_command`/`notification_webhook` (validated list/http(s)), `notification_rate_limit`/`notification_window_seconds` (integers >= 0) with defaults in `default_config_text`.
+- `runner.py` emits attention events after every cycle via `_announce` (best-effort, suppressed, no provider input, outcome unchanged); `cli.py` gains `events [--limit] [--json]` (read-only) and `export-events --out --max-bytes [--json]` (bounded snapshot, refuses above cap), and `recover` records a stale-session event on stale recovery; `operator.py` doctor gains a non-required `notifications` check describing opt-in state.
+- Tests: `tests/test_observability.py` (30 tests: versioned stable schema, redaction, non-attention mapping, aggregation, export failure isolation without success claims, multi-sink continuation, file round-trip, command failure, dedup/rate-limit/window-expiry, single-attempt failure records with retry on next observation, bounded state, no-sink suppression, runner blocker/completed/verification-failed/interrupted/idle events, default opt-out, failing notification never changes scheduling, config validation, CLI events/export bound).
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (358 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
+- Live proof on this host: ruff check/format clean, mypy clean on 21 files, coverage 82% (gate met), `openspec validate --changes --strict --no-interactive` 1 passed before archiving, no active changes after archiving.
+- All post-MVP changes are implemented, verified, and archived. No active changes remain.
 
 ## Next change
 
-Next is `metrics-export-and-notifications`. Select only one active change at a time with `openspec list`; remaining packages are planning-only until implementation is explicitly started.
+No active changes remain (`openspec list` is empty). All eight post-MVP changes plus the MVP sequence are implemented, verified, and archived. Do not start new work without an explicit new change.
 
 ## Feature-to-change sequence
 
