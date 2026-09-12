@@ -5,8 +5,11 @@
 - MVP COMPLETE: all five changes implemented, verified, and archived. `human-control-and-resync` archived as `2026-09-12-human-control-and-resync` (commit `13d2f01`).
 - New modules: `src/ariadex/control.py` (AUTO/MANUAL/PAUSE machine, `owns_input`/`allows_scheduling`, idempotent transitions, `resume`-only-from-PAUSE rejection), `src/ariadex/resync.py` (handoff + `git status --porcelain` + `git diff --stat` + spec + queue reconciliation; manual edits are evidence, never completion).
 - Enforcement: `run` requires AUTO (MANUAL refuses, PAUSE refuses); `Runner.run_once` mode-guards without touching the adapter; `takeover`/`pause` preserve the tmux session and write observation logs; `auto` resyncs, persists, enters AUTO, then schedules; malformed handoff refuses resync.
-- Environment blocker (unchanged): no `tmux` binary, so live-tmux test skips and scheduling stops before sending work in this environment. Live-session proof (fresh-session continuity, takeover with a real CLI) still requires a tmux host.
-- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (164 tests, 1 skip; stdlib only; runtime requires PyYAML).
+- Post-MVP: `tmux-auto-install` implemented, verified, and archived as `2026-09-12-tmux-auto-install` (commit `19ed0e9`).
+- New module `src/ariadex/tmux_setup.py`: missing tmux is installed unattended via apt-get/dnf/yum/pacman/zypper/apk/brew with `sudo -n` (fails fast, never prompts); resolved binary drives `run`/`auto`/`attach`; `--no-auto-install` opts out.
+- Live result on this host: install correctly attempted via apt-get but `sudo -n` has no passwordless rights, so it failed fast with the exact manual command (`sudo apt-get install -y tmux`). Success-path proof still needs a host with install rights.
+- Environment blocker (updated): tmux still absent here; run `--no-auto-install run` to reproduce the old stop-before-work error.
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (179 tests, 1 skip; stdlib only; runtime requires PyYAML).
 - No V2 work started, per the sequence rule.
 
 ## Next change
@@ -57,5 +60,5 @@ Incomplete or blocked work must not be claimed complete. Record the exact failed
 
 - `PYTHONPATH=src python3 -m unittest discover -s tests`: 164 tests ran, OK (1 skipped: live tmux lifecycle, `tmux` binary unavailable).
 - `openspec validate --changes --strict --no-interactive`: 1 passed, 0 failed (before archiving; archive generated `openspec/specs/human-control/spec.md` and `openspec/specs/resync/spec.md`). No active changes remain.
-- Scratch exercise: `takeover` idempotent, MANUAL `run` refused, `resume` rejected from MANUAL, `pause` -> `resume` works with session preserved, `auto` resyncs (uncommitted changes observed, next action recomputed) then stops on missing tmux.
-- MVP evidence per change is recorded in this file's history (commits `608bc22` through `13d2f01`).
+- `openspec validate --changes --strict --no-interactive`: 1 passed, 0 failed (tmux-auto-install; archived to `openspec/specs/tmux-setup/spec.md`). No active changes remain.
+- Scratch exercise: `auto` attempted `sudo -n apt-get update`, failed fast without prompting, and named the manual install; `--no-auto-install run` keeps the stop-before-work error naming the apt command.
