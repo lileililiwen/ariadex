@@ -70,7 +70,23 @@ The completed implementation audit produced six remediation changes, all archive
 
 See [HANDOFF.md](HANDOFF.md) for findings, dependencies, and verification evidence. Only one active change may be implemented at a time.
 
-## Next: deferred V2 capabilities
+## Complete: daemon-first human-supervision UX
+
+All three daemon UX changes are implemented, tested, archived, and
+committed (see `HANDOFF.md` for per-change evidence):
+
+1. `daemon-first-runtime-and-simple-cli` — resident project daemon, simple
+   lifecycle commands, local IPC, and safe restart/recovery.
+2. `human-yield-hotkey-and-floating-control` — middle-right mini-player widget,
+   configurable global yield hotkey, and daemon-mediated controls. Depends on
+   `daemon-first-runtime-and-simple-cli`.
+3. `local-install-and-user-deployment` — user-scoped install/uninstall/doctor,
+   service/autostart integration, and clean local distribution. Depends on
+   both preceding changes.
+
+The terminal workflow remains supported alongside the daemon UX.
+
+## Deferred V2 capabilities
 
 With the foundations above archived, the deferred capabilities are:
 

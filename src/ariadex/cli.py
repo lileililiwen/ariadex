@@ -18,6 +18,7 @@ from . import concurrency as concurrency_mod
 from . import config as config_mod
 from . import control as control_mod
 from . import daemon as daemon_mod
+from . import deploy as deploy_mod
 from . import handoff as handoff_mod
 from . import live_evidence as live_evidence_mod
 from . import logging as logging_mod
@@ -153,6 +154,39 @@ def build_parser() -> argparse.ArgumentParser:
         "--editor",
         default=None,
         help="editor command for the companion Editor button (default: $EDITOR)",
+    )
+    install_parser = sub.add_parser(
+        "install",
+        help="install user-scoped daemon/companion integration (no root)",
+    )
+    install_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the confirmation prompt",
+    )
+    install_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit stable JSON instead of human-readable text",
+    )
+    uninstall_parser = sub.add_parser(
+        "uninstall",
+        help="remove Ariadex-owned user integration (project state kept)",
+    )
+    uninstall_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the confirmation prompt",
+    )
+    uninstall_parser.add_argument(
+        "--purge",
+        action="store_true",
+        help="also remove the per-user companion configuration",
+    )
+    uninstall_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit stable JSON instead of human-readable text",
     )
     admin_parser = sub.add_parser(
         "admin",
@@ -1145,6 +1179,8 @@ def cmd_stop(project_dir: Path, as_json: bool = False) -> int:
 
 ADMIN_COMMANDS = (
     "companion",
+    "install",
+    "uninstall",
     "doctor",
     "preview",
     "queue",
@@ -1188,6 +1224,65 @@ def cmd_companion(
     except companion_mod.CompanionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
+
+
+def cmd_install(
+    project_dir: Path, confirmed: bool = False, as_json: bool = False
+) -> int:
+    """Install user-scoped daemon/companion integration. No root required.
+
+    Prints the plan before mutating anything; project state and config are
+    never touched. Service registration failure rolls back partial work.
+    """
+    import json as json_mod
+
+    if _load_config(project_dir) is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    for line in deploy_mod.install_plan(project_dir):
+        print(f"plan: {line}")
+    if not _confirm_scheduling(confirmed, "Install user integration? [y/N] "):
+        return EXIT_ERROR
+    try:
+        report = deploy_mod.install_project(project_dir)
+    except deploy_mod.DeployError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if as_json:
+        print(json_mod.dumps(report.to_dict(), sort_keys=True, indent=2))
+    else:
+        print(deploy_mod.format_deploy_text(report))
+        capabilities = report.capabilities
+        if capabilities is not None:
+            print(f"entry: {deploy_mod.entry_label(capabilities.entry)}")
+            print(f"provider: {capabilities.provider}")
+            print(f"tmux: {capabilities.tmux}")
+            print(f"desktop: {capabilities.desktop}")
+            print(f"hotkey: {capabilities.hotkey}")
+    return EXIT_OK
+
+
+def cmd_uninstall(
+    project_dir: Path,
+    purge: bool = False,
+    confirmed: bool = False,
+    as_json: bool = False,
+) -> int:
+    """Remove only Ariadex-owned integration. Project state is always kept."""
+    import json as json_mod
+
+    _ = project_dir  # uninstall is home-scoped; the project is untouched
+    if not _confirm_scheduling(confirmed, "Remove user integration? [y/N] "):
+        return EXIT_ERROR
+    report = deploy_mod.uninstall_project(purge_config=purge)
+    if as_json:
+        print(json_mod.dumps(report.to_dict(), sort_keys=True, indent=2))
+    else:
+        print(deploy_mod.format_deploy_text(report))
+    if any(a.state == "manual" for a in report.artifacts):
+        return EXIT_ERROR
+    return EXIT_OK
 
 
 def cmd_admin(project_dir: Path, admin_argv: list[str], no_auto_install: bool) -> int:
@@ -1590,6 +1685,17 @@ def main(argv: list[str] | None = None) -> int:
             project_dir,
             hotkey=getattr(args, "hotkey", None),
             editor=getattr(args, "editor", None),
+        ),
+        "install": lambda: cmd_install(
+            project_dir,
+            confirmed=getattr(args, "yes", False),
+            as_json=getattr(args, "json", False),
+        ),
+        "uninstall": lambda: cmd_uninstall(
+            project_dir,
+            purge=getattr(args, "purge", False),
+            confirmed=getattr(args, "yes", False),
+            as_json=getattr(args, "json", False),
         ),
         "admin": lambda: cmd_admin(
             project_dir,

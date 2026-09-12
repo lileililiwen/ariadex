@@ -320,6 +320,9 @@ def run_doctor(project_dir: Path) -> tuple[list[DoctorCheck], dict]:
                 False,
             )
         )
+    from . import deploy as deploy_mod
+
+    checks.extend(deploy_mod.deployment_checks(project_dir))
     summary = {
         "ok": all(c.ok or not c.required for c in checks),
         "checks": [c.to_dict() for c in checks],

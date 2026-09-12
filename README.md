@@ -20,10 +20,13 @@ cycle limit, takeover cancellation and scheduler coordination,
  repository identity and release readiness, release publication and
  remote verification, reproducible release and security evidence, and
   quality gate hardening (518 tests, stdlib only). `ariadex 0.1.0` is
-  published on PyPI. The first daemon UX change
-  (`daemon-first-runtime-and-simple-cli`) adds a resident project daemon
-  with simple `start`, `stop`, `status`, `pause`, and `resume` controls;
-  two daemon UX changes remain planned — see
+  published on PyPI. The three daemon UX changes
+  (`daemon-first-runtime-and-simple-cli`,
+  `human-yield-hotkey-and-floating-control`, and
+  `local-install-and-user-deployment`) add a resident project daemon
+  with simple `start`, `stop`, `status`, `pause`, and `resume` controls,
+  an opt-in floating companion with a global yield hotkey, and
+  user-scoped install/uninstall plus service integration — see
   [ROADMAP.md](ROADMAP.md) and [HANDOFF.md](HANDOFF.md).
 
 ## Requirements
@@ -77,6 +80,13 @@ Verify any installation in a scratch directory:
 ariadex --version
 mkdir /tmp/ariadex-smoke && cd /tmp/ariadex-smoke
 ariadex init
+```
+
+Opt in to user-session integration (no root) from inside a project:
+
+```bash
+ariadex install --yes    # launchers, systemd user unit, desktop autostart
+ariadex uninstall --yes  # removes only Ariadex-owned files; state kept
 ```
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and
@@ -140,6 +150,39 @@ A typical session:
 ./ariadex resume        # leave PAUSE, back to manual control
 ```
 
+## User deployment (opt-in)
+
+`ariadex install` wires the daemon and companion into your login session
+without root and without touching project state or config. It prints a
+plan first, then records everything it creates in an ownership manifest
+(`~/.local/share/ariadex/manifest.json`), so `ariadex uninstall` removes
+exactly what Ariadex owns. Repeat runs are safe: reinstalling reports
+`already`, and uninstalling twice makes the second run a successful no-op.
+`--purge` additionally removes the per-user companion configuration.
+
+What install creates on Linux with systemd user services and X11:
+
+- `~/.local/bin/ariadex-daemon` and `~/.local/bin/ariadex-companion`
+  launchers (executable, invoke the resolved `ariadex` entry point —
+  never a checkout-relative script — from the project directory).
+- `~/.config/systemd/user/ariadex-daemon.service`, enabled via
+  `systemctl --user` (starts `ariadex start` in the project on login,
+  restarts on failure).
+- `~/.config/autostart/ariadex-companion.desktop` for the companion
+  (X11 + Tkinter only).
+
+Manual fallback: without `systemctl`, install still writes the launchers
+and reports service integration as `manual` with the exact foreground
+command (`cd <project> && ariadex start`). If service registration fails
+after the launchers are written, the unit file is rolled back and the
+error names the remaining manual cleanup — the manifest keeps ownership
+for `uninstall`. Unsupported platforms stay explicit: macOS LaunchAgent
+and Windows startup integration are follow-up work, so install reports
+them as `blocked` with the foreground commands instead of pretending.
+`ariadex doctor` reports `package`, `launchers`, `ipc` (socket presence
+and owner-only permissions), and `service` readiness independently;
+missing prerequisites are never presented as ready.
+
 ## How it works
 
 ```text
@@ -180,13 +223,16 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | `start [--json]`   | Start the resident daemon (idempotent; refuses live leases)    |
 | `stop [--json]`    | Bounded graceful shutdown; durable state kept for `recover`    |
 | `companion [--hotkey] [--editor]` | Opt-in floating yield control (Linux X11 + Tkinter) |
+| `install [--yes] [--json]` | User-scoped launchers + service integration (no root) |
+| `uninstall [--purge] [--yes] [--json]` | Remove owned integration; state kept |
 | `status [--json]`  | Daemon-mediated when healthy, otherwise local durable state    |
 | `pause [--json]`   | Daemon-mediated when healthy; no new scheduling, safe cancel   |
 | `resume [--json]`  | Daemon-mediated when healthy; resync, back to manual control   |
-| `admin <command>`  | Advanced namespace: `companion doctor preview queue history`   |
-|                    | `resolve defer reopen reprioritize recover prune-logs`         |
-|                    | `export-logs events export-events evidence preflight run auto` |
-|                    | `attach takeover status pause resume` (top-level aliases stay) |
+| `admin <command>`  | Advanced namespace: `companion install uninstall doctor`       |
+|                    | `preview queue history resolve defer reopen reprioritize`      |
+|                    | `recover prune-logs export-logs events export-events evidence` |
+|                    | `preflight run auto attach takeover status pause resume`       |
+|                    | (top-level aliases stay)                                       |
 | `run [--yes] [--preview]` | Execute the next action from durable state (needs `AUTO`) |
 | `auto [--yes] [--preview]` | Resync, enter `AUTO`, and resume scheduling            |
 | `attach`           | Attach your terminal to the live tmux Coding CLI session       |
@@ -251,7 +297,7 @@ instead of silently substituting another spec.
 ```bash
 pip install -e ".[dev]"                              # pinned QA toolchain
 ariadex preflight                                    # paths/versions: python, package, pip-audit, build, providers, tmux
-python -m unittest discover -s tests                 # 620 tests, stdlib only
+python -m unittest discover -s tests                 # 649 tests, stdlib only
 openspec validate --changes --strict --no-interactive
 ruff check src tests
 ruff format --check src tests
