@@ -63,6 +63,21 @@ lives in exactly one place: `src/ariadex/__init__.py` (`__version__`), and
 
 ## Release guidance
 
+Version invariants (tag, package, artifacts, and PyPI must all agree):
+
+- Single source of truth: `__version__` in `src/ariadex/__init__.py` only.
+- A release tag MUST be exactly `ariadex-v<version>`.
+- Built artifacts MUST carry the same version in their file names and in
+  their embedded metadata (wheel `METADATA`, sdist `PKG-INFO`).
+- The PyPI index MUST serve exactly the tagged version after publication.
+- Versions are immutable: an already-published version MUST NOT be
+  overwritten or republished. If publication succeeds but index
+  verification fails, the release is incomplete — record the exact tag,
+  package version, and remediation in `HANDOFF.md`; yank the broken
+  release on PyPI if needed, then bump and tag a new version.
+
+Maintainer sequence:
+
 1. Bump `__version__` in `src/ariadex/__init__.py` only.
 2. Add a `CHANGELOG.md` entry under a new version heading.
 3. Build: `python3 -m build` (produces `dist/ariadex-<version>.tar.gz`
@@ -74,7 +89,15 @@ lives in exactly one place: `src/ariadex/__init__.py` (`__version__`), and
 6. Dry run (publishes nothing, must pass):
    `python -m ariadex.release --tag ariadex-v<version>` checks the
    canonical `origin` remote, package identity URLs, tag/version
-   alignment, artifacts, and the security-reporting route. Pushing the
+   alignment, artifact presence and embedded metadata versions, and the
+   security-reporting route. Add `--check-pypi` (as the release workflow
+   does) to also reject an already-published version. Pushing the
    tag runs the release workflow, which re-verifies every gate and then
-   publishes to PyPI via scoped trusted publishing followed by a
-   clean-index install check (`--version`, `init`, `status`).
+   publishes to PyPI via scoped trusted publishing, verifies the exact
+   version from a clean-index install (`--version` compared against the
+   tag, plus `init`/`status`), and records tag, package version,
+   artifact hashes, and the verified PyPI version in the run summary.
+
+Rollback: yank the release on PyPI and delete the tag and GitHub
+release; never force-push `main`, never republish under the same
+version.

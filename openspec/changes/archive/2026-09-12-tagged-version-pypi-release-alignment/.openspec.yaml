@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+depends_on:
+  - release-publication-and-remote-verification

@@ -126,6 +126,30 @@ class WorkflowStructureTest(unittest.TestCase):
             "no release job has environment protection",
         )
 
+    def test_release_triggers_only_on_version_tags(self):
+        release = self.workflows["release.yml"]
+        triggers = triggers_of(release)
+        push = triggers.get("push", {})
+        self.assertEqual(
+            push.get("tags"),
+            ["ariadex-v*"],
+            "release must trigger only on `ariadex-v*` tags",
+        )
+        self.assertNotIn("branches", push, "branch pushes must never publish")
+
+    def test_ci_never_publishes(self):
+        ci = self.workflows["ci.yml"]
+        for job in ci.get("jobs", {}).values():
+            for step in job.get("steps", []) or []:
+                uses = step.get("uses", "")
+                run = str(step.get("run", ""))
+                self.assertNotIn(
+                    "pypa/gh-action-pypi-publish",
+                    uses,
+                    "CI must never publish to PyPI",
+                )
+                self.assertNotIn("twine upload", run, "CI must never upload")
+
 
 class ActionPinningTest(unittest.TestCase):
     @classmethod

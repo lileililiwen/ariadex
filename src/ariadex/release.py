@@ -1,11 +1,24 @@
 """Release-readiness dry run: fail-closed checks, no publishing.
 
+Version invariants (tag, package, artifacts, PyPI must all agree):
+
+- The single source of truth is `ariadex.__version__`.
+- A release tag MUST be exactly `ariadex-v<package version>`.
+- Built artifacts MUST carry the same version in their file names and in
+  their embedded metadata (wheel `METADATA`, sdist `PKG-INFO`).
+- The PyPI index MUST serve exactly the tagged version after publication;
+  a different resolved version means the release is incomplete.
+- Versions are immutable: an already-published version MUST NOT be
+  overwritten. Remediation is a new version plus a new tag, never a
+  republish under the same version.
+
 Verifies that published metadata identifies Ariadex-owned resources, the
 canonical `origin` remote is configured, the release tag matches the
-single-source package version, build artifacts exist with recorded hashes,
-and the security-reporting route resolves to the canonical tracker. Never
-uploads anything; PyPI publication happens only in the tag-triggered
-release workflow via scoped trusted publishing after every gate passes.
+single-source package version, build artifacts exist with recorded hashes
+and matching embedded metadata, and the security-reporting route resolves
+to the canonical tracker. Never uploads anything; PyPI publication happens
+only in the tag-triggered release workflow via scoped trusted publishing
+after every gate passes.
 """
 
 from __future__ import annotations
@@ -13,9 +26,11 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import hashlib
+import json
 import re
 import subprocess
 import tomllib
+import urllib.request
 from pathlib import Path
 
 CANONICAL_REPO_URL = "https://github.com/lileililiwen/ariadex"
@@ -26,6 +41,12 @@ CANONICAL_SSH_PREFIXES = (
 )
 FOREIGN_MARKERS = ("anomalyco/opencode", "github.com/anomalyco")
 REQUIRED_URL_KEYS = ("Homepage", "Security", "Changelog")
+
+#: Canonical release tag prefix: a release tag is `ariadex-v<version>`.
+TAG_PREFIX = "ariadex-v"
+
+#: PyPI JSON endpoint listing published versions (network access required).
+PYPI_JSON_URL = "https://pypi.org/pypi/ariadex/json"
 
 
 @dataclasses.dataclass
@@ -104,9 +125,16 @@ def check_security_route(security_text: str) -> CheckResult:
     )
 
 
+def version_from_tag(tag: str) -> str | None:
+    """Version named by a canonical tag, or None for a non-release tag."""
+    if tag.startswith(TAG_PREFIX) and len(tag) > len(TAG_PREFIX):
+        return tag[len(TAG_PREFIX) :]
+    return None
+
+
 def check_version_tag(version: str, tag: str) -> CheckResult:
     """Release tag must equal `ariadex-v<package version>`."""
-    expected = f"ariadex-v{version}"
+    expected = f"{TAG_PREFIX}{version}"
     if not tag:
         return CheckResult(
             "version-tag",
@@ -137,6 +165,187 @@ def check_artifacts(dist_dir: Path | str, version: str) -> CheckResult:
         digest = hashlib.sha256((dist / name).read_bytes()).hexdigest()
         hashes.append(f"{name} sha256:{digest[:16]}...")
     return CheckResult("artifacts", True, "; ".join(hashes))
+
+
+def artifact_filenames(version: str) -> tuple[str, str]:
+    """Expected sdist and wheel file names for `version`."""
+    return (
+        f"ariadex-{version}.tar.gz",
+        f"ariadex-{version}-py3-none-any.whl",
+    )
+
+
+def read_metadata_version(path: Path) -> str | None:
+    """Version from embedded build metadata, or None when unreadable.
+
+    Wheels carry it in `<dist-info>/METADATA`; sdists in `<pkg>/PKG-INFO`.
+    A mismatch between this value and the package version means the
+    artifacts were built from a different tree than the tagged commit.
+    """
+    import tarfile
+    import zipfile
+
+    try:
+        if path.suffix == ".whl":
+            with zipfile.ZipFile(path) as archive:
+                candidates = [
+                    name
+                    for name in archive.namelist()
+                    if name.endswith(".dist-info/METADATA")
+                ]
+                if not candidates:
+                    return None
+                text = archive.read(sorted(candidates)[0]).decode(
+                    "utf-8", errors="replace"
+                )
+        else:
+            with tarfile.open(path, "r:gz") as archive:
+                candidates = [
+                    name for name in archive.getnames() if name.endswith("/PKG-INFO")
+                ]
+                if not candidates:
+                    return None
+                extracted = archive.extractfile(sorted(candidates)[0])
+                if extracted is None:
+                    return None
+                text = extracted.read().decode("utf-8", errors="replace")
+    except (OSError, ValueError, EOFError, tarfile.TarError, zipfile.BadZipFile):
+        return None
+    match = re.search(r"(?m)^Version:\s*(\S+)\s*$", text)
+    return match.group(1) if match else None
+
+
+def check_artifact_metadata(dist_dir: Path | str, version: str) -> CheckResult:
+    """Embedded artifact metadata must name the release `version`.
+
+    File names alone cannot prove the build matches the tagged commit; the
+    wheel `METADATA` and sdist `PKG-INFO` versions must agree too. Runs
+    before publication: any mismatch fails the release.
+    """
+    dist = Path(dist_dir)
+    names = artifact_filenames(version)
+    missing = [name for name in names if not (dist / name).is_file()]
+    if missing:
+        return CheckResult(
+            "artifact-metadata",
+            False,
+            f"missing in {dist}: {missing}; run `python -m build`",
+        )
+    problems = []
+    matched = []
+    for name in names:
+        found = read_metadata_version(dist / name)
+        if found is None:
+            problems.append(f"`{name}` carries no readable version metadata")
+        elif found != version:
+            problems.append(
+                f"`{name}` metadata version `{found}` differs from `{version}`; "
+                "rebuild from the tagged commit"
+            )
+        else:
+            matched.append(f"`{name}`={found}")
+    if problems:
+        return CheckResult("artifact-metadata", False, "; ".join(problems))
+    return CheckResult(
+        "artifact-metadata", True, f"embedded versions agree: {'; '.join(matched)}"
+    )
+
+
+def fetch_pypi_payload(timeout_s: int = 30) -> str:
+    """Raw PyPI JSON payload for this project (network; raises on failure)."""
+    request = urllib.request.Request(
+        PYPI_JSON_URL, headers={"Accept": "application/json"}
+    )
+    with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310
+        return response.read().decode("utf-8", errors="replace")
+
+
+def published_versions(payload: str) -> set[str]:
+    """Version strings named by a PyPI JSON payload (raises ValueError)."""
+    try:
+        data = json.loads(payload)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"PyPI response is not JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("PyPI response names no `releases` mapping")
+    releases = data.get("releases")
+    if not isinstance(releases, dict):
+        raise ValueError("PyPI response names no `releases` mapping")
+    return {str(item) for item in releases}
+
+
+def check_version_not_published(
+    version: str,
+    payload: str | None = None,
+    fetcher=fetch_pypi_payload,
+) -> CheckResult:
+    """Release `version` must not already exist on PyPI (immutable versions).
+
+    Pass an explicit `payload` to check without network access. A network
+    failure fails closed: an unverified duplicate must never publish.
+    Remediation is a new version plus a new tag, never an overwrite.
+    """
+    if payload is None:
+        try:
+            payload = fetcher()
+        except Exception as exc:
+            return CheckResult(
+                "version-unused",
+                False,
+                f"could not query {PYPI_JSON_URL} ({exc}); rerun online; "
+                "an already-published version must never be overwritten",
+            )
+    try:
+        used = published_versions(payload)
+    except ValueError as exc:
+        return CheckResult("version-unused", False, str(exc))
+    if version in used:
+        return CheckResult(
+            "version-unused",
+            False,
+            f"version `{version}` is already published on PyPI; bump "
+            "`__version__`, add a CHANGELOG entry, and tag a new version; "
+            "never overwrite or republish under the same version",
+        )
+    return CheckResult(
+        "version-unused", True, f"version `{version}` is not on PyPI yet"
+    )
+
+
+def parse_reported_version(output: str) -> str | None:
+    """Version from `ariadex --version` output (`ariadex X.Y.Z`)."""
+    match = re.search(r"(?m)^ariadex\s+(\S+)\s*$", output.strip())
+    return match.group(1) if match else None
+
+
+def check_published_version(reported_output: str, version: str) -> CheckResult:
+    """The PyPI index must resolve exactly the release `version`.
+
+    A different resolved version means the release is incomplete: report it
+    with the exact tag and remediation instead of silently republishing.
+    """
+    reported = parse_reported_version(reported_output)
+    if reported is None:
+        return CheckResult(
+            "published-version",
+            False,
+            f"could not parse a version from `{reported_output.strip()[:80]}`; "
+            f"expected `ariadex {version}` from the PyPI index",
+        )
+    if reported != version:
+        return CheckResult(
+            "published-version",
+            False,
+            f"incomplete release: PyPI resolved `ariadex {reported}`, expected "
+            f"`ariadex {version}`; do not overwrite or republish under the "
+            "same version — yank the broken release on PyPI if needed, then "
+            "bump `__version__` and tag a new version",
+        )
+    return CheckResult(
+        "published-version",
+        True,
+        f"PyPI index serves `ariadex {version}` as released",
+    )
 
 
 def normalize_remote_url(remote_url: str) -> str:
@@ -214,11 +423,16 @@ def dry_run(
     tag: str,
     dist: str = "dist",
     remote_url: str | None = None,
+    check_pypi: bool = False,
+    pypi_payload: str | None = None,
 ) -> list[CheckResult]:
     """Run every readiness check against a project root (no publishing).
 
     `remote_url=None` resolves `origin` via git in `root`; pass an explicit
-    URL (or `""`) to check a value without touching git.
+    URL (or `""`) to check a value without touching git. `check_pypi=True`
+    additionally rejects an already-published version via the PyPI index
+    (needs network unless `pypi_payload` is supplied); local runs stay
+    offline by default while the release workflow always checks.
     """
     from . import __version__
 
@@ -248,6 +462,9 @@ def dry_run(
         results.append(check_security_route(security_text))
     results.append(check_version_tag(__version__, tag))
     results.append(check_artifacts(base / dist, __version__))
+    results.append(check_artifact_metadata(base / dist, __version__))
+    if check_pypi or pypi_payload is not None:
+        results.append(check_version_not_published(__version__, pypi_payload))
     if remote_url is None:
         remote_url = resolve_origin_remote(base)
     results.append(check_canonical_remote(remote_url))
@@ -278,8 +495,33 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="explicit `origin` URL to check (default: resolve via git)",
     )
+    parser.add_argument(
+        "--check-pypi",
+        action="store_true",
+        help="reject an already-published version via the PyPI index",
+    )
+    parser.add_argument(
+        "--verify-published",
+        default=None,
+        metavar="OUTPUT",
+        help="`ariadex --version` output from a fresh PyPI install, "
+        "checked against --tag (post-publish verification only)",
+    )
     args = parser.parse_args(argv)
-    results = dry_run(args.root, args.tag, args.dist, args.remote_url)
+    if args.verify_published is not None:
+        expected = version_from_tag(args.tag)
+        if expected is None:
+            result = CheckResult(
+                "published-version",
+                False,
+                f"tag `{args.tag}` is not `{TAG_PREFIX}<version>`; "
+                "verify the tagged release instead",
+            )
+        else:
+            result = check_published_version(args.verify_published, expected)
+        print(format_report([result]))
+        return 0 if result.ok else 1
+    results = dry_run(args.root, args.tag, args.dist, args.remote_url, args.check_pypi)
     print(format_report(results))
     return 0 if all(r.ok for r in results) else 1
 

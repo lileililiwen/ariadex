@@ -1,7 +1,10 @@
 # companion-dependencies Specification
 
 ## Purpose
-TBD - created by archiving change companion-prerequisite-auto-install. Update Purpose after archive.
+
+Ensure the one-command installation flow can prepare and verify the desktop
+companion prerequisites instead of delegating discovery to the user.
+
 ## Requirements
 ### Requirement: Detect missing companion prerequisites
 
