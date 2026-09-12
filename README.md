@@ -19,7 +19,7 @@ cycle limit, takeover cancellation and scheduler coordination,
  canonical spec and doc governance, real-provider live validation,
  repository identity and release readiness, release publication and
  remote verification, reproducible release and security evidence, and
-  quality gate hardening (702 tests, stdlib only). `ariadex 0.1.0` is
+  quality gate hardening (709 tests, stdlib only). `ariadex 0.1.0` is
   published on PyPI. The three daemon UX changes
   (`daemon-first-runtime-and-simple-cli`,
   `human-yield-hotkey-and-floating-control`, and
@@ -78,6 +78,61 @@ From a source checkout (no install; uses `./ariadex` wrapper):
 git clone https://github.com/lileililiwen/ariadex.git && cd ariadex
 ./ariadex --help
 ```
+
+### Local development install
+
+The recommended local development setup uses the committed `uv.lock`.
+`uv` is a user-scoped development prerequisite; it is not installed into
+system Python and is not required by normal Ariadex runtime users.
+
+From the repository root, run:
+
+```bash
+git clone https://github.com/lileililiwen/ariadex.git
+cd ariadex
+
+# Detect uv, ask before installing it user-scoped if missing, then create
+# the locked development environment with pip-audit, ruff, mypy, coverage,
+# build, and pinned type stubs.
+./ariadex dev setup
+
+# Use this in a non-interactive terminal or CI-like setup:
+./ariadex dev setup --yes
+```
+
+The command is safe to repeat. It performs `uv sync --frozen --extra dev`
+and verifies `pip-audit` through the resulting environment. To prohibit all
+dependency installation and receive a manual recovery instruction, use:
+
+```bash
+./ariadex dev setup --no-dependency-install
+```
+
+After setup, run project tools through `uv run` so they use the locked
+environment instead of an unrelated global interpreter:
+
+```bash
+uv run python -m unittest discover -s tests
+openspec validate --changes --strict --no-interactive
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run mypy src/ariadex
+uv run coverage run -m unittest discover -s tests
+uv run coverage report
+uv run python scripts/check_coverage.py
+uv run pip-audit --desc=on .
+uv run python -m build
+```
+
+OpenSpec is a Node CLI and is not part of Ariadex's Python development
+extra. Install it once if it is not already available:
+
+```bash
+npm install -g @fission-ai/openspec@1.6.0
+```
+
+The security audit needs network access to query its vulnerability service.
+Without network access, an unavailable audit is not a clean result.
 
 Verify any installation in a scratch directory:
 
@@ -313,17 +368,16 @@ instead of silently substituting another spec.
 ## Development
 
 ```bash
-ariadex dev setup                                    # install uv and sync the locked QA toolchain
-uv sync --extra dev                                  # equivalent after uv is available
-ariadex preflight                                    # paths/versions: python, package, pip-audit, build, providers, tmux
-python -m unittest discover -s tests                 # 702 tests, stdlib only
-openspec validate --changes --strict --no-interactive
-ruff check src tests
-ruff format --check src tests
-mypy src/ariadex
-coverage run -m unittest discover -s tests && coverage report  # gate: 82%
+./ariadex dev setup                                  # bootstrap the locked QA toolchain
+uv run ariadex preflight                             # package, pip-audit, build, providers, tmux
+uv run python -m unittest discover -s tests           # 709 tests, stdlib only
+uv run openspec validate --changes --strict --no-interactive
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run mypy src/ariadex
+uv run coverage run -m unittest discover -s tests && uv run coverage report  # gate: 82%
 uv run pip-audit --desc=on .
-python -m build                                      # sdist + wheel in dist/
+uv run python -m build                               # sdist + wheel in dist/
 ```
 
 Every CI command above runs locally with the committed `uv.lock` and pinned
@@ -342,9 +396,9 @@ requirements, `pip-audit` queries the vulnerability database,
 instead of downloading:
 
 ```bash
-ariadex dev setup                         # once, while online (warms uv cache)
-python -m build --no-isolation           # offline build; needs `build` + backends already installed
-ariadex evidence --tmux-bin PATH         # offline tmux evidence with a supplied binary
+./ariadex dev setup --yes                 # once, while online (warms uv cache)
+uv run python -m build --no-isolation     # offline build; needs cached build + backends
+uv run ariadex evidence --tmux-bin PATH   # offline tmux evidence with a supplied binary
 ```
 
 Limitations of the offline path: `--no-isolation` trusts the ambient
