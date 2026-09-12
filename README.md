@@ -6,9 +6,14 @@ Ariadex keeps Coding CLI work moving across fresh contexts without losing unfini
 
 ## Status
 
-MVP is implemented and tested: project foundation and CLI, agent adapters
-and tmux driver, state-driven runner and handoff, verification/logging/
-observability, human control and resync, plus unattended tmux installation.
+MVP plus all eight post-MVP changes are implemented, tested, archived,
+and committed: project foundation and CLI, agent adapters and tmux
+driver, state-driven runner and handoff, verification/logging/
+observability, human control and resync, unattended tmux installation,
+live runtime evidence, packaging and distribution, CI/quality/security
+gates, human supervision ergonomics, single-runner concurrency and
+recovery, log data governance, spec dependency and execution governance,
+and metrics export and notifications (358 tests, stdlib only).
 See [ROADMAP.md](ROADMAP.md) and [HANDOFF.md](HANDOFF.md).
 
 ## Requirements
@@ -106,6 +111,12 @@ durable state:
 - `.ariadex/runs/` and `.ariadex/metrics.jsonl` — per-cycle logs and
   metrics. Unavailable token usage is recorded as `usage: unavailable`,
   never estimated.
+- `.ariadex/events.jsonl` — versioned attention events (blocker,
+  verification failure, stale session, verified completion) plus
+  aggregate summaries via `ariadex events` and snapshots via
+  `ariadex export-events`. Notifications are opt-in, redacted,
+  deduplicated, and rate-limited; delivery failure is recorded locally
+  and never changes scheduling.
 
 Modes define input ownership: in `AUTO` Ariadex may schedule and send
 input; in `MANUAL` it only observes and logs; in `PAUSE` it starts no new
@@ -118,13 +129,27 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | Command            | Effect                                                        |
 | ------------------ | ------------------------------------------------------------- |
 | `init`             | Create `.ariadex/` defaults without overwriting existing files |
-| `run`              | Execute the next action from durable state (needs `AUTO`)      |
+| `run [--yes] [--preview]` | Execute the next action from durable state (needs `AUTO`) |
+| `auto [--yes] [--preview]` | Resync, enter `AUTO`, and resume scheduling             |
 | `attach`           | Attach your terminal to the live tmux Coding CLI session       |
-| `status`           | Show mode, agent, spec, session, context, elapsed, tests, next |
+| `status [--json]`  | Show mode, agent, spec, session, context, elapsed, tests, next |
+| `doctor [--json]`  | Preflight config, provider, tmux, specs, verification, lock    |
+| `preview [--json]` | Show the exact next action and gate; sends no input            |
+| `queue [--status] [--json]` | List unresolved items and history counts            |
+| `history <id> [--json]` | Show an item and its transitions                       |
+| `resolve <id>`     | Mark an item RESOLVED (keeps history)                          |
+| `defer <id> --to --reason` | Mark an item DEFERRED with target and reason         |
+| `reopen <id>`      | Return an item to OPEN (keeps history)                         |
+| `reprioritize <id> --priority` | Change an item priority (keeps history)          |
+| `recover [--json]` | Reconcile state, handoff, lock, and tmux after interruption    |
+| `prune-logs [--yes] [--json]` | Enforce retention/size bounds on telemetry       |
+| `export-logs --out [--json]` | Copy telemetry (`runs/` + `metrics.jsonl`)      |
+| `events [--limit] [--json]` | Show aggregate summary and recent attention events |
+| `export-events --out [--json]` | Write the versioned export snapshot to a file  |
+| `evidence [--gate]`| Run opt-in live runtime evidence (passed/skipped/blocked)      |
 | `pause`            | Enter `PAUSE`; the CLI session keeps running                   |
 | `resume`           | Leave `PAUSE` (valid only from `PAUSE`)                        |
 | `takeover`         | Enter `MANUAL`; automatic input stops, logs continue           |
-| `auto`             | Resync, enter `AUTO`, and resume scheduling                    |
 | `--no-auto-install`| Never install tmux automatically; stop if it is missing        |
 
 ## Configuration
@@ -139,16 +164,35 @@ reset_mode: auto              # soft | hard | auto (fresh-session strength)
 verification_commands: []     # shell commands that gate completion
 retry_limit: 2                # bounded verification retries
 blocker_policy: stop-on-blocker  # stop-on-blocker | record-and-continue
+log_retention_days: 30        # telemetry age bound in days (0 keeps everything)
+log_max_bytes: 10485760       # run-log size cap in bytes
+metrics_max_bytes: 5242880    # metrics file cap in bytes (0 disables that cap)
+notifications_enabled: false  # opt-in attention signals (blocker, failure, stale, done)
+notification_command: []      # argv receiving the redacted payload JSON on stdin
+notification_webhook: ""      # http(s) URL receiving the payload, or empty
+notification_rate_limit: 5    # max deliveries per attention key per window
+notification_window_seconds: 3600  # deduplication/rate-limit window
 ```
 
 Add your test/build commands to `verification_commands`; the runner
 executes them in order after adapter work and advances only on full pass.
 
+Order specs with optional per-change metadata
+(`openspec/changes/<name>/.openspec.yaml`):
+
+```yaml
+depends_on: [predecessor-change]  # must be verified complete first
+```
+
+The runner validates dependencies, rejects cycles, selects only eligible
+specs, and preserves missing/cyclic/blocked reasons as unresolved work
+instead of silently substituting another spec.
+
 ## Development
 
 ```bash
 pip install -e ".[dev]"                              # pinned QA toolchain
-python -m unittest discover -s tests                 # 221 tests, stdlib only
+python -m unittest discover -s tests                 # 358 tests, stdlib only
 openspec validate --changes --strict --no-interactive
 ruff check src tests
 ruff format --check src tests
@@ -173,5 +217,9 @@ runtime state and verification evidence.
 
 Ariadex is an orchestration and lifecycle layer. It does not become an IDE,
 edit code itself, call provider LLM APIs, or reimplement OpenCode, Codex,
-Claude Code, or other Coding CLIs. PTY, additional providers, dependency
-DAGs, token statistics, crash recovery, and remote monitoring are V2 scope.
+Claude Code, or other Coding CLIs. Still deferred: native PTY driver,
+additional providers, token and cost statistics, advanced retry strategies
+and idle detection, and remote monitoring beyond the provider-neutral
+export boundary. Shipped within the boundary: spec dependency governance,
+single-scheduler crash recovery, log retention/redaction/export, and
+versioned metrics with opt-in notifications.

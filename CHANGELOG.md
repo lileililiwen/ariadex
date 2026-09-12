@@ -32,6 +32,18 @@ lives in exactly one place: `src/ariadex/__init__.py` (`__version__`), and
   `tmux-auto-install`, `live-runtime-evidence` (see `HANDOFF.md` and
   `openspec/specs/`).
 
+## [Unreleased post-MVP foundations]
+
+- `packaging-and-distribution`, `ci-quality-security-gates`,
+  `human-supervision-ergonomics`, `single-runner-concurrency-and-recovery`,
+  `log-data-governance`, `spec-dependency-and-execution-governance`,
+  `metrics-export-and-notifications` (see `HANDOFF.md` and
+  `openspec/specs/`). Notable surface: `doctor`, `preview`, `queue`,
+  `history`, `resolve`/`defer`/`reopen`/`reprioritize`, `recover`,
+  `prune-logs`, `export-logs`, `events`, `export-events`, per-change
+  `depends_on` ordering, single-scheduler lease with crash recovery,
+  telemetry retention/redaction, and opt-in redacted notifications.
+
 ## Release guidance
 
 1. Bump `__version__` in `src/ariadex/__init__.py` only.
