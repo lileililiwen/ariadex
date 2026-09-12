@@ -17,6 +17,7 @@ from . import control as control_mod
 from . import handoff as handoff_mod
 from . import live_evidence as live_evidence_mod
 from . import logging as logging_mod
+from . import operator as operator_mod
 from . import providers as providers_mod
 from . import resync as resync_mod
 from . import runner as runner_mod
@@ -78,19 +79,105 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init", help="create .ariadex/ defaults without overwriting files")
-    sub.add_parser("run", help="start execution after validating prerequisites")
+    run_parser = sub.add_parser(
+        "run", help="start execution after validating prerequisites"
+    )
+    run_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="confirm scheduling without prompting (non-interactive use)",
+    )
+    run_parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="show the exact next action and gate, then exit without input",
+    )
     sub.add_parser("attach", help="attach to the active terminal session")
-    sub.add_parser("status", help="report persisted mode, session, and work")
+    status_parser = sub.add_parser(
+        "status", help="report persisted mode, session, and work"
+    )
+    status_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit stable JSON instead of human-readable text",
+    )
     sub.add_parser("pause", help="enter PAUSE: no new scheduling operations")
     sub.add_parser("resume", help="leave PAUSE and return to manual control")
     sub.add_parser(
         "takeover",
         help="take manual control: automatic input disabled, observation continues",
     )
-    sub.add_parser(
+    auto_parser = sub.add_parser(
         "auto",
         help="resynchronize from handoff and specs, then resume scheduling",
     )
+    auto_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="confirm scheduling without prompting (non-interactive use)",
+    )
+    auto_parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="resynchronize, show the exact next action and gate, no input",
+    )
+    doctor_parser = sub.add_parser(
+        "doctor", help="preflight config, provider, tmux, specs, verification"
+    )
+    doctor_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
+    preview_parser = sub.add_parser(
+        "preview", help="show the exact next action and gate; sends no input"
+    )
+    preview_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
+    queue_parser = sub.add_parser(
+        "queue", help="list unresolved items and history counts"
+    )
+    queue_parser.add_argument(
+        "--status",
+        default=None,
+        help="filter by OPEN, RESOLVED, DEFERRED, or BLOCKED",
+    )
+    queue_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
+    history_parser = sub.add_parser("history", help="show an item and its transitions")
+    history_parser.add_argument("item_id", help="unresolved item id (e.g. u-1a2b3c4d)")
+    history_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
+    resolve_parser = sub.add_parser(
+        "resolve", help="mark an item RESOLVED (keeps history)"
+    )
+    resolve_parser.add_argument("item_id", help="unresolved item id")
+    resolve_parser.add_argument("--note", default="", help="decision note for history")
+    defer_parser = sub.add_parser(
+        "defer", help="mark an item DEFERRED with target+reason"
+    )
+    defer_parser.add_argument("item_id", help="unresolved item id")
+    defer_parser.add_argument(
+        "--to", required=True, help="target spec for the deferral"
+    )
+    defer_parser.add_argument("--reason", required=True, help="reason for the deferral")
+    defer_parser.add_argument("--note", default="", help="decision note for history")
+    reopen_parser = sub.add_parser(
+        "reopen", help="return an item to OPEN (keeps history)"
+    )
+    reopen_parser.add_argument("item_id", help="unresolved item id")
+    reopen_parser.add_argument("--note", default="", help="decision note for history")
+    reprioritize_parser = sub.add_parser(
+        "reprioritize", help="change an item priority (keeps history)"
+    )
+    reprioritize_parser.add_argument("item_id", help="unresolved item id")
+    reprioritize_parser.add_argument(
+        "--priority", required=True, help="high, medium, or low"
+    )
+    reprioritize_parser.add_argument("--note", default="", help="decision note")
     evidence = sub.add_parser(
         "evidence",
         help="run opt-in live runtime evidence (passed/skipped/blocked)",
@@ -190,7 +277,7 @@ def _load_state(project_dir: Path) -> state_mod.State | None:
         return None
 
 
-def cmd_status(project_dir: Path) -> int:
+def cmd_status(project_dir: Path, as_json: bool = False) -> int:
     cfg = _load_config(project_dir)
     if cfg is None:
         return EXIT_ERROR
@@ -207,6 +294,28 @@ def cmd_status(project_dir: Path) -> int:
     )
     blocked = [item for item in handoff.unresolved if item.status == "BLOCKED"]
     opened = sum(1 for item in handoff.unresolved if item.status == "OPEN")
+    tests = status_mod.tests_summary(records[-1] if records else None)
+    if as_json:
+        import json as json_mod
+
+        payload = {
+            "mode": st.mode,
+            "agent": f"{cfg.agent_provider} (terminal: {cfg.terminal_driver})",
+            "provider": cfg.agent_provider,
+            "terminal": cfg.terminal_driver,
+            "spec": st.current_spec or handoff.current_spec,
+            "session": st.session_id,
+            "context_strategy": cfg.context_strategy,
+            "elapsed": status_mod.elapsed_since(st.updated_at),
+            "open_count": opened,
+            "blocked_count": len(blocked),
+            "tests": tests,
+            "next_action": handoff.next_action,
+        }
+        print(json_mod.dumps(payload, sort_keys=True, indent=2))
+        for item in blocked:
+            print(f"blocker {item.id}: {item.description}")
+        return EXIT_OK
     print(
         status_mod.render_status(
             mode=st.mode,
@@ -217,13 +326,175 @@ def cmd_status(project_dir: Path) -> int:
             elapsed=status_mod.elapsed_since(st.updated_at),
             open_count=opened,
             blocked_count=len(blocked),
-            tests=status_mod.tests_summary(records[-1] if records else None),
+            tests=tests,
             next_action=handoff.next_action,
         )
     )
     for item in blocked:
         print(f"blocker {item.id}: {item.description}")
     return EXIT_OK
+
+
+def cmd_doctor(project_dir: Path, as_json: bool = False) -> int:
+    import json as json_mod
+
+    checks, summary = operator_mod.run_doctor(project_dir)
+    if as_json:
+        print(json_mod.dumps(summary, sort_keys=True, indent=2))
+    else:
+        print(operator_mod.format_doctor_text(checks))
+    return EXIT_OK if summary["ok"] else EXIT_ERROR
+
+
+def cmd_preview(project_dir: Path, as_json: bool = False) -> int:
+    import json as json_mod
+
+    preview = operator_mod.build_preview(project_dir)
+    if as_json:
+        print(json_mod.dumps(preview, sort_keys=True, indent=2))
+    else:
+        print(operator_mod.format_preview_text(preview))
+    return EXIT_OK
+
+
+def cmd_queue(
+    project_dir: Path, status_filter: str | None = None, as_json: bool = False
+) -> int:
+    import json as json_mod
+
+    cfg = _load_config(project_dir)
+    if cfg is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    try:
+        handoff = handoff_mod.read_handoff(project_dir / cfg.handoff_file)
+    except handoff_mod.HandoffError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if status_filter is not None:
+        try:
+            handoff_mod._require_enum(
+                status_filter, handoff_mod.ITEM_STATUSES, "item status"
+            )
+        except handoff_mod.HandoffError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+    items = operator_mod.queue_view(handoff, status_filter)
+    if as_json:
+        print(json_mod.dumps({"items": items}, sort_keys=True, indent=2))
+    else:
+        print(operator_mod.format_queue_text(items))
+    return EXIT_OK
+
+
+def cmd_history(project_dir: Path, item_id: str, as_json: bool = False) -> int:
+    import json as json_mod
+
+    cfg = _load_config(project_dir)
+    if cfg is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    try:
+        handoff = handoff_mod.read_handoff(project_dir / cfg.handoff_file)
+    except handoff_mod.HandoffError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        item = operator_mod.history_view(handoff, item_id)
+    except handoff_mod.HandoffError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if as_json:
+        print(json_mod.dumps(item, sort_keys=True, indent=2))
+    else:
+        print(operator_mod.format_history_text(item))
+    return EXIT_OK
+
+
+def _cmd_mutate(project_dir: Path, apply) -> int:
+    cfg = _load_config(project_dir)
+    if cfg is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    try:
+        handoff = handoff_mod.read_handoff(project_dir / cfg.handoff_file)
+    except handoff_mod.HandoffError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        item = apply(handoff)
+    except handoff_mod.HandoffError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        operator_mod.persist_handoff_and_count(project_dir, handoff)
+    except (handoff_mod.HandoffError, state_mod.StateError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    print(f"{item.id}: {item.status} (history: {len(item.history)})")
+    return EXIT_OK
+
+
+def cmd_resolve(project_dir: Path, item_id: str, note: str = "") -> int:
+    return _cmd_mutate(
+        project_dir, lambda h: operator_mod.apply_resolve(h, item_id, note)
+    )
+
+
+def cmd_defer(
+    project_dir: Path, item_id: str, target: str, reason: str, note: str = ""
+) -> int:
+    return _cmd_mutate(
+        project_dir,
+        lambda h: operator_mod.apply_defer(h, item_id, target, reason, note),
+    )
+
+
+def cmd_reopen(project_dir: Path, item_id: str, note: str = "") -> int:
+    return _cmd_mutate(
+        project_dir, lambda h: operator_mod.apply_reopen(h, item_id, note)
+    )
+
+
+def cmd_reprioritize(
+    project_dir: Path, item_id: str, priority: str, note: str = ""
+) -> int:
+    return _cmd_mutate(
+        project_dir,
+        lambda h: operator_mod.apply_reprioritize(h, item_id, priority, note),
+    )
+
+
+def _confirm_scheduling(confirmed: bool) -> bool:
+    """Require explicit approval in interactive use unless --yes is given.
+
+    Non-interactive callers (tests, CI, pipes) proceed without prompting;
+    interactive terminals must answer yes. Returns True when scheduling may
+    proceed; prints the reason and returns False otherwise. Sends no input.
+    """
+    if confirmed:
+        return True
+    try:
+        interactive = sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    if not interactive:
+        return True
+    try:
+        answer = input("Proceed with scheduling? [y/N] ").strip().lower()
+    except EOFError:
+        print("aborted: confirmation required; rerun with --yes", file=sys.stderr)
+        return False
+    if answer not in ("y", "yes"):
+        print(
+            "aborted: confirmation required; rerun with --yes to schedule",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 def _log_mode_event(
@@ -329,10 +600,17 @@ def cmd_evidence(
     return EXIT_OK
 
 
-def cmd_auto(project_dir: Path, auto_install: bool = True) -> int:
+def cmd_auto(
+    project_dir: Path,
+    auto_install: bool = True,
+    confirmed: bool = False,
+    preview_only: bool = False,
+) -> int:
     # Resynchronize from handoff, git, specs, and queue; persist; enter
     # AUTO; then resume the runner. Manual edits are evidence, never
-    # completion: verification still gates advancement.
+    # completion: verification still gates advancement. Preview shows the
+    # exact next action and gate and sends no input; interactive scheduling
+    # requires explicit confirmation unless --yes is given.
     cfg = _load_config(project_dir)
     if cfg is None:
         return EXIT_ERROR
@@ -362,6 +640,12 @@ def cmd_auto(project_dir: Path, auto_install: bool = True) -> int:
         print("mode: AUTO (scheduling resumed from resynchronized state)")
     else:
         print("mode is already AUTO; resynchronized state")
+    preview = operator_mod.build_preview(project_dir)
+    print(operator_mod.format_preview_text(preview))
+    if preview_only:
+        return EXIT_OK
+    if not _confirm_scheduling(confirmed):
+        return EXIT_ERROR
     return _run_loop(
         project_dir, cfg, state_mod.read(project_dir), auto_install=auto_install
     )
@@ -411,9 +695,16 @@ def _run_loop(
     return EXIT_OK
 
 
-def cmd_run(project_dir: Path, auto_install: bool = True) -> int:
+def cmd_run(
+    project_dir: Path,
+    auto_install: bool = True,
+    confirmed: bool = False,
+    preview_only: bool = False,
+) -> int:
     # State-driven execution, gated on AUTO: MANUAL disables automatic
-    # input and PAUSE allows no new scheduling operations.
+    # input and PAUSE allows no new scheduling operations. Preview shows the
+    # exact next action and gate and sends no input; interactive scheduling
+    # requires explicit confirmation unless --yes is given.
     cfg = _load_config(project_dir)
     if cfg is None:
         return EXIT_ERROR
@@ -433,6 +724,12 @@ def cmd_run(project_dir: Path, auto_install: bool = True) -> int:
                 "use `ariadex auto` to resynchronize and resume",
                 file=sys.stderr,
             )
+        return EXIT_ERROR
+    preview = operator_mod.build_preview(project_dir)
+    print(operator_mod.format_preview_text(preview))
+    if preview_only:
+        return EXIT_OK
+    if not _confirm_scheduling(confirmed):
         return EXIT_ERROR
     return _run_loop(project_dir, cfg, st, auto_install=auto_install)
 
@@ -480,13 +777,56 @@ def main(argv: list[str] | None = None) -> int:
     auto_install = not args.no_auto_install
     handlers = {
         "init": lambda: cmd_init(project_dir),
-        "run": lambda: cmd_run(project_dir, auto_install=auto_install),
+        "run": lambda: cmd_run(
+            project_dir,
+            auto_install=auto_install,
+            confirmed=getattr(args, "yes", False),
+            preview_only=getattr(args, "preview", False),
+        ),
         "attach": lambda: cmd_attach(project_dir, auto_install=auto_install),
-        "status": lambda: cmd_status(project_dir),
+        "status": lambda: cmd_status(project_dir, as_json=getattr(args, "json", False)),
         "pause": lambda: cmd_pause(project_dir),
         "resume": lambda: cmd_resume(project_dir),
         "takeover": lambda: cmd_takeover(project_dir),
-        "auto": lambda: cmd_auto(project_dir, auto_install=auto_install),
+        "auto": lambda: cmd_auto(
+            project_dir,
+            auto_install=auto_install,
+            confirmed=getattr(args, "yes", False),
+            preview_only=getattr(args, "preview", False),
+        ),
+        "doctor": lambda: cmd_doctor(project_dir, as_json=getattr(args, "json", False)),
+        "preview": lambda: cmd_preview(
+            project_dir, as_json=getattr(args, "json", False)
+        ),
+        "queue": lambda: cmd_queue(
+            project_dir,
+            status_filter=getattr(args, "status", None),
+            as_json=getattr(args, "json", False),
+        ),
+        "history": lambda: cmd_history(
+            project_dir,
+            args.item_id,
+            as_json=getattr(args, "json", False),
+        ),
+        "resolve": lambda: cmd_resolve(
+            project_dir, args.item_id, getattr(args, "note", "")
+        ),
+        "defer": lambda: cmd_defer(
+            project_dir,
+            args.item_id,
+            args.to,
+            args.reason,
+            getattr(args, "note", ""),
+        ),
+        "reopen": lambda: cmd_reopen(
+            project_dir, args.item_id, getattr(args, "note", "")
+        ),
+        "reprioritize": lambda: cmd_reprioritize(
+            project_dir,
+            args.item_id,
+            args.priority,
+            getattr(args, "note", ""),
+        ),
         "evidence": lambda: cmd_evidence(
             project_dir,
             gate=getattr(args, "gate", False),
