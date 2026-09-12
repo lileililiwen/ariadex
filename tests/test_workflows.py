@@ -39,12 +39,6 @@ REVIEWED_MUTABLE_REFS = {
         "major-version tag of the first-party artifact uploader; only "
         "uploads already-verified build outputs."
     ),
-    "pypa/gh-action-pypi-publish@release/v1": (
-        "release-branch tag of the official PyPI publisher; the step runs "
-        "only after every gate in the tag-triggered, environment-protected "
-        "release job, and PyPI upload stays manual until the trusted "
-        "publisher is configured."
-    ),
 }
 
 

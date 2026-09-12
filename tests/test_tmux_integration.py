@@ -14,6 +14,9 @@ from ariadex.terminal import TmuxDriver, session_name_for
 
 
 @unittest.skipUnless(shutil.which("tmux"), "tmux binary not available")
+@unittest.skipUnless(
+    shutil.which("opencode"), "opencode binary not available for live round-trip"
+)
 class LiveTmuxTest(unittest.TestCase):
     def test_create_send_capture_terminate(self):
         driver = TmuxDriver()

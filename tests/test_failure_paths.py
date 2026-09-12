@@ -645,8 +645,11 @@ class LiveEvidenceFaultTest(unittest.TestCase):
         from ariadex import tmux_setup
         from ariadex.tmux_setup import TmuxSetupError
 
-        with mock.patch.object(
-            tmux_setup, "ensure_tmux", side_effect=TmuxSetupError("no sudo")
+        with (
+            mock.patch.object(tmux_setup, "find_tmux", return_value=None),
+            mock.patch.object(
+                tmux_setup, "ensure_tmux", side_effect=TmuxSetupError("no sudo")
+            ),
         ):
             results = run_all(only=["tmux-lifecycle"], provision=True, timeout_s=1)
         by_name = {r.name: r for r in results}
