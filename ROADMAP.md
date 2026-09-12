@@ -86,6 +86,21 @@ committed (see `HANDOFF.md` for per-change evidence):
 
 The terminal workflow remains supported alongside the daemon UX.
 
+## Complete: companion prerequisites and release alignment
+
+Two follow-up changes are implemented, tested, archived, and
+committed (see `HANDOFF.md` for per-change evidence):
+
+1. `companion-prerequisite-auto-install` — confirmed `python3-tk`
+   preparation during `ariadex install` (passwordless `sudo -n` only,
+   never a password prompt), `--no-dependency-install` opt-out, and
+   fail-closed post-install verification before any autostart claim.
+2. `tagged-version-pypi-release-alignment` — tag/package/artifact/PyPI
+   version gates (`ariadex-v<version>`, embedded metadata check,
+   duplicate-version rejection), exact fresh-index verification against
+   the tag, release summary evidence, and immutable-version failure
+   handling.
+
 ## Deferred V2 capabilities
 
 With the foundations above archived, the deferred capabilities are:

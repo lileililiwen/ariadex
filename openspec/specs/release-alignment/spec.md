@@ -1,7 +1,10 @@
 # release-alignment Specification
 
 ## Purpose
-TBD - created by archiving change tagged-version-pypi-release-alignment. Update Purpose after archive.
+
+Guarantee that a tagged Ariadex release and its PyPI package represent the
+same immutable version.
+
 ## Requirements
 ### Requirement: Exact tag and package version
 

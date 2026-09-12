@@ -19,14 +19,19 @@ cycle limit, takeover cancellation and scheduler coordination,
  canonical spec and doc governance, real-provider live validation,
  repository identity and release readiness, release publication and
  remote verification, reproducible release and security evidence, and
-  quality gate hardening (518 tests, stdlib only). `ariadex 0.1.0` is
+  quality gate hardening (702 tests, stdlib only). `ariadex 0.1.0` is
   published on PyPI. The three daemon UX changes
   (`daemon-first-runtime-and-simple-cli`,
   `human-yield-hotkey-and-floating-control`, and
   `local-install-and-user-deployment`) add a resident project daemon
   with simple `start`, `stop`, `status`, `pause`, and `resume` controls,
   an opt-in floating companion with a global yield hotkey, and
-  user-scoped install/uninstall plus service integration — see
+  user-scoped install/uninstall plus service integration. Two follow-up
+  changes complete the set: `companion-prerequisite-auto-install`
+  (confirmed `python3-tk` preparation with `--no-dependency-install`
+  opt-out and fail-closed verification) and
+  `tagged-version-pypi-release-alignment` (tag/package/artifact/PyPI
+  version gates, immutable versions, exact index verification) — see
   [ROADMAP.md](ROADMAP.md) and [HANDOFF.md](HANDOFF.md).
 
 ## Requirements
@@ -310,7 +315,7 @@ instead of silently substituting another spec.
 ```bash
 pip install -e ".[dev]"                              # pinned QA toolchain
 ariadex preflight                                    # paths/versions: python, package, pip-audit, build, providers, tmux
-python -m unittest discover -s tests                 # 649 tests, stdlib only
+python -m unittest discover -s tests                 # 702 tests, stdlib only
 openspec validate --changes --strict --no-interactive
 ruff check src tests
 ruff format --check src tests
