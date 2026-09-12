@@ -91,7 +91,7 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active changes remain. Next maintainer steps: add the canonical remote (`git remote add origin https://github.com/lileililiwen/ariadex.git`), push, and tag a release (`ariadex-v<version>`); thereafter V2 capabilities from ROADMAP.
+Select `release-publication-and-remote-verification` first with `openspec list`. Its next steps are to add the canonical remote, verify GitHub protections and CI, and configure reviewed PyPI trusted publishing. Then continue with `reproducible-release-and-security-evidence`. Do not start V2 capabilities until these two changes are complete (the hardening change is already archived).
 
 ## Audit remediation sequence
 
