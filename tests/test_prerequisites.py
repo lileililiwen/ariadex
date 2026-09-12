@@ -330,6 +330,21 @@ class WidgetCheckTest(unittest.TestCase):
         result = check_widget()
         self.assertIn(result.state, ("present", "unsupported", "declined"))
 
+    def test_display_unavailable_does_not_claim_widget_ready(self):
+        from ariadex import companion as companion_mod
+
+        result = check_widget(
+            prerequisites=lambda: {
+                "tkinter_available": True,
+                "display_available": False,
+                "desktop": companion_mod.DesktopInfo("x11", True, "x11"),
+                "hotkey": "Ctrl+Esc",
+                "hotkey_ok": True,
+            },
+        )
+        self.assertEqual(result.state, "unsupported")
+        self.assertIn("display", result.detail.lower())
+
 
 class CoordinateTest(unittest.TestCase):
     def test_ready_host_is_silent_with_no_mutation(self):

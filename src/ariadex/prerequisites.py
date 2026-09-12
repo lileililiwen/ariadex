@@ -228,6 +228,19 @@ def check_widget(
             recovery="use `ariadex pause` and `ariadex resume` "
             "instead of the floating widget",
         )
+    display_ready = current.get("display_available")
+    if display_ready is None:
+        # Keep injected prerequisite fixtures backwards-compatible; the live
+        # deploy probe always supplies this field.
+        display_ready = True
+    if not display_ready:
+        return PrerequisiteResult(
+            name="widget",
+            state="unsupported",
+            detail="widget unavailable: cannot connect to the desktop display",
+            recovery="use terminal controls or repair the X11 display session, "
+            "then rerun `ariadex start`",
+        )
     probe = companion_mod.tkinter_available
     if current.get("tkinter_available"):
         return PrerequisiteResult(name="widget", state="present", detail="widget ready")

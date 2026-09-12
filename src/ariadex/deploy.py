@@ -230,6 +230,7 @@ def companion_prerequisites() -> dict:
         hotkey_ok = str(exc)
     return {
         "tkinter_available": tkinter_ok,
+        "display_available": companion_mod.display_available(),
         "desktop": desktop,
         "hotkey": hotkey,
         "hotkey_ok": hotkey_ok,

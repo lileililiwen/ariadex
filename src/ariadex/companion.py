@@ -87,13 +87,32 @@ def detect_desktop(env: dict | None = None) -> DesktopInfo:
 
 
 def tkinter_available() -> bool:
-    """Whether the Tkinter UI toolkit imports (no window is created)."""
+    """Whether the Tkinter UI toolkit imports."""
     try:
         import tkinter  # noqa: F401
 
         return True
     except ImportError:
         return False
+
+
+def display_available() -> bool:
+    """Whether this process can create and destroy a Tk window."""
+    if not tkinter_available():
+        return False
+    import tkinter as tk
+
+    root = None
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.update_idletasks()
+    except Exception:
+        return False
+    finally:
+        with contextlib.suppress(Exception):
+            root.destroy()
+    return True
 
 
 def parse_hotkey(text: str) -> tuple[frozenset[str], str]:
