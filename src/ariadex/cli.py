@@ -16,6 +16,7 @@ from pathlib import Path
 from . import concurrency as concurrency_mod
 from . import config as config_mod
 from . import control as control_mod
+from . import daemon as daemon_mod
 from . import handoff as handoff_mod
 from . import live_evidence as live_evidence_mod
 from . import logging as logging_mod
@@ -106,8 +107,47 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit stable JSON instead of human-readable text",
     )
-    sub.add_parser("pause", help="enter PAUSE: no new scheduling operations")
-    sub.add_parser("resume", help="leave PAUSE and return to manual control")
+    pause_parser = sub.add_parser(
+        "pause", help="enter PAUSE: no new scheduling operations"
+    )
+    pause_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit stable JSON instead of human-readable text",
+    )
+    resume_parser = sub.add_parser(
+        "resume", help="leave PAUSE and return to manual control"
+    )
+    resume_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit stable JSON instead of human-readable text",
+    )
+    start_parser = sub.add_parser(
+        "start", help="start the resident project daemon (idempotent)"
+    )
+    start_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit stable JSON instead of human-readable text",
+    )
+    stop_parser = sub.add_parser(
+        "stop", help="request graceful daemon shutdown (bounded)"
+    )
+    stop_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit stable JSON instead of human-readable text",
+    )
+    admin_parser = sub.add_parser(
+        "admin",
+        help="advanced inspection and repair commands (existing capabilities)",
+    )
+    admin_parser.add_argument(
+        "admin_argv",
+        nargs=argparse.REMAINDER,
+        help="advanced command and arguments (e.g. `admin doctor`)",
+    )
     sub.add_parser(
         "takeover",
         help="take manual control: automatic input disabled, observation continues",
@@ -359,7 +399,41 @@ def _load_state(project_dir: Path) -> state_mod.State | None:
         return None
 
 
+def _daemon_ipc_or_none(project_dir: Path, request_type: str) -> dict | None:
+    """One bounded control round-trip; None when no healthy daemon answers.
+
+    Never raises into scheduling: missing/stale records, unsafe endpoints,
+    and connection failures all fall back to local behavior.
+    """
+    try:
+        record = daemon_mod.read_record(project_dir)
+    except Exception:
+        return None
+    if not daemon_mod.daemon_alive(record):
+        return None
+    try:
+        response = daemon_mod.send_request(project_dir, request_type)
+    except daemon_mod.DaemonError:
+        return None
+    if not isinstance(response, dict) or not response.get("ok"):
+        return None
+    state = response.get("state")
+    return state if isinstance(state, dict) else {}
+
+
 def cmd_status(project_dir: Path, as_json: bool = False) -> int:
+    # When a healthy daemon answers, report its resulting state: the CLI
+    # connects to the project socket, sends a typed JSON request, waits for
+    # a bounded response, and prints it. Otherwise use durable state locally.
+    ipc = _daemon_ipc_or_none(project_dir, "status")
+    if ipc:
+        import json as json_mod
+
+        if as_json:
+            print(json_mod.dumps({"daemon": ipc}, sort_keys=True, indent=2))
+        else:
+            print(daemon_mod.format_status_text(ipc))
+        return EXIT_OK
     cfg = _load_config(project_dir)
     if cfg is None:
         return EXIT_ERROR
@@ -759,7 +833,13 @@ def _coordination_note(project_dir: Path) -> str:
     return "no active scheduler"
 
 
-def _transition(project_dir: Path, via: str, note: str, log_event: bool = False) -> int:
+def _transition(
+    project_dir: Path,
+    via: str,
+    note: str,
+    log_event: bool = False,
+    as_json: bool = False,
+) -> int:
     cfg = _load_config(project_dir)
     if cfg is None:
         return EXIT_ERROR
@@ -777,6 +857,30 @@ def _transition(project_dir: Path, via: str, note: str, log_event: bool = False)
         coordination = _coordination_note(project_dir)
     else:
         coordination = ""
+    if as_json:
+        import json as json_mod
+
+        changed = mode != st.mode
+        if changed:
+            st.mode = mode
+            state_mod.write(project_dir, st)
+            if log_event:
+                _log_mode_event(project_dir, st, via, f"mode -> {mode}: {note}")
+        print(
+            json_mod.dumps(
+                {
+                    "ok": True,
+                    "via": via,
+                    "mode": mode,
+                    "changed": changed,
+                    "note": note,
+                    "coordination": coordination or None,
+                },
+                sort_keys=True,
+                indent=2,
+            )
+        )
+        return EXIT_OK
     if mode == st.mode:
         print(f"mode is already {mode}; no change made")
         if coordination:
@@ -792,25 +896,291 @@ def _transition(project_dir: Path, via: str, note: str, log_event: bool = False)
     return EXIT_OK
 
 
-def cmd_pause(project_dir: Path) -> int:
+def cmd_pause(project_dir: Path, as_json: bool = False) -> int:
     # Idempotent: an already-paused project succeeds without touching the
     # tmux session or scheduling work. The CLI process stays alive.
+    # A healthy daemon answers first (typed IPC, bounded response);
+    # otherwise the transition applies locally with the same semantics.
+    ipc = _daemon_ipc_or_none(project_dir, "pause")
+    if ipc:
+        import json as json_mod
+
+        if as_json:
+            print(json_mod.dumps({"daemon": ipc}, sort_keys=True, indent=2))
+        else:
+            print(daemon_mod.format_status_text(ipc))
+        return EXIT_OK
     return _transition(
         project_dir,
         "pause",
         "no new scheduling operations; CLI session preserved",
         log_event=True,
+        as_json=as_json,
     )
 
 
-def cmd_resume(project_dir: Path) -> int:
+def cmd_resume(project_dir: Path, as_json: bool = False) -> int:
     # Valid only from PAUSE; returns to manual control. `auto` resumes
-    # scheduling after resynchronization.
+    # scheduling after resynchronization. Daemon-mediated when healthy.
+    ipc = _daemon_ipc_or_none(project_dir, "resume")
+    if ipc:
+        import json as json_mod
+
+        if as_json:
+            print(json_mod.dumps({"daemon": ipc}, sort_keys=True, indent=2))
+        else:
+            print(daemon_mod.format_status_text(ipc))
+        return EXIT_OK
     return _transition(
         project_dir,
         "resume",
         "manual control; use `ariadex auto` to resume scheduling",
+        as_json=as_json,
     )
+
+
+def cmd_start(project_dir: Path, as_json: bool = False) -> int:
+    """Start the resident daemon. Idempotent; never steals a live lease.
+
+    Sends no provider input. Reports the existing daemon when one owns the
+    project, refuses when another live scheduler holds the lease, and
+    recovers stale ownership before spawning.
+    """
+    import contextlib as _contextlib
+    import json as json_mod
+    import subprocess
+    import time
+
+    if _load_config(project_dir) is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    record = daemon_mod.read_record(project_dir)
+    if daemon_mod.daemon_alive(record) and record is not None:
+        # Duplicate start: confirm the endpoint answers, but never create
+        # a second scheduler or provider session either way.
+        assert record is not None
+        healthy: bool = _daemon_ipc_or_none(project_dir, "status") is not None
+        detail = (
+            f"daemon already running (pid {record.pid}, "
+            f"endpoint {record.endpoint}, "
+            f"{'reachable' if healthy else 'endpoint not answering'})"
+        )
+        if not healthy:
+            detail += "; run `ariadex admin recover` if scheduling stalls"
+        if as_json:
+            print(
+                json_mod.dumps(
+                    {
+                        "started": False,
+                        "duplicate": True,
+                        "pid": record.pid,
+                        "endpoint": record.endpoint,
+                        "reachable": healthy,
+                    },
+                    sort_keys=True,
+                    indent=2,
+                )
+            )
+        else:
+            print(detail)
+        return EXIT_OK
+    diagnosis = concurrency_mod.diagnose(project_dir)
+    if diagnosis.get("state") == "active":
+        owner = diagnosis.get("owner") or {}
+        print(
+            f"error: refused: project is owned by pid {owner.get('pid')} "
+            f"on {owner.get('hostname') or '?'}; refusing to steal a live lease "
+            "(no provider input sent; see `ariadex doctor`)",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    if diagnosis.get("state") == "stale":
+        report = concurrency_mod.recover_project(project_dir)
+        print(concurrency_mod.format_recovery_text(report))
+    if record is not None and not daemon_mod.daemon_alive(record):
+        with _contextlib.suppress(OSError):
+            daemon_mod.socket_path(project_dir).unlink()
+        print(
+            f"stale daemon record (pid {record.pid}) reconciled; starting a new daemon"
+        )
+    try:
+        # Absolute import path: the child must resolve `ariadex` even when
+        # the parent was launched with a relative PYTHONPATH or from a
+        # different working directory (installed entry points need nothing).
+        child_env = dict(os.environ)
+        src_root = str(Path(__file__).resolve().parent.parent)
+        existing_path = child_env.get("PYTHONPATH", "")
+        child_env["PYTHONPATH"] = src_root + (
+            os.pathsep + existing_path if existing_path else ""
+        )
+        proc = subprocess.Popen(  # noqa: S603
+            [sys.executable, "-m", "ariadex.daemon", str(project_dir)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            cwd=str(project_dir),
+            env=child_env,
+        )
+    except OSError as exc:
+        print(f"error: daemon start failed: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    deadline = time.monotonic() + daemon_mod.DEFAULT_IPC_TIMEOUT_S
+    ready = False
+    while time.monotonic() < deadline:
+        current = daemon_mod.read_record(project_dir)
+        if (
+            daemon_mod.daemon_alive(current)
+            and daemon_mod.socket_path(project_dir).exists()
+        ):
+            ready = True
+            break
+        if proc.poll() is not None:
+            break
+        time.sleep(0.1)
+    if not ready:
+        print(
+            "error: daemon did not become ready within the bounded wait; "
+            "run `ariadex status` and `ariadex admin recover` "
+            "(no provider input sent)",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    current = daemon_mod.read_record(project_dir)
+    pid = current.pid if current else proc.pid
+    if as_json:
+        print(
+            json_mod.dumps(
+                {
+                    "started": True,
+                    "duplicate": False,
+                    "pid": pid,
+                    "endpoint": str(daemon_mod.SOCKET_REL_PATH),
+                },
+                sort_keys=True,
+                indent=2,
+            )
+        )
+    else:
+        print(
+            f"daemon started (pid {pid}, "
+            f"endpoint {daemon_mod.SOCKET_REL_PATH}); observing durable state"
+        )
+    return EXIT_OK
+
+
+def cmd_stop(project_dir: Path, as_json: bool = False) -> int:
+    """Request graceful daemon shutdown. Bounded; fail-closed.
+
+    Leaves durable work, evidence, and handoff history untouched so
+    `recover` can reconcile after interruption.
+    """
+    import contextlib as _contextlib
+    import json as json_mod
+
+    if _load_config(project_dir) is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    record = daemon_mod.read_record(project_dir)
+    if not daemon_mod.daemon_alive(record):
+        if record is not None:
+            record.status = "stopped"
+            with _contextlib.suppress(Exception):
+                daemon_mod.write_record(project_dir, record)
+        with _contextlib.suppress(OSError):
+            daemon_mod.socket_path(project_dir).unlink()
+        if as_json:
+            print(
+                json_mod.dumps(
+                    {"stopped": True, "was_running": False}, sort_keys=True, indent=2
+                )
+            )
+        else:
+            print("daemon: stopped (no running daemon)")
+        return EXIT_OK
+    try:
+        response = daemon_mod.send_request(project_dir, "stop")
+    except daemon_mod.DaemonError as exc:
+        print(f"error: stop failed: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if not isinstance(response, dict) or not response.get("ok"):
+        detail = ""
+        if isinstance(response, dict) and response.get("error"):
+            detail = f": {response['error']}"
+        print(f"error: daemon refused stop{detail}", file=sys.stderr)
+        return EXIT_ERROR
+    state = response.get("state")
+    view = (
+        state if isinstance(state, dict) else daemon_mod.daemon_status_view(project_dir)
+    )
+    if as_json:
+        print(
+            json_mod.dumps(
+                {"stopped": True, "was_running": True, "daemon": view},
+                sort_keys=True,
+                indent=2,
+            )
+        )
+    else:
+        print(daemon_mod.format_status_text(view))
+    return EXIT_OK
+
+
+ADMIN_COMMANDS = (
+    "doctor",
+    "preview",
+    "queue",
+    "history",
+    "resolve",
+    "defer",
+    "reopen",
+    "reprioritize",
+    "recover",
+    "prune-logs",
+    "export-logs",
+    "events",
+    "export-events",
+    "evidence",
+    "preflight",
+    "run",
+    "auto",
+    "attach",
+    "takeover",
+    "status",
+    "pause",
+    "resume",
+)
+
+
+def cmd_admin(project_dir: Path, admin_argv: list[str], no_auto_install: bool) -> int:
+    """Advanced namespace: same capabilities, explicit grouping.
+
+    Top-level commands keep working unchanged; `admin <command> ...`
+    forwards to the same handlers so scripts can migrate gradually.
+    """
+    if not admin_argv or admin_argv[0] in ("-h", "--help"):
+        print(
+            "advanced commands (also available at top level): "
+            + ", ".join(ADMIN_COMMANDS)
+        )
+        return EXIT_OK
+    if admin_argv[0] == "admin":
+        print("error: nested `admin admin` is refused", file=sys.stderr)
+        return EXIT_ERROR
+    if admin_argv[0] not in ADMIN_COMMANDS:
+        print(
+            f"error: unknown admin command `{admin_argv[0]}`; "
+            f"expected one of: {', '.join(ADMIN_COMMANDS)}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    forwarded: list[str] = []
+    if no_auto_install:
+        forwarded.append("--no-auto-install")
+    forwarded.extend(admin_argv)
+    return main(forwarded)
 
 
 def cmd_takeover(project_dir: Path) -> int:
@@ -1176,8 +1546,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "attach": lambda: cmd_attach(project_dir, auto_install=auto_install),
         "status": lambda: cmd_status(project_dir, as_json=getattr(args, "json", False)),
-        "pause": lambda: cmd_pause(project_dir),
-        "resume": lambda: cmd_resume(project_dir),
+        "pause": lambda: cmd_pause(project_dir, as_json=getattr(args, "json", False)),
+        "resume": lambda: cmd_resume(project_dir, as_json=getattr(args, "json", False)),
+        "start": lambda: cmd_start(project_dir, as_json=getattr(args, "json", False)),
+        "stop": lambda: cmd_stop(project_dir, as_json=getattr(args, "json", False)),
+        "admin": lambda: cmd_admin(
+            project_dir,
+            list(getattr(args, "admin_argv", []) or []),
+            no_auto_install=not auto_install,
+        ),
         "takeover": lambda: cmd_takeover(project_dir),
         "auto": lambda: cmd_auto(
             project_dir,

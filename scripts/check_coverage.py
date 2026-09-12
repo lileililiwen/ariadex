@@ -25,6 +25,7 @@ FLOORS: dict[str, int] = {
     "ariadex/live_evidence.py": 80,  # measured 84
     "ariadex/runner.py": 82,  # measured 86
     "ariadex/cli.py": 78,  # measured 81
+    "ariadex/daemon.py": 78,  # measured 81
 }
 
 ROW = re.compile(r"^(?P<name>\S+)\s+\d+\s+\d+.*?(?P<pct>\d+)%\s*(?P<missing>.*)$")

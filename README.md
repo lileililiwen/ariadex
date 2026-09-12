@@ -19,9 +19,12 @@ cycle limit, takeover cancellation and scheduler coordination,
  canonical spec and doc governance, real-provider live validation,
  repository identity and release readiness, release publication and
  remote verification, reproducible release and security evidence, and
- quality gate hardening (518 tests, stdlib only). `ariadex 0.1.0` is
- published on PyPI; no active changes remain — see [ROADMAP.md](ROADMAP.md)
- and [HANDOFF.md](HANDOFF.md).
+  quality gate hardening (518 tests, stdlib only). `ariadex 0.1.0` is
+  published on PyPI. The first daemon UX change
+  (`daemon-first-runtime-and-simple-cli`) adds a resident project daemon
+  with simple `start`, `stop`, `status`, `pause`, and `resume` controls;
+  two daemon UX changes remain planned — see
+  [ROADMAP.md](ROADMAP.md) and [HANDOFF.md](HANDOFF.md).
 
 ## Requirements
 
@@ -33,8 +36,9 @@ cycle limit, takeover cancellation and scheduler coordination,
   install packages, install tmux yourself or pass `--no-auto-install`
   to keep the stop-before-work error.
 
-No IDE plugins, LLM API keys, or daemons are required. Ariadex drives the
-Coding CLIs you already use; it never calls a provider LLM API itself.
+No IDE plugins or LLM API keys are required. The current runtime drives the
+Coding CLIs you already use; the planned daemon and desktop companion will
+remain local control layers and will never call a provider LLM API itself.
 
 ## Installation
 
@@ -83,14 +87,26 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and
 ```bash
 git clone https://github.com/lileililiwen/ariadex.git && cd ariadex
 ./ariadex init          # create .ariadex/ defaults, never overwrites
-./ariadex auto          # resync from handoff+git+specs, enter AUTO, schedule
-./ariadex status        # mode, agent, spec, session, unresolved, tests, next
+./ariadex start         # start the resident daemon (idempotent)
+./ariadex status        # daemon state, mode, spec, session, queue, next
 ./ariadex attach        # watch the live Coding CLI in tmux
 ```
+
+The daemon owns scheduling, persistence, and local control requests. When
+it is running, `status`, `pause`, and `resume` are answered by the daemon
+over a project-scoped Unix socket (`.ariadex/daemon.sock`, owner-only
+permissions, typed JSON requests); without a daemon the same commands act
+on durable state locally. Advanced inspection and repair commands keep
+working at the top level and are also grouped under `admin`
+(e.g. `ariadex admin doctor`).
 
 A typical session:
 
 ```bash
+./ariadex start         # start once; duplicate starts report the owner
+./ariadex pause         # no new scheduling; in-flight work is cancelled safely
+./ariadex resume        # resync, back to manual control
+./ariadex stop          # bounded graceful shutdown; state left for `recover`
 ./ariadex run           # execute the next durable action (requires AUTO)
 ./ariadex takeover      # stop automatic input, keep observing (MANUAL)
 # ... edit code yourself, in tmux or your editor ...
@@ -136,10 +152,18 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | Command            | Effect                                                        |
 | ------------------ | ------------------------------------------------------------- |
 | `init`             | Create `.ariadex/` defaults without overwriting existing files |
+| `start [--json]`   | Start the resident daemon (idempotent; refuses live leases)    |
+| `stop [--json]`    | Bounded graceful shutdown; durable state kept for `recover`    |
+| `status [--json]`  | Daemon-mediated when healthy, otherwise local durable state    |
+| `pause [--json]`   | Daemon-mediated when healthy; no new scheduling, safe cancel   |
+| `resume [--json]`  | Daemon-mediated when healthy; resync, back to manual control   |
+| `admin <command>`  | Advanced namespace: `doctor preview queue history resolve`     |
+|                    | `defer reopen reprioritize recover prune-logs export-logs`     |
+|                    | `events export-events evidence preflight run auto attach`      |
+|                    | `takeover status pause resume` (top-level aliases unchanged)   |
 | `run [--yes] [--preview]` | Execute the next action from durable state (needs `AUTO`) |
-| `auto [--yes] [--preview]` | Resync, enter `AUTO`, and resume scheduling             |
+| `auto [--yes] [--preview]` | Resync, enter `AUTO`, and resume scheduling            |
 | `attach`           | Attach your terminal to the live tmux Coding CLI session       |
-| `status [--json]`  | Show mode, agent, spec, session, context, elapsed, tests, next |
 | `doctor [--json]`  | Preflight config, provider, tmux, specs, verification, lock    |
 | `preview [--json]` | Show the exact next action and gate; sends no input            |
 | `queue [--status] [--json]` | List unresolved items and history counts            |
@@ -201,7 +225,7 @@ instead of silently substituting another spec.
 ```bash
 pip install -e ".[dev]"                              # pinned QA toolchain
 ariadex preflight                                    # paths/versions: python, package, pip-audit, build, providers, tmux
-python -m unittest discover -s tests                 # 507 tests, stdlib only
+python -m unittest discover -s tests                 # 555 tests, stdlib only
 openspec validate --changes --strict --no-interactive
 ruff check src tests
 ruff format --check src tests
