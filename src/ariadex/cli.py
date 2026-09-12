@@ -28,6 +28,14 @@ from . import tmux_setup as tmux_setup_mod
 EXIT_OK = 0
 EXIT_ERROR = 1
 
+
+def _package_version() -> str:
+    try:
+        from . import __version__ as version
+    except ImportError:
+        return "unknown"
+    return version
+
 HANDOFF_TEMPLATE = """\
 # Ariadex handoff
 
@@ -58,6 +66,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-auto-install",
         action="store_true",
         help="do not install a missing tmux automatically; stop instead",
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version="%(prog)s " + _package_version(),
+        help="print the Ariadex version and exit",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

@@ -24,6 +24,48 @@ See [ROADMAP.md](ROADMAP.md) and [HANDOFF.md](HANDOFF.md).
 No IDE plugins, LLM API keys, or daemons are required. Ariadex drives the
 Coding CLIs you already use; it never calls a provider LLM API itself.
 
+## Installation
+
+Prerequisites (never bundled, never silently downloaded as packages):
+
+- Python 3.11+ and PyYAML (installed automatically as a dependency)
+- A Coding CLI: `opencode` or `codex` on PATH
+- tmux: installed automatically on first `run`/`attach` via the system
+  package manager, or install it yourself (see Requirements above).
+  Pass `--no-auto-install` to keep the stop-before-work error.
+
+From PyPI with pipx (recommended for CLI use):
+
+```bash
+pipx install ariadex
+ariadex --help
+```
+
+From PyPI with pip:
+
+```bash
+pip install ariadex
+ariadex --help
+```
+
+From a source checkout (no install; uses `./ariadex` wrapper):
+
+```bash
+git clone <ariadex> && cd ariadex
+./ariadex --help
+```
+
+Verify any installation in a scratch directory:
+
+```bash
+ariadex --version
+mkdir /tmp/ariadex-smoke && cd /tmp/ariadex-smoke
+ariadex init
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes and
+[SECURITY.md](SECURITY.md) for the security contact.
+
 ## Quickstart
 
 ```bash

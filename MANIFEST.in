@@ -1,0 +1,2 @@
+include LICENSE CHANGELOG.md SECURITY.md README.md pyproject.toml
+global-exclude __pycache__ *.py[cod] *.egg-info

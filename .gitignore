@@ -4,6 +4,8 @@ bin/
 obj/
 dist/
 build/
+*.egg-info/
+src/*.egg-info/
 coverage/
 node_modules/
 .venv/
