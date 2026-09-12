@@ -288,7 +288,8 @@ ariadex watch --widget --attach \
 ```
 
 Full flags: `--session`, `--provider`, `--initial-prompt`,
-`--continuation-prompt`, `--finished-change` (tasks.md gate),
+`--continuation-prompt`, `--finished-change` (optional tasks.md gate
+override; otherwise the change in `HANDOFF.md` is checked),
 `--debounce` (default 3), `--poll-interval` (default 5.0s),
 `--max-polls` (0 = unbounded), `--list-sessions`, `--create`, `--attach`,
 `--widget`, and `--no-widget`

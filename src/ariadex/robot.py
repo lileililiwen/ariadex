@@ -269,7 +269,7 @@ def check_boundary(
             active=[],
         )
     try:
-        handoff_mod.read_handoff(handoff_path)
+        handoff = handoff_mod.read_handoff(handoff_path)
     except (handoff_mod.HandoffError, OSError) as exc:
         return BoundaryCheck(ok=False, reason=f"handoff unreadable: {exc}", active=[])
     graph, errors = spec_graph_mod.load_graph(project_dir, config.spec_dir)
@@ -280,9 +280,10 @@ def check_boundary(
             reason=f"spec metadata blocked: {errors[first]}",
             active=sorted(graph),
         )
-    if config.finished_change:
+    finished_change = config.finished_change or handoff.current_spec or ""
+    if finished_change:
         done, reason = _tasks_complete(
-            project_dir, config.spec_dir, config.finished_change
+            project_dir, config.spec_dir, finished_change
         )
         if not done:
             return BoundaryCheck(ok=False, reason=reason, active=sorted(graph))

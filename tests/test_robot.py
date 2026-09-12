@@ -756,6 +756,42 @@ class BoundaryTest(unittest.TestCase):
             check.reason,
         )
 
+    def test_handoff_current_spec_is_checked_without_override(self) -> None:
+        project = make_project(self._tmp)
+        change = project / "openspec" / "changes" / "demo"
+        change.mkdir(parents=True)
+        (change / "tasks.md").write_text(
+            "# Tasks\n\n- [x] Implemented\n", encoding="utf-8"
+        )
+        handoff = handoff_mod.read_handoff(project / ".ariadex" / "handoff.md")
+        handoff.current_spec = "demo"
+        handoff_mod.write_handoff(project / ".ariadex" / "handoff.md", handoff)
+
+        with unittest.mock.patch.object(
+            robot_mod, "_git_tree_clean", return_value=(True, "")
+        ):
+            check = robot_mod.check_boundary(project, self._config())
+
+        self.assertTrue(check.ok, check.reason)
+        self.assertEqual(check.active, ["demo"])
+
+    def test_handoff_current_spec_open_tasks_block_without_override(self) -> None:
+        project = make_project(self._tmp)
+        change = project / "openspec" / "changes" / "demo"
+        change.mkdir(parents=True)
+        (change / "tasks.md").write_text(
+            "# Tasks\n\n- [x] Implemented\n- [ ] Still running\n",
+            encoding="utf-8",
+        )
+        handoff = handoff_mod.read_handoff(project / ".ariadex" / "handoff.md")
+        handoff.current_spec = "demo"
+        handoff_mod.write_handoff(project / ".ariadex" / "handoff.md", handoff)
+
+        check = robot_mod.check_boundary(project, self._config())
+
+        self.assertFalse(check.ok)
+        self.assertIn("1 open task", check.reason)
+
     def test_git_gate_refuses_outside_a_repo(self) -> None:
         project = make_project(self._tmp)
         clean, reason = robot_mod._git_tree_clean(project)
