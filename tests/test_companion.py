@@ -791,7 +791,7 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.assertIsNotNone(self.window._save_after)
 
     def test_close_button_stops_daemon_and_exits_widget(self):
-        self.assertEqual(self.window.close_button.options.get("text"), "×")
+        self.assertEqual(self.window.close_button.options.get("text"), "\u00d7")
         self.window.close_button.invoke()
         self.assertTrue(self.root.destroyed)
         self.assertEqual(self.client.calls, ["stop"])

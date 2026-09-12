@@ -685,7 +685,7 @@ class CompanionWindow:
         self.toggle_button.pack(side="right")
         self.close_button = tk.Button(
             self.titlebar,
-            text="×",
+            text="\u00d7",
             width=2,
             name="close-button",
             takefocus=True,
@@ -1291,7 +1291,19 @@ class RobotWindow:
         )
 
 
-def run_robot_widget(watcher: object, *, poll_interval_s: float = 2.0) -> int:
+class RobotWatcherBoundary(Protocol):
+    """Structural boundary for watchers driven by the floating widget."""
+
+    def status_view(self) -> dict: ...
+    def request_pause(self) -> str: ...
+    def request_resume(self) -> str: ...
+    def request_quit(self) -> str: ...
+    def run(self) -> object: ...
+
+
+def run_robot_widget(
+    watcher: RobotWatcherBoundary, *, poll_interval_s: float = 2.0
+) -> int:
     """Run a floating robot window around a watcher running in a worker thread.
 
     The Tk process is a desktop window, not a tmux pane. The watcher owns
@@ -1314,14 +1326,14 @@ def run_robot_widget(watcher: object, *, poll_interval_s: float = 2.0) -> int:
         raise CompanionError(f"robot widget unavailable: {exc}") from exc
 
     root = tk.Tk()
-    status_fn = getattr(watcher, "status_view")
-    on_pause = getattr(watcher, "request_pause")
-    on_quit = getattr(watcher, "request_quit")
+    status_fn = watcher.status_view
+    on_pause = watcher.request_pause
+    on_quit = watcher.request_quit
     window = RobotWindow(
         root,
         status_fn=status_fn,
         on_pause=on_pause,
-        on_resume=getattr(watcher, "request_resume"),
+        on_resume=watcher.request_resume,
         on_quit=on_quit,
         hotkey_adapter=hotkey_adapter,
         hotkey=hotkey,
@@ -1331,14 +1343,14 @@ def run_robot_widget(watcher: object, *, poll_interval_s: float = 2.0) -> int:
 
     def run_watch() -> None:
         with contextlib.suppress(Exception):
-            getattr(watcher, "run")()
+            watcher.run()
 
     thread = threading.Thread(target=run_watch, name="ariadex-robot-watch", daemon=True)
     thread.start()
     try:
         root.mainloop()
     except KeyboardInterrupt:
-        print(getattr(watcher, "request_quit")())
+        print(watcher.request_quit())
         with contextlib.suppress(Exception):
             root.destroy()
     finally:

@@ -182,7 +182,9 @@ class EnsureTest(unittest.TestCase):
                 tkinter_probe=lambda: False,
             )
         self.assertEqual(result.state, "installed")
-        self.assertEqual([item["capture_output"] for item in kwargs_seen], [False, False])
+        self.assertEqual(
+            [item["capture_output"] for item in kwargs_seen], [False, False]
+        )
 
     def test_failed_install_is_blocked_with_command(self):
         def runner(argv, **kwargs):

@@ -37,9 +37,7 @@ def make_project(monkey_state=None) -> Path:
     monkey_state.append(tmp)
     root = Path(tmp.name)
     (root / ".ariadex").mkdir(parents=True)
-    handoff_mod.write_handoff(
-        root / "HANDOFF.md", handoff_mod.empty_handoff("s")
-    )
+    handoff_mod.write_handoff(root / "HANDOFF.md", handoff_mod.empty_handoff("s"))
     (root / "openspec" / "changes").mkdir(parents=True)
     return root
 
@@ -1021,7 +1019,10 @@ class RobotWidgetTest(unittest.TestCase):
             return "resumed"
 
         window = companion_mod.RobotWindow(
-            FakeTkRoot(), status_fn, on_pause=pause, on_resume=resume,
+            FakeTkRoot(),
+            status_fn,
+            on_pause=pause,
+            on_resume=resume,
             on_quit=lambda: "stopped",
         )
         window.pause_button.invoke()
@@ -1082,16 +1083,24 @@ class RobotWidgetTest(unittest.TestCase):
         watcher = Watcher()
         with (
             unittest.mock.patch.object(
-                companion_mod, "detect_desktop",
+                companion_mod,
+                "detect_desktop",
                 return_value=types.SimpleNamespace(supported=True, session="x11"),
             ),
-            unittest.mock.patch.object(companion_mod, "adapter_for_session", return_value=hotkey),
-            unittest.mock.patch.object(companion_mod, "configured_hotkey", return_value="Ctrl+Esc"),
+            unittest.mock.patch.object(
+                companion_mod, "adapter_for_session", return_value=hotkey
+            ),
+            unittest.mock.patch.object(
+                companion_mod, "configured_hotkey", return_value="Ctrl+Esc"
+            ),
             unittest.mock.patch.object(companion_mod, "parse_hotkey"),
-            unittest.mock.patch.object(companion_mod, "tkinter_available", return_value=True),
+            unittest.mock.patch.object(
+                companion_mod, "tkinter_available", return_value=True
+            ),
         ):
             # The imported tkinter module is supplied by install_fake_tk.
             import tkinter
+
             tkinter.Tk = TestTk
             companion_mod.run_robot_widget(watcher, poll_interval_s=0.01)
         self.assertEqual(hotkey.registered[0], "Ctrl+Esc")

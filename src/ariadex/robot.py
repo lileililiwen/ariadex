@@ -282,9 +282,7 @@ def check_boundary(
         )
     finished_change = config.finished_change or handoff.current_spec or ""
     if finished_change:
-        done, reason = _tasks_complete(
-            project_dir, config.spec_dir, finished_change
-        )
+        done, reason = _tasks_complete(project_dir, config.spec_dir, finished_change)
         if not done:
             return BoundaryCheck(ok=False, reason=reason, active=sorted(graph))
     clean, reason = _git_tree_clean(project_dir)

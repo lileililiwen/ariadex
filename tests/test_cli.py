@@ -123,7 +123,9 @@ class WidgetCommandTest(unittest.TestCase):
     def test_widget_does_not_start_daemon_when_tkinter_is_missing(self):
         with (
             mock.patch("ariadex.cli.cmd_init", return_value=0) as init,
-            mock.patch("ariadex.cli.companion_mod.tkinter_available", return_value=False),
+            mock.patch(
+                "ariadex.cli.companion_mod.tkinter_available", return_value=False
+            ),
             mock.patch("ariadex.cli.tmux_setup_mod.detect_manager", return_value=None),
             mock.patch("ariadex.cli.cmd_start", return_value=0) as start,
         ):

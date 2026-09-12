@@ -251,7 +251,8 @@ def build_parser() -> argparse.ArgumentParser:
     watch_parser.add_argument(
         "--initial-prompt",
         default=None,
-        help="prompt sent once to the attached ready conversation (omit to attach without sending)",
+        help="prompt sent once to the attached ready conversation "
+        "(omit to attach without sending)",
     )
     watch_parser.add_argument(
         "--attach",
@@ -2319,6 +2320,14 @@ def cmd_attach(project_dir: Path, auto_install: bool = True) -> int:
     return EXIT_ERROR
 
 
+def _widget_project_dir(args: argparse.Namespace, project_dir: Path) -> Path:
+    """Resolve the widget target directory (`--project` or the cwd)."""
+    project = args.project if args.command == "widget" else None
+    if project is None:
+        return project_dir
+    return project.expanduser().resolve()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     project_dir = _project_dir()
@@ -2347,11 +2356,7 @@ def main(argv: list[str] | None = None) -> int:
             editor=getattr(args, "editor", None),
         ),
         "widget": lambda: cmd_widget(
-            (
-                getattr(args, "project", None).expanduser().resolve()
-                if getattr(args, "project", None) is not None
-                else project_dir
-            ),
+            _widget_project_dir(args, project_dir),
             hotkey=getattr(args, "hotkey", None),
             editor=getattr(args, "editor", None),
             confirmed=getattr(args, "yes", False),
