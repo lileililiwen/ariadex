@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import handoff as handoff_mod
 from . import logging as logging_mod
+from . import spec_graph as spec_graph_mod
 from .adapters import AdapterError, AgentAdapter, StartupError, select_reset
 from .config import Config
 from .verify import (
@@ -54,15 +55,49 @@ class RepositoryView:
     spec_dir: str
     specs: list
     missing_spec_dir: bool = False
+    dependencies: dict = dataclasses.field(default_factory=dict)
+    graph_errors: dict = dataclasses.field(default_factory=dict)
 
 
 def inspect_repository(project_dir: Path, spec_dir: str) -> RepositoryView:
-    """Inspect durable repository state: which spec changes exist."""
+    """Inspect durable repository state: which spec changes exist.
+
+    Also loads optional per-change dependency metadata
+    (`depends_on` in `.openspec.yaml`). Malformed metadata is reported in
+    `graph_errors` and never raises; scheduling treats it as a blocker.
+    """
     path = project_dir / spec_dir
     if not path.is_dir():
         return RepositoryView(spec_dir=spec_dir, specs=[], missing_spec_dir=True)
     specs = sorted(entry.name for entry in path.iterdir() if entry.is_dir())
-    return RepositoryView(spec_dir=spec_dir, specs=specs)
+    graph, errors = spec_graph_mod.load_graph(project_dir, spec_dir)
+    return RepositoryView(
+        spec_dir=spec_dir,
+        specs=specs,
+        dependencies=graph,
+        graph_errors=errors,
+    )
+
+
+def ensure_blocker_once(
+    handoff: handoff_mod.Handoff, description: str, priority: str = "high"
+) -> handoff_mod.UnresolvedItem:
+    """Persist a blocker without duplicating identical open/blocked work.
+
+    Dependency, cycle, and missing-spec reasons recur every cycle while the
+    underlying state is unchanged. Reusing the existing item keeps the
+    unresolved queue bounded while history retention still applies.
+    """
+    for item in handoff.unresolved:
+        if (
+            item.description == description
+            and item.status in ("OPEN", "BLOCKED")
+            and item.type == "blocker"
+        ):
+            return item
+    return handoff_mod.add_item(
+        handoff, type="blocker", description=description, priority=priority
+    )
 
 
 def select_next_action(
@@ -74,6 +109,12 @@ def select_next_action(
 
     Issues whose attempts exceed `retry_limit` are skipped: no additional
     automatic attempt is scheduled for them.
+
+    Explicit handoff targets (`current_spec`/`next_spec`) remain
+    authoritative when valid; a missing or ineligible target returns STOP
+    with a durable reason instead of silently selecting another spec. With
+    no explicit target, the first eligible spec in deterministic
+    topological order is selected; directory sort order alone never decides.
     """
     opens = handoff_mod.open_items(handoff)
     if retry_limit is not None:
@@ -81,16 +122,95 @@ def select_next_action(
     if opens:
         top = opens[0]
         return ACTION_RESOLVE_ISSUE, f"{top.id}: {top.description}"
+    if repo.graph_errors:
+        name = sorted(repo.graph_errors)[0]
+        return (
+            ACTION_STOP,
+            f"spec `{name}` dependency metadata invalid: {repo.graph_errors[name]}",
+        )
+    graph = (
+        dict(repo.dependencies)
+        if repo.dependencies
+        else {name: [] for name in repo.specs}
+    )
+    for name in repo.specs:
+        graph.setdefault(name, [])
+    active = set(repo.specs)
+    completed = spec_graph_mod.completed_spec_names(handoff)
     if handoff.current_spec is not None:
-        if handoff.current_spec not in repo.specs:
+        target = handoff.current_spec
+        if target not in active:
             return (
                 ACTION_STOP,
-                f"current spec `{handoff.current_spec}` missing from {repo.spec_dir}",
+                f"current spec `{target}` missing from {repo.spec_dir}",
             )
-        return ACTION_ADVANCE_SPEC, handoff.current_spec
+        ok, reason = spec_graph_mod.validate_target(target, graph, active, completed)
+        if not ok:
+            return ACTION_STOP, reason
+        return ACTION_ADVANCE_SPEC, target
     if handoff.next_spec is not None:
-        return ACTION_START_SPEC, handoff.next_spec
+        target = handoff.next_spec
+        if target not in active:
+            return (
+                ACTION_STOP,
+                f"next spec `{target}` missing from {repo.spec_dir}",
+            )
+        ok, reason = spec_graph_mod.validate_target(target, graph, active, completed)
+        if not ok:
+            return ACTION_STOP, reason
+        return ACTION_START_SPEC, target
+    eligible = spec_graph_mod.eligible_specs(graph, completed)
+    if eligible:
+        return ACTION_START_SPEC, eligible[0]
+    if active:
+        # Every active change already verified complete: the queue is
+        # drained even though the directories still exist pre-archive.
+        if active <= completed:
+            return ACTION_IDLE, "all specs verified complete"
+        # No eligible spec: name the underlying dependency reason so the
+        # runner persists it instead of idling silently over blocked work.
+        missing = spec_graph_mod.find_missing(graph, active, completed)
+        if missing:
+            name = sorted(missing)[0]
+            deps = ", ".join(f"`{dep}`" for dep in missing[name])
+            return (
+                ACTION_STOP,
+                f"spec `{name}` depends on missing {deps}; "
+                "declare the predecessor or remove the dependency",
+            )
+        cycles = spec_graph_mod.find_cycles(graph)
+        if cycles:
+            cycle = cycles[0]
+            chain = " -> ".join(f"`{part}`" for part in [*cycle, cycle[0]])
+            return (
+                ACTION_STOP,
+                f"dependency cycle {chain}; break the cycle before scheduling",
+            )
+        # Every remaining spec waits on incomplete predecessors.
+        name = eligible_specs_fallback(graph, active, completed)
+        incomplete = spec_graph_mod.incomplete_predecessors(name, graph, completed)
+        names = ", ".join(f"`{dep}`" for dep in incomplete) or "predecessors"
+        return (
+            ACTION_STOP,
+            f"spec `{name}` waits on incomplete {names}; complete predecessors first",
+        )
     return ACTION_IDLE, "no unresolved issues and no current or next spec"
+
+
+def eligible_specs_fallback(
+    graph: dict[str, list[str]], active: set[str], completed: set[str]
+) -> str:
+    """First alphabetically among active, incomplete, non-cyclic specs."""
+    missing = spec_graph_mod.find_missing(graph, active, completed)
+    blocked = spec_graph_mod.specs_in_cycles(spec_graph_mod.find_cycles(graph))
+    candidates = sorted(
+        name
+        for name in active
+        if name not in missing and name not in blocked and name not in completed
+    )
+    if candidates:
+        return candidates[0]
+    return sorted(active)[0]
 
 
 def select_context_strategy(config: Config) -> str:
@@ -344,12 +464,7 @@ class Runner:
             self.cycles.append(result)
             return result
         if kind == ACTION_STOP:
-            handoff_mod.add_item(
-                handoff,
-                type="blocker",
-                description=target,
-                priority="high",
-            )
+            ensure_blocker_once(handoff, target)
             result = self._stop_for_blocker(handoff, target)
             self.cycles.append(result)
             return result
@@ -641,8 +756,8 @@ class Runner:
             )
             return True
         if kind == ACTION_START_SPEC:
-            handoff.current_spec = handoff.next_spec
-            handoff.current_spec_file = f"{self.config.spec_dir}/{handoff.next_spec}"
+            handoff.current_spec = target
+            handoff.current_spec_file = f"{self.config.spec_dir}/{target}"
             handoff.next_spec = None
             handoff.status = "in-progress"
             return True

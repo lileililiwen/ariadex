@@ -94,11 +94,19 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(kind, "stop")
 
     def test_nothing_to_do_is_idle(self):
-        cfg = make_project(self.root)
+        cfg = make_project(self.root, specs=())
         kind, _ = select_next_action(
             handoff.empty_handoff(), inspect_repository(self.root, cfg.spec_dir)
         )
         self.assertEqual(kind, "idle")
+
+    def test_eligible_spec_auto_selected_without_explicit_target(self):
+        cfg = make_project(self.root)
+        kind, target = select_next_action(
+            handoff.empty_handoff(), inspect_repository(self.root, cfg.spec_dir)
+        )
+        self.assertEqual(kind, "start-spec")
+        self.assertEqual(target, "demo")
 
 
 class ExecutionTest(unittest.TestCase):
