@@ -38,7 +38,7 @@ def make_project(monkey_state=None) -> Path:
     root = Path(tmp.name)
     (root / ".ariadex").mkdir(parents=True)
     handoff_mod.write_handoff(
-        root / ".ariadex" / "handoff.md", handoff_mod.empty_handoff("s")
+        root / "HANDOFF.md", handoff_mod.empty_handoff("s")
     )
     (root / "openspec" / "changes").mkdir(parents=True)
     return root
@@ -721,7 +721,7 @@ class BoundaryTest(unittest.TestCase):
 
     def test_missing_handoff_blocks(self) -> None:
         project = make_project(self._tmp)
-        (project / ".ariadex" / "handoff.md").unlink()
+        (project / "HANDOFF.md").unlink()
         check = robot_mod.check_boundary(project, self._config())
         self.assertFalse(check.ok)
         self.assertIn("handoff", check.reason)
@@ -781,9 +781,9 @@ class BoundaryTest(unittest.TestCase):
         (change / "tasks.md").write_text(
             "# Tasks\n\n- [x] Implemented\n", encoding="utf-8"
         )
-        handoff = handoff_mod.read_handoff(project / ".ariadex" / "handoff.md")
+        handoff = handoff_mod.read_handoff(project / "HANDOFF.md")
         handoff.current_spec = "demo"
-        handoff_mod.write_handoff(project / ".ariadex" / "handoff.md", handoff)
+        handoff_mod.write_handoff(project / "HANDOFF.md", handoff)
 
         with unittest.mock.patch.object(
             robot_mod, "_git_tree_clean", return_value=(True, "")
@@ -801,9 +801,9 @@ class BoundaryTest(unittest.TestCase):
             "# Tasks\n\n- [x] Implemented\n- [ ] Still running\n",
             encoding="utf-8",
         )
-        handoff = handoff_mod.read_handoff(project / ".ariadex" / "handoff.md")
+        handoff = handoff_mod.read_handoff(project / "HANDOFF.md")
         handoff.current_spec = "demo"
-        handoff_mod.write_handoff(project / ".ariadex" / "handoff.md", handoff)
+        handoff_mod.write_handoff(project / "HANDOFF.md", handoff)
 
         check = robot_mod.check_boundary(project, self._config())
 

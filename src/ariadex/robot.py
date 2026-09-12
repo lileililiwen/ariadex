@@ -147,7 +147,7 @@ class RobotConfig:
     poll_interval_s: float = 5.0
     max_polls: int = 0  # 0 means unbounded; widgets quit explicitly
     spec_dir: str = "openspec/changes"
-    handoff_file: str = ".ariadex/handoff.md"
+    handoff_file: str = "HANDOFF.md"
     finished_change: str = ""
 
     def to_dict(self) -> dict:

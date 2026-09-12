@@ -37,13 +37,19 @@ class InitTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("created", out)
         self.assertTrue((self.root / ".ariadex" / "config.yaml").is_file())
-        self.assertTrue((self.root / ".ariadex" / "handoff.md").is_file())
+        self.assertTrue((self.root / "HANDOFF.md").is_file())
         self.assertTrue((self.root / ".ariadex" / "state.json").is_file())
+
+    def test_init_creates_custom_handoff_path(self):
+        write_raw_config(self.root, "handoff_file: docs/NEXT.md\n")
+        code, out, _ = run_cli(self.root, "init")
+        self.assertEqual(code, 0)
+        self.assertIn("docs/NEXT.md", out)
+        self.assertTrue((self.root / "docs" / "NEXT.md").is_file())
 
     def test_init_preserves_existing_files(self):
         write_raw_config(self.root, "agent_provider: codex\n")
-        handoff = self.root / ".ariadex" / "handoff.md"
-        handoff.parent.mkdir(parents=True, exist_ok=True)
+        handoff = self.root / "HANDOFF.md"
         handoff.write_text("human content\n", encoding="utf-8")
         code, out, _ = run_cli(self.root, "init")
         self.assertEqual(code, 0)

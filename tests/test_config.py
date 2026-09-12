@@ -25,6 +25,7 @@ class DefaultsTest(unittest.TestCase):
         self.assertIn(cfg.reset_mode, config.RESET_MODES)
         self.assertTrue(cfg.spec_dir)
         self.assertTrue(cfg.handoff_file)
+        self.assertEqual(cfg.handoff_file, "HANDOFF.md")
         self.assertIsInstance(cfg.verification_commands, list)
         self.assertGreaterEqual(cfg.retry_limit, 0)
         self.assertTrue(cfg.blocker_policy)

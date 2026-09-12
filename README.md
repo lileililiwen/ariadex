@@ -353,13 +353,14 @@ missing prerequisites are never presented as ready.
 
 Ariadex is a project-scoped runtime for repeatedly executing verified coding
 work from durable repository state. It is not a chat window. Its durable
-inputs are the project configuration, `.ariadex/handoff.md`, active OpenSpec
+inputs are the project configuration, `HANDOFF.md` by default, active OpenSpec
 changes, git state, the unresolved-work queue, and configured verification
 commands.
 
 The normal lifecycle is:
 
-1. `ariadex init` creates missing `.ariadex/` configuration, handoff, and
+1. `ariadex init` creates missing `.ariadex/` configuration, the configured
+   handoff file (default `HANDOFF.md`), and
    state files without overwriting existing files.
 2. `ariadex start` starts one resident daemon for the project. The daemon does
    not open a visible terminal; it owns the background scheduling loop.
@@ -412,8 +413,10 @@ durable state:
 - `.ariadex/config.yaml` — agent provider, terminal driver, context
   strategy, reset mode, spec directory, handoff path, verification
   commands, retry limit, blocker policy.
-- `.ariadex/handoff.md` — current spec, completed work, unresolved issues
+- `HANDOFF.md` by default — current spec, completed work, unresolved issues
   (`OPEN`/`RESOLVED`/`DEFERRED`/`BLOCKED`), next action, next spec.
+  Change the project-relative path with `handoff_file` in
+  `.ariadex/config.yaml`.
 - `.ariadex/state.json` — mode (`AUTO`/`MANUAL`/`PAUSE`), session,
   unresolved count.
 - `.ariadex/runs/` and `.ariadex/metrics.jsonl` — per-cycle logs and

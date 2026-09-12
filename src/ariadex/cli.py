@@ -1637,7 +1637,7 @@ def cmd_watch(
                 poll_interval_s=poll_interval,
                 max_polls=max_polls,
                 spec_dir=cfg.spec_dir if cfg else "openspec/changes",
-                handoff_file=cfg.handoff_file if cfg else ".ariadex/handoff.md",
+                handoff_file=cfg.handoff_file if cfg else "HANDOFF.md",
                 finished_change=finished_change,
             )
         )

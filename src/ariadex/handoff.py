@@ -1,6 +1,6 @@
 """Durable cross-session handoff and unresolved-issue lifecycle.
 
-The handoff file (default `.ariadex/handoff.md`) is Markdown with a
+The handoff file (default `HANDOFF.md`) is Markdown with a
 versioned YAML front-matter block, so it stays human-readable while the
 runner parses session id, current spec, status, completed work, unresolved
 items, next action, and next spec without conversation history.

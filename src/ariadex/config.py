@@ -37,7 +37,7 @@ class Config:
     context_strategy: str = "per-spec"
     reset_mode: str = "auto"
     spec_dir: str = "openspec/changes"
-    handoff_file: str = ".ariadex/handoff.md"
+    handoff_file: str = "HANDOFF.md"
     verification_commands: list = dataclasses.field(default_factory=list)
     retry_limit: int = 2
     blocker_policy: str = "stop-on-blocker"
@@ -80,7 +80,7 @@ reset_mode: auto
 spec_dir: openspec/changes
 # Durable handoff path: current spec, completed work, unresolved issues,
 # blockers, pending decisions, next action, and next spec.
-handoff_file: .ariadex/handoff.md
+handoff_file: HANDOFF.md
 # Shell commands that must pass before work is claimed complete.
 verification_commands: []
 # Maximum bounded retries for a failed operation. Must be >= 0.

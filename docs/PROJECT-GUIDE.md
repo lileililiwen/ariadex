@@ -206,7 +206,7 @@ Behavior:
 | Path | Purpose |
 | --- | --- |
 | `.ariadex/config.yaml` | provider, tmux, active-spec, verification, retry, and telemetry configuration |
-| `.ariadex/handoff.md` | durable context: completed work, unresolved work, blockers, and next action |
+| `HANDOFF.md` | durable context: current spec, completed work, unresolved work, blockers, and next action; configurable via `handoff_file` |
 | `.ariadex/state.json` | mode, session ID, current spec, unresolved count, and update time |
 | `.ariadex/daemon.json` | daemon PID, socket endpoint, lease/runtime status |
 | `.ariadex/daemon.sock` | local typed control IPC while the daemon is alive |
