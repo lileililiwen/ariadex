@@ -2,19 +2,20 @@
 
 ## Current state
 
-- `agent-adapters-and-tmux-driver` is implemented, verified, and archived as `2026-09-12-agent-adapters-and-tmux-driver` (commit `8bd10a8`).
-- New modules: `src/ariadex/adapters.py` (`AgentAdapter`, `Capabilities`, typed `AdapterError` hierarchy, `select_reset`), `src/ariadex/terminal.py` (`TerminalDriver`, `TmuxDriver`, `FakeTerminalDriver`), `src/ariadex/providers.py` (`OpenCodeAdapter`, `CodexAdapter`, registry-backed `get_adapter`).
-- Capability declarations: OpenCode `soft_reset:true` (`/new`), Codex `soft_reset:false` (hard reset via terminate+restart); both `token_usage:false` so metrics must use `usage: unavailable`.
-- CLI now: `run` resolves the adapter, requires tmux, and still exits non-zero without starting work (scheduler is change 3); `attach` execs into `ariadex-<session-id>` when tmux and the session exist.
-- Environment blocker: `tmux` binary is not installed here, so `tests/test_tmux_integration.py` skips (`tmux binary not available`) and provider capability flags are declared pending live-session verification once tmux exists. `opencode` and `codex` binaries are present; `--help` confirmed TUI-first CLIs.
-- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (71 tests, 1 skip; stdlib only; runtime requires PyYAML).
-- Active queue is the remaining three MVP changes in [ROADMAP.md](ROADMAP.md).
+- `state-driven-runner-and-handoff` is implemented, verified, and archived as `2026-09-12-state-driven-runner-and-handoff` (commit `6b5bf2f`).
+- New modules: `src/ariadex/handoff.py` (versioned YAML front-matter in `.ariadex/handoff.md`, OPEN/RESOLVED/DEFERRED/BLOCKED lifecycle with history, atomic write, malformed-file `HandoffError`), `src/ariadex/runner.py` (inspect -> determine -> execute -> persist loop, `Verifier` boundary, `select_context_strategy`, `apply_reset`, stop-on-blocker, state.json sync).
+- Selection rule: highest-priority OPEN issue precedes spec advancement; missing spec dir or adapter failure records a BLOCKED item without advancing.
+- Config reconciliations: `context_strategy` enum per-spec/per-task/token-threshold/manual/never (default per-spec; legacy `fresh-session` coerced), `blocker_policy` enum stop-on-blocker/record-and-continue (default stop-on-blocker; legacy `record-and-stop` coerced). `reset_mode` soft/hard/auto unchanged.
+- Verification stays a boundary (`UnavailableVerifier`): unverified outcomes persist and stop the run; nothing completes from agent prose. `run` now executes the loop (bounded 10 cycles); `status` shows handoff status, open/blocked counts, blockers, and next action.
+- Environment blocker (unchanged): no `tmux` binary, so live-tmux test skips and `run` stops before sending work in this environment.
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (105 tests, 1 skip; stdlib only; runtime requires PyYAML).
+- Active queue is the remaining two MVP changes in [ROADMAP.md](ROADMAP.md).
 
 ## Next change
 
-`state-driven-runner-and-handoff`
+`verification-logging-and-observability`
 
-It implements the state-driven orchestration loop, versioned handoff schema, unresolved queue, and reset policy on top of the foundation and adapter contracts.
+It implements shell-command verification gates, bounded retries, session run logs, metrics records, and status display on top of the runner boundary.
 
 ## Feature-to-change sequence
 
@@ -58,6 +59,6 @@ Incomplete or blocked work must not be claimed complete. Record the exact failed
 
 ## Verification evidence
 
-- `PYTHONPATH=src python3 -m unittest discover -s tests`: 71 tests ran, OK (1 skipped: live tmux lifecycle, `tmux` binary unavailable).
-- `openspec validate --changes --strict --no-interactive`: 4 passed, 0 failed (before archiving the completed change; archive re-validated specs and generated `openspec/specs/agent-adapter/spec.md` and `openspec/specs/tmux-terminal/spec.md`).
-- Foundation evidence from change 1 remains valid: `init`/`status`/`pause` idempotency, invalid `reset_mode` rejection, unsupported-provider `run` rejection.
+- `PYTHONPATH=src python3 -m unittest discover -s tests`: 105 tests ran, OK (1 skipped: live tmux lifecycle, `tmux` binary unavailable).
+- `openspec validate --changes --strict --no-interactive`: 3 passed, 0 failed (before archiving; archive generated `openspec/specs/handoff-and-unresolved-queue/spec.md` and `openspec/specs/state-driven-runner/spec.md`).
+- Scratch exercise: `init` + `status` shows handoff section; `run` without tmux exits 1 before sending work; runner restart/queue/reset paths covered by fake-driver tests.
