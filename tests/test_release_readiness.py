@@ -282,10 +282,12 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
     def test_publication_is_gated_on_evidence_and_readiness(self):
         text = self._workflow_text()
-        gate = text.index("evidence --gate")
+        gate = text.index("evidence --release-gate")
         readiness = text.index("ariadex.release --tag")
         publish = text.index("pypa/gh-action-pypi-publish")
-        self.assertLess(gate, publish, "live evidence gate must precede publication")
+        self.assertLess(
+            gate, publish, "live evidence release gate must precede publication"
+        )
         self.assertLess(
             readiness, publish, "readiness dry run must precede publication"
         )

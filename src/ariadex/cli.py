@@ -255,6 +255,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="exit non-zero unless every scenario passed",
     )
     evidence.add_argument(
+        "--release-gate",
+        action="store_true",
+        help="publication gate: fail on blocked or zero real provider passes",
+    )
+    evidence.add_argument(
         "--timeout",
         type=int,
         default=live_evidence_mod.DEFAULT_TIMEOUT_S,
@@ -898,6 +903,7 @@ def cmd_export_events(
 def cmd_evidence(
     project_dir: Path,
     gate: bool = False,
+    release_gate: bool = False,
     timeout_s: int = live_evidence_mod.DEFAULT_TIMEOUT_S,
     only: str | None = None,
     provision: bool = False,
@@ -905,8 +911,9 @@ def cmd_evidence(
     local_tmux: bool = False,
 ) -> int:
     # Diagnostics only: never schedules work, sends input, or installs
-    # anything. Honest classification: skipped/blocked are reported, and
-    # --gate exits non-zero unless everything passed.
+    # anything. Honest classification: skipped/blocked are reported,
+    # --gate exits non-zero unless everything passed, and --release-gate
+    # fails on blocked results or zero real provider passes.
     names = only.split(",") if only else None
     results = live_evidence_mod.run_all(
         timeout_s=timeout_s,
@@ -916,6 +923,8 @@ def cmd_evidence(
         local_tmux=local_tmux,
     )
     print(live_evidence_mod.format_report(results))
+    if release_gate:
+        return live_evidence_mod.release_gate_exit_code(results)
     if gate:
         return live_evidence_mod.gate_exit_code(results)
     return EXIT_OK
@@ -1227,6 +1236,7 @@ def main(argv: list[str] | None = None) -> int:
         "evidence": lambda: cmd_evidence(
             project_dir,
             gate=getattr(args, "gate", False),
+            release_gate=getattr(args, "release_gate", False),
             timeout_s=getattr(args, "timeout", live_evidence_mod.DEFAULT_TIMEOUT_S),
             only=getattr(args, "only", None),
             provision=getattr(args, "provision", False),

@@ -49,8 +49,8 @@ jobs:
         run: |
           command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
           command -v opencode || npm install -g opencode-ai@1
-      - name: live evidence release gate (no skips allowed)
-        run: python -m ariadex evidence --gate --timeout 180
+      - name: live evidence release gate (blocked and zero-provider fails)
+        run: python -m ariadex evidence --release-gate --timeout 180
       - run: python -m build
       - name: release readiness dry run (identity, remote, tag, security, artifacts)
         run: python -m ariadex.release --tag "${GITHUB_REF_NAME}"

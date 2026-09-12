@@ -7,7 +7,7 @@
 ## 2. Release verification
 
 - [ ] 2.1 Configure PyPI trusted publishing scoped to the canonical workflow.
-- [ ] 2.2 Run a maintainer-reviewed tag release with no skipped live evidence.
+- [ ] 2.2 Run a maintainer-reviewed tag release: no failed/blocked live evidence, at least one real provider lifecycle passed, skipped providers explicitly reported as unevaluated.
 - [ ] 2.3 Verify PyPI metadata, hashes, install, `ariadex --version`, `init`, and `status` from the published artifact.
 
 ## 3. Handoff

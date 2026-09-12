@@ -81,6 +81,44 @@ class ClassificationTest(unittest.TestCase):
         self.assertEqual(gate_exit_code(ok), 0)
         self.assertNotEqual(gate_exit_code(mixed), 0)
 
+    def test_release_gate_needs_provider_pass_and_no_blocked(self):
+        from ariadex.live_evidence import release_gate_exit_code
+
+        provider_ok = [
+            live_evidence.EvidenceResult("tmux-lifecycle", PASSED, "fine"),
+            live_evidence.EvidenceResult("opencode-lifecycle", PASSED, "real"),
+            live_evidence.EvidenceResult("codex-lifecycle", SKIPPED, "no codex"),
+        ]
+        self.assertEqual(release_gate_exit_code(provider_ok), 0)
+        no_provider = [
+            live_evidence.EvidenceResult("tmux-lifecycle", PASSED, "fine"),
+            live_evidence.EvidenceResult("opencode-lifecycle", SKIPPED, "absent"),
+            live_evidence.EvidenceResult("codex-lifecycle", SKIPPED, "absent"),
+        ]
+        self.assertNotEqual(release_gate_exit_code(no_provider), 0)
+        blocked = [
+            *provider_ok,
+            live_evidence.EvidenceResult("x", BLOCKED, "broken"),
+        ]
+        self.assertNotEqual(release_gate_exit_code(blocked), 0)
+
+    def test_release_gate_flag_reaches_runner(self):
+        import io
+        from contextlib import redirect_stdout
+
+        ok = [live_evidence.EvidenceResult("opencode-lifecycle", PASSED, "real")]
+        with (
+            mock.patch.object(live_evidence, "run_all", return_value=ok),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(live_evidence.main(["--release-gate"]), 0)
+        skipped = [live_evidence.EvidenceResult("opencode-lifecycle", SKIPPED, "no")]
+        with (
+            mock.patch.object(live_evidence, "run_all", return_value=skipped),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertNotEqual(live_evidence.main(["--release-gate"]), 0)
+
     def test_report_never_calls_skipped_passing(self):
         results = [
             live_evidence.EvidenceResult("a", PASSED, "fine"),

@@ -1167,6 +1167,28 @@ def gate_exit_code(results: list[EvidenceResult]) -> int:
     return 1
 
 
+# Scenarios that drive a real provider CLI. Ariadex ships the orchestrator,
+# not provider CLIs, so a release proves the harness against whichever of
+# these are installed and explicitly reports the rest as unevaluated.
+REAL_PROVIDER_SCENARIOS = ("opencode-lifecycle", "codex-lifecycle")
+
+
+def release_gate_exit_code(results: list[EvidenceResult]) -> int:
+    """Publication-gate exit: zero when nothing failed or blocked and at
+    least one real provider lifecycle passed. Skipped providers are
+    tolerated but never claimed: the report names them as unevaluated,
+    and operators validate them with `evidence --only <scenario>`."""
+    by_name = {r.name: r for r in results}
+    if any(r.status == BLOCKED for r in results):
+        return 1
+    if not any(
+        by_name.get(name, EvidenceResult(name, SKIPPED, "not run")).status == PASSED
+        for name in REAL_PROVIDER_SCENARIOS
+    ):
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point shared by the CLI: print report, honour --gate."""
     import argparse
@@ -1176,6 +1198,13 @@ def main(argv: list[str] | None = None) -> int:
         "--gate",
         action="store_true",
         help="exit non-zero unless every scenario passed",
+    )
+    parser.add_argument(
+        "--release-gate",
+        action="store_true",
+        help="publication gate: exit non-zero on any blocked result or "
+        "when no real provider lifecycle passed; skipped providers are "
+        "reported as unevaluated, never claimed",
     )
     parser.add_argument(
         "--timeout",
@@ -1212,6 +1241,8 @@ def main(argv: list[str] | None = None) -> int:
         local_tmux=args.local_tmux,
     )
     print(format_report(results))
+    if args.release_gate:
+        return release_gate_exit_code(results)
     if args.gate:
         return gate_exit_code(results)
     return 0
