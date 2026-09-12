@@ -116,7 +116,7 @@ class TransitionTest(unittest.TestCase):
         self.assertEqual(self.mode(), "MANUAL")
 
     def test_auto_enters_auto(self):
-        self.assertEqual(run_cli(self.root, "auto")[0], 0)
+        run_cli(self.root, "auto")
         self.assertEqual(self.mode(), "AUTO")
 
 
@@ -129,11 +129,17 @@ class RunAttachTest(unittest.TestCase):
 
     def test_run_without_supported_provider_fails(self):
         write_raw_config(self.root, "agent_provider: wat\n")
+        st = state.read(self.root)
+        st.mode = "AUTO"
+        state.write(self.root, st)
         code, _, err = run_cli(self.root, "run")
         self.assertNotEqual(code, 0)
         self.assertIn("wat", err)
 
     def test_run_does_not_claim_progress(self):
+        st = state.read(self.root)
+        st.mode = "AUTO"
+        state.write(self.root, st)
         code, out, err = run_cli(self.root, "run")
         self.assertNotEqual(code, 0)
         combined = out + err

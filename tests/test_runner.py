@@ -52,7 +52,9 @@ def make_project(root: Path, specs=("demo",), **overrides) -> config.Config:
 def make_runner(root: Path, cfg=None, verifier=None, provider="opencode"):
     cfg = cfg or make_project(root)
     (root / ".ariadex").mkdir(parents=True, exist_ok=True)
-    state.write(root, state.initial_state())
+    stored = state.initial_state()
+    stored.mode = "AUTO"
+    state.write(root, stored)
     driver = FakeTerminalDriver()
     adapter = providers.get_adapter(
         provider, driver, "test-session", root
@@ -366,7 +368,9 @@ class ObservabilityTest(unittest.TestCase):
 
         cfg = make_project(self.root)
         (self.root / ".ariadex").mkdir(parents=True, exist_ok=True)
-        state.write(self.root, state.initial_state())
+        stored = state.initial_state()
+        stored.mode = "AUTO"
+        state.write(self.root, stored)
         adapter = UsageAdapter(FakeTerminalDriver(), "s", self.root)
         run = Runner(self.root, cfg, adapter, PassVerifier())
         doc = handoff.empty_handoff()

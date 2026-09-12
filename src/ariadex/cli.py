@@ -14,9 +14,11 @@ import sys
 from pathlib import Path
 
 from . import config as config_mod
+from . import control as control_mod
 from . import handoff as handoff_mod
 from . import logging as logging_mod
 from . import providers as providers_mod
+from . import resync as resync_mod
 from . import runner as runner_mod
 from . import state as state_mod
 from . import status as status_mod
@@ -165,86 +167,122 @@ def cmd_status(project_dir: Path) -> int:
     return EXIT_OK
 
 
-def _set_mode(project_dir: Path, mode: str, note: str) -> int:
-    cfg = _load_config(project_dir)
-    if cfg is None:
-        return EXIT_ERROR
-    try:
-        st = state_mod.read(project_dir)
-    except state_mod.StateError:
-        st = state_mod.initial_state()
-    if st.mode == mode:
-        print(f"mode is already {mode}; no change made")
-        return EXIT_OK
-    st.mode = mode
-    state_mod.write(project_dir, st)
-    print(f"mode: {mode} ({note})")
-    return EXIT_OK
-
-
-def cmd_pause(project_dir: Path) -> int:
-    # Idempotent: an already-paused project succeeds without touching
-    # the session identifier or scheduling work.
-    return _set_mode(project_dir, "PAUSE", "no new scheduling operations")
-
-
-def cmd_resume(project_dir: Path) -> int:
-    # Leaves PAUSE under manual control; `auto` resumes scheduling.
-    return _set_mode(project_dir, "MANUAL", "manual control; use `ariadex auto` to resume scheduling")
-
-
-def cmd_takeover(project_dir: Path) -> int:
-    # Placeholder lifecycle: MANUAL means no automatic input while Ariadex
-    # keeps observing and logging. Later changes add live takeover.
-    return _set_mode(
-        project_dir,
-        "MANUAL",
-        "manual control active; automatic input disabled, observation continues",
+def _log_mode_event(
+    project_dir: Path, st: state_mod.State, action: str, note: str
+) -> None:
+    """Observation is permitted in every mode; input is not."""
+    record = logging_mod.RunLogRecord(
+        session_id=st.session_id,
+        spec=st.current_spec,
+        action=action,
+        input="",
+        output=note,
+        exit_code=0,
+        validation_result="n/a",
+        reset_reason=None,
+        retry_count=0,
+    )
+    logging_mod.write_run_log(
+        project_dir / ".ariadex" / logging_mod.RUNS_DIRNAME, record
     )
 
 
-def cmd_auto(project_dir: Path) -> int:
-    # Placeholder lifecycle: validate, resync from durable sources, enter AUTO.
-    # The full runner lands in state-driven-runner-and-handoff.
-    cfg = _load_config(project_dir)
-    if cfg is None:
-        return EXIT_ERROR
-    try:
-        st = state_mod.read(project_dir)
-    except state_mod.StateError:
-        st = state_mod.initial_state()
-    handoff_path = project_dir / cfg.handoff_file
-    if handoff_path.is_file():
-        print(f"resynchronized from {cfg.handoff_file}")
-    else:
-        print(
-            f"warning: handoff file {cfg.handoff_file} not found; "
-            "continuing with repository and spec state only"
-        )
-    if st.mode == "AUTO":
-        print("mode is already AUTO; no change made")
-        return EXIT_OK
-    st.mode = "AUTO"
-    state_mod.write(project_dir, st)
-    print("mode: AUTO (scheduling resumed from handoff and spec state)")
-    return EXIT_OK
-
-
-def cmd_run(project_dir: Path) -> int:
-    # State-driven execution: inspect, determine, execute through the
-    # adapter, persist, then reset or stop. Verification stays a boundary
-    # until verification-logging-and-observability ships, so unverified
-    # outcomes are persisted without advancing and stop the run.
+def _transition(
+    project_dir: Path, via: str, note: str, log_event: bool = False
+) -> int:
     cfg = _load_config(project_dir)
     if cfg is None:
         return EXIT_ERROR
     st = _load_state(project_dir)
     if st is None:
         return EXIT_ERROR
-    if st.mode == "PAUSE":
-        print("error: project is PAUSED; use `ariadex resume` or `ariadex auto` first",
-              file=sys.stderr)
+    target = control_mod.VIA_TARGETS[via]
+    try:
+        mode = control_mod.transition(st.mode, target, via=via)
+    except control_mod.TransitionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    if mode == st.mode:
+        print(f"mode is already {mode}; no change made")
+        return EXIT_OK
+    st.mode = mode
+    state_mod.write(project_dir, st)
+    if log_event:
+        _log_mode_event(project_dir, st, via, f"mode -> {mode}: {note}")
+    print(f"mode: {mode} ({note})")
+    return EXIT_OK
+
+
+def cmd_pause(project_dir: Path) -> int:
+    # Idempotent: an already-paused project succeeds without touching the
+    # tmux session or scheduling work. The CLI process stays alive.
+    return _transition(
+        project_dir, "pause",
+        "no new scheduling operations; CLI session preserved",
+        log_event=True,
+    )
+
+
+def cmd_resume(project_dir: Path) -> int:
+    # Valid only from PAUSE; returns to manual control. `auto` resumes
+    # scheduling after resynchronization.
+    return _transition(
+        project_dir, "resume",
+        "manual control; use `ariadex auto` to resume scheduling",
+    )
+
+
+def cmd_takeover(project_dir: Path) -> int:
+    # MANUAL means no automatic input while observation and logs continue.
+    # The existing tmux session is preserved, never terminated here.
+    return _transition(
+        project_dir, "takeover",
+        "manual control active; automatic input disabled until `ariadex auto`; "
+        "CLI session preserved",
+        log_event=True,
+    )
+
+
+def cmd_auto(project_dir: Path) -> int:
+    # Resynchronize from handoff, git, specs, and queue; persist; enter
+    # AUTO; then resume the runner. Manual edits are evidence, never
+    # completion: verification still gates advancement.
+    cfg = _load_config(project_dir)
+    if cfg is None:
+        return EXIT_ERROR
+    st = _load_state(project_dir)
+    if st is None:
+        return EXIT_ERROR
+    try:
+        _, report = resync_mod.resync(project_dir, cfg)
+    except handoff_mod.HandoffError as exc:
+        print(f"error: resync refused: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if report.git_available:
+        print(f"resync: {len(report.changed_files)} uncommitted change(s) observed")
+    else:
+        print("resync: git unavailable; used handoff and spec state")
+    for note in report.notes:
+        print(f"resync: {note}")
+    print(f"resync: next action: {report.next_action}")
+    try:
+        mode = control_mod.transition(st.mode, "AUTO", via="auto")
+    except control_mod.TransitionError as exc:  # unreachable; kept explicit
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if mode != st.mode:
+        st.mode = mode
+        state_mod.write(project_dir, st)
+        print("mode: AUTO (scheduling resumed from resynchronized state)")
+    else:
+        print("mode is already AUTO; resynchronized state")
+    return _run_loop(project_dir, cfg, state_mod.read(project_dir))
+
+
+def _run_loop(
+    project_dir: Path, cfg: config_mod.Config, st: state_mod.State
+) -> int:
+    """Execute the state-driven runner loop. Caller owns mode ownership."""
     if cfg.terminal_driver not in config_mod.SUPPORTED_TERMINAL_DRIVERS:
         print(
             f"error: unsupported terminal driver `{cfg.terminal_driver}`; "
@@ -277,6 +315,32 @@ def cmd_run(project_dir: Path) -> int:
     if last is not None and last.stopped and last.stop_reason not in ("idle",):
         return EXIT_ERROR
     return EXIT_OK
+
+
+def cmd_run(project_dir: Path) -> int:
+    # State-driven execution, gated on AUTO: MANUAL disables automatic
+    # input and PAUSE allows no new scheduling operations.
+    cfg = _load_config(project_dir)
+    if cfg is None:
+        return EXIT_ERROR
+    st = _load_state(project_dir)
+    if st is None:
+        return EXIT_ERROR
+    if not control_mod.allows_scheduling(st.mode):
+        if st.mode == "PAUSE":
+            print(
+                "error: scheduling requires AUTO mode; project is PAUSED "
+                "(use `ariadex resume` or `ariadex auto` first)",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "error: automatic input is disabled in MANUAL mode; "
+                "use `ariadex auto` to resynchronize and resume",
+                file=sys.stderr,
+            )
+        return EXIT_ERROR
+    return _run_loop(project_dir, cfg, st)
 
 
 def cmd_attach(project_dir: Path) -> int:

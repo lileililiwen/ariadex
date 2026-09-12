@@ -192,9 +192,37 @@ class Runner:
             "retries": 0,
         }
         started = logging_mod.now_iso()
-        result = self._cycle()
+        guard = self._mode_guard()
+        result = guard if guard is not None else self._cycle()
         self._observe(result, started)
         return result
+
+    def _mode_guard(self) -> CycleResult | None:
+        """Refuse automatic input unless the durable mode is AUTO.
+
+        MANUAL keeps observation and logs but sends nothing; PAUSE allows
+        no new scheduling operations. Neither path touches the adapter.
+        """
+        from . import control as control_mod
+        from . import state as state_mod
+
+        try:
+            mode = state_mod.read(self.project_dir).mode
+        except state_mod.StateError:
+            return None
+        if control_mod.allows_scheduling(mode):
+            return None
+        self._ctx["output"] = (
+            f"mode is {mode}: no automatic input without `ariadex auto`"
+        )
+        return CycleResult(
+            kind=ACTION_STOP,
+            action=f"none — {mode} mode",
+            outcome="mode-guard",
+            detail=f"mode is {mode}: scheduling requires AUTO",
+            stopped=True,
+            stop_reason="not-auto",
+        )
 
     def _observe(self, result: CycleResult, started: str) -> None:
         """Persist one run log and one metrics record per cycle."""
