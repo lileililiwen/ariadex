@@ -69,6 +69,15 @@ def truncate_output(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     return text[:limit] + f"\n…[truncated {len(text) - limit} chars]"
 
 
+def _text(part: bytes | str | None) -> str:
+    """TimeoutExpired payloads are typed bytes|str; never crash on bytes."""
+    if part is None:
+        return ""
+    if isinstance(part, bytes):
+        return part.decode("utf-8", errors="replace")
+    return part
+
+
 def run_command(
     command: str, workdir: Path | str, timeout_s: int = DEFAULT_TIMEOUT_S
 ) -> CommandResult:
@@ -93,7 +102,7 @@ def run_command(
         )
     except subprocess.TimeoutExpired as exc:
         duration = time.monotonic() - start
-        partial = (exc.stdout or "") + (exc.stderr or "")
+        partial = _text(exc.stdout) + _text(exc.stderr)
         note = f"\ncommand timed out after {timeout_s}s"
         return CommandResult(
             command=command,
@@ -121,7 +130,9 @@ def run_commands(
     failed = [res for res in results if res.exit_code != 0]
     if not failed:
         return VerificationOutcome(
-            passed=True, exit_code=0, results=results,
+            passed=True,
+            exit_code=0,
+            results=results,
             detail=f"all {len(results)} verification command(s) passed",
         )
     first = failed[0]
@@ -130,13 +141,12 @@ def run_commands(
     elif first.exit_code is None:
         detail = f"verification FAILED: `{first.command}` unavailable: {first.output}"
     else:
-        detail = (
-            f"verification FAILED: `{first.command}` "
-            f"exited {first.exit_code}"
-        )
+        detail = f"verification FAILED: `{first.command}` exited {first.exit_code}"
     return VerificationOutcome(
-        passed=False, exit_code=first.exit_code,
-        results=results, detail=detail,
+        passed=False,
+        exit_code=first.exit_code,
+        results=results,
+        detail=detail,
     )
 
 

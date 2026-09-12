@@ -2,7 +2,7 @@
 
 import unittest
 
-from ariadex import adapters, providers
+from ariadex import providers
 from ariadex.adapters import (
     AdapterError,
     Capabilities,
@@ -28,7 +28,7 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(driver.sessions["test-session"]["command"], ["opencode"])
 
     def test_start_connects_when_session_alive(self):
-        adapter, driver = make_open_code()
+        adapter, _driver = make_open_code()
         adapter.start()
         self.assertEqual(adapter.start(), "connected")
 
@@ -152,8 +152,10 @@ class UnsupportedCapabilityTest(unittest.TestCase):
     def test_registry_matches_config_contract(self):
         from ariadex import config
 
-        self.assertEqual(tuple(sorted(providers.supported_providers())),
-                         tuple(sorted(config.SUPPORTED_PROVIDERS)))
+        self.assertEqual(
+            tuple(sorted(providers.supported_providers())),
+            tuple(sorted(config.SUPPORTED_PROVIDERS)),
+        )
 
 
 class SelectResetTest(unittest.TestCase):
@@ -181,13 +183,19 @@ class SelectResetTest(unittest.TestCase):
 
     def test_opencode_selects_soft_codex_selects_hard(self):
         self.assertEqual(
-            select_reset("auto", providers.OpenCodeAdapter(
-                FakeTerminalDriver(), "s", "/tmp").capabilities),
+            select_reset(
+                "auto",
+                providers.OpenCodeAdapter(
+                    FakeTerminalDriver(), "s", "/tmp"
+                ).capabilities,
+            ),
             "soft",
         )
         self.assertEqual(
-            select_reset("auto", providers.CodexAdapter(
-                FakeTerminalDriver(), "s", "/tmp").capabilities),
+            select_reset(
+                "auto",
+                providers.CodexAdapter(FakeTerminalDriver(), "s", "/tmp").capabilities,
+            ),
             "hard",
         )
 

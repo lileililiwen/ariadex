@@ -24,6 +24,19 @@ classifiers = [
 ]
 dependencies = ["PyYAML>=6"]
 
+[project.optional-dependencies]
+# Pinned quality-gate toolchain (see [tool.ruff], [tool.mypy],
+# [tool.coverage] below and .github/workflows/ci.yml). Install with:
+#   pip install -e ".[dev]"
+dev = [
+  "build==1.6.1",
+  "coverage==7.16.0",
+  "mypy==2.3.1",
+  "pip-audit==2.10.1",
+  "ruff==0.16.7",
+  "types-PyYAML==6.0.12.20260906",
+]
+
 [project.urls]
 Homepage = "https://github.com/anomalyco/opencode"
 Security = "https://github.com/anomalyco/opencode/blob/main/SECURITY.md"
@@ -40,3 +53,31 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 ariadex = ["py.typed"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+# E/F: syntax, unused, undefined. I: import order. UP: py311 idioms.
+# B: likely bugs. SIM105/SIM117: mechanical simplifications. C4/RUF: safe
+# modernizations. Bandit (S), pylint (PL) and blind-except (BLE) families
+# are intentionally out: they demand behavior-affecting changes and are
+# deferred to a hardening pass.
+select = ["B", "C4", "E", "F", "I", "RUF", "SIM", "UP", "W"]
+
+[tool.mypy]
+python_version = "3.11"
+show_error_codes = true
+warn_unused_ignores = true
+
+[tool.coverage.run]
+source = ["ariadex"]
+branch = true
+
+[tool.coverage.report]
+# Threshold is the measured 2026-09-12 baseline (82% total across
+# src/ariadex under `coverage run -m unittest discover -s tests`).
+# Raise it, never lower it.
+fail_under = 82
+show_missing = true

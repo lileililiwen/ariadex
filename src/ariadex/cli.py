@@ -36,6 +36,7 @@ def _package_version() -> str:
         return "unknown"
     return version
 
+
 HANDOFF_TEMPLATE = """\
 # Ariadex handoff
 
@@ -245,9 +246,7 @@ def _log_mode_event(
     )
 
 
-def _transition(
-    project_dir: Path, via: str, note: str, log_event: bool = False
-) -> int:
+def _transition(project_dir: Path, via: str, note: str, log_event: bool = False) -> int:
     cfg = _load_config(project_dir)
     if cfg is None:
         return EXIT_ERROR
@@ -275,7 +274,8 @@ def cmd_pause(project_dir: Path) -> int:
     # Idempotent: an already-paused project succeeds without touching the
     # tmux session or scheduling work. The CLI process stays alive.
     return _transition(
-        project_dir, "pause",
+        project_dir,
+        "pause",
         "no new scheduling operations; CLI session preserved",
         log_event=True,
     )
@@ -285,7 +285,8 @@ def cmd_resume(project_dir: Path) -> int:
     # Valid only from PAUSE; returns to manual control. `auto` resumes
     # scheduling after resynchronization.
     return _transition(
-        project_dir, "resume",
+        project_dir,
+        "resume",
         "manual control; use `ariadex auto` to resume scheduling",
     )
 
@@ -294,27 +295,34 @@ def cmd_takeover(project_dir: Path) -> int:
     # MANUAL means no automatic input while observation and logs continue.
     # The existing tmux session is preserved, never terminated here.
     return _transition(
-        project_dir, "takeover",
+        project_dir,
+        "takeover",
         "manual control active; automatic input disabled until `ariadex auto`; "
         "CLI session preserved",
         log_event=True,
     )
 
 
-def cmd_evidence(project_dir: Path, gate: bool = False,
-                 timeout_s: int = live_evidence_mod.DEFAULT_TIMEOUT_S,
-                 only: str | None = None,
-                 provision: bool = False,
-                 tmux_bin: str | None = None,
-                 local_tmux: bool = False) -> int:
+def cmd_evidence(
+    project_dir: Path,
+    gate: bool = False,
+    timeout_s: int = live_evidence_mod.DEFAULT_TIMEOUT_S,
+    only: str | None = None,
+    provision: bool = False,
+    tmux_bin: str | None = None,
+    local_tmux: bool = False,
+) -> int:
     # Diagnostics only: never schedules work, sends input, or installs
     # anything. Honest classification: skipped/blocked are reported, and
     # --gate exits non-zero unless everything passed.
     names = only.split(",") if only else None
-    results = live_evidence_mod.run_all(timeout_s=timeout_s, only=names,
-                                        provision=provision,
-                                        tmux_bin=tmux_bin,
-                                        local_tmux=local_tmux)
+    results = live_evidence_mod.run_all(
+        timeout_s=timeout_s,
+        only=names,
+        provision=provision,
+        tmux_bin=tmux_bin,
+        local_tmux=local_tmux,
+    )
     print(live_evidence_mod.format_report(results))
     if gate:
         return live_evidence_mod.gate_exit_code(results)
@@ -482,8 +490,7 @@ def main(argv: list[str] | None = None) -> int:
         "evidence": lambda: cmd_evidence(
             project_dir,
             gate=getattr(args, "gate", False),
-            timeout_s=getattr(args, "timeout",
-                              live_evidence_mod.DEFAULT_TIMEOUT_S),
+            timeout_s=getattr(args, "timeout", live_evidence_mod.DEFAULT_TIMEOUT_S),
             only=getattr(args, "only", None),
             provision=getattr(args, "provision", False),
             tmux_bin=getattr(args, "tmux_bin", None),

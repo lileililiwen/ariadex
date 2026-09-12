@@ -18,6 +18,7 @@ import os
 import shutil
 import stat
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 EXECUTABLE = "tmux"
@@ -208,7 +209,10 @@ def read_depends(package: str = "tmux") -> list[str]:
         raise TmuxSetupError("local tmux fetch needs `apt-cache` on PATH")
     proc = subprocess.run(
         ["apt-cache", "depends", "--no-recommends", package],
-        capture_output=True, text=True, timeout=120, env=_c_locale(),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=_c_locale(),
     )
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "unknown error").strip()
@@ -224,8 +228,10 @@ def read_depends(package: str = "tmux") -> list[str]:
     return deps
 
 
-def missing_shared_libs(binary: str | Path,
-                        lib_dirs: list[str | Path] | None = None) -> list[str]:
+def missing_shared_libs(
+    binary: str | Path,
+    lib_dirs: Sequence[str | Path] | None = None,
+) -> list[str]:
     """Shared libraries the loader cannot resolve for `binary` (via ldd).
 
     `lib_dirs` are prepended to `LD_LIBRARY_PATH` so extracted-but-
@@ -236,7 +242,10 @@ def missing_shared_libs(binary: str | Path,
         extra = ":".join(str(d) for d in lib_dirs)
         env["LD_LIBRARY_PATH"] = f"{extra}:{env.get('LD_LIBRARY_PATH', '')}"
     proc = subprocess.run(
-        ["ldd", str(binary)], capture_output=True, text=True, timeout=120,
+        ["ldd", str(binary)],
+        capture_output=True,
+        text=True,
+        timeout=120,
         env=env,
     )
     if proc.returncode != 0:
@@ -273,9 +282,7 @@ def fetch_local_tmux(dest_dir: str | Path) -> Path:
     """
     dest = Path(dest_dir)
     if shutil.which("apt-get") is None or shutil.which("dpkg-deb") is None:
-        raise TmuxSetupError(
-            "local tmux fetch needs `apt-get` and `dpkg-deb` on PATH"
-        )
+        raise TmuxSetupError("local tmux fetch needs `apt-get` and `dpkg-deb` on PATH")
     dl_dir = dest / "debs"
     root = dest / "root"
     dl_dir.mkdir(parents=True, exist_ok=True)
@@ -285,7 +292,10 @@ def fetch_local_tmux(dest_dir: str | Path) -> Path:
         wanted = ["tmux", *[d for d in deps if d != "tmux"]]
         proc = subprocess.run(
             ["apt-get", "download", *wanted],
-            capture_output=True, text=True, timeout=600, cwd=str(dl_dir),
+            capture_output=True,
+            text=True,
+            timeout=600,
+            cwd=str(dl_dir),
         )
         if proc.returncode != 0:
             detail = (proc.stderr or proc.stdout or "unknown error").strip()
@@ -296,7 +306,9 @@ def fetch_local_tmux(dest_dir: str | Path) -> Path:
         for deb in debs:
             proc = subprocess.run(
                 ["dpkg-deb", "-x", str(deb), str(root)],
-                capture_output=True, text=True, timeout=600,
+                capture_output=True,
+                text=True,
+                timeout=600,
             )
             if proc.returncode != 0:
                 detail = (proc.stderr or proc.stdout or "unknown error").strip()
@@ -313,7 +325,9 @@ def fetch_local_tmux(dest_dir: str | Path) -> Path:
                 + "; install them on the host or extend the fetch list"
             )
         return write_tmux_wrapper(
-            dest / "bin" / "tmux", target, lib_dirs,
+            dest / "bin" / "tmux",
+            target,
+            lib_dirs,
         )
     except TmuxSetupError:
         raise

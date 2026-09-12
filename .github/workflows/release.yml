@@ -1,0 +1,71 @@
+# Ariadex release: tag-triggered, fail-closed verification.
+#
+# Tag the release commit as `ariadex-v<version>` (must equal
+# `ariadex.__version__`; a mismatch fails the workflow). Live evidence
+# runs with `--gate`, so any skipped or blocked scenario fails the
+# release instead of silently passing. PyPI upload stays manual (see
+# CHANGELOG.md release guidance); built artifacts are retained here.
+#
+# Protection: grant this workflow the `release` environment in the repo
+# settings with required reviewers, so tags alone cannot ship.
+
+name: Release
+
+on:
+  push:
+    tags: ["ariadex-v*"]
+
+jobs:
+  verify-and-publish:
+    name: verify and retain artifacts
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install -g @fission-ai/openspec@1.6.0
+      - run: pip install -e ".[dev]" "build==1.6.1"
+      - name: tag matches package version
+        run: |
+          test "${GITHUB_REF_NAME}" = "ariadex-v$(python -c 'import ariadex; print(ariadex.__version__)')"
+      - run: python -m unittest discover -s tests
+      - run: openspec validate --changes --strict --no-interactive
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+      - run: mypy src/ariadex
+      - run: coverage run -m unittest discover -s tests
+      - run: coverage report
+      - run: pip-audit --desc=on .
+      - name: ensure tmux and a provider CLI
+        run: |
+          command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
+          command -v opencode || npm install -g opencode-ai@1
+      - name: live evidence release gate (no skips allowed)
+        run: python -m ariadex evidence --gate --timeout 180
+      - run: python -m build
+      - name: verify artifacts and record hashes
+        run: |
+          ls dist/ariadex-*.tar.gz dist/ariadex-*-py3-none-any.whl
+          sha256sum dist/ariadex-*.tar.gz dist/ariadex-*-py3-none-any.whl | tee dist/SHA256SUMS.txt
+      - name: clean-venv install and smoke test
+        run: |
+          python -m venv /tmp/releasevenv
+          /tmp/releasevenv/bin/pip install dist/ariadex-*-py3-none-any.whl
+          /tmp/releasevenv/bin/ariadex --help
+          /tmp/releasevenv/bin/ariadex --version
+          mkdir -p /tmp/ariadex-release-smoke && cd /tmp/ariadex-release-smoke
+          rm -rf .ariadex
+          /tmp/releasevenv/bin/ariadex init
+          /tmp/releasevenv/bin/ariadex status
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ariadex-${{ github.ref_name }}
+          path: |
+            dist/ariadex-*.tar.gz
+            dist/ariadex-*-py3-none-any.whl
+            dist/SHA256SUMS.txt

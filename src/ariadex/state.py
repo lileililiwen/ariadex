@@ -6,12 +6,13 @@ and last update time. Supported modes are AUTO, MANUAL, and PAUSE.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 STATE_REL_PATH = Path(".ariadex") / "state.json"
@@ -44,7 +45,7 @@ def new_session_id() -> str:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def initial_state() -> State:
@@ -84,13 +85,9 @@ def read(project_dir: Path) -> State:
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise StateError(f"invalid runtime state in {STATE_REL_PATH}: {exc}") from exc
     if not isinstance(raw, dict):
-        raise StateError(
-            f"invalid runtime state in {STATE_REL_PATH}: object required"
-        )
+        raise StateError(f"invalid runtime state in {STATE_REL_PATH}: object required")
     known = {field.name for field in dataclasses.fields(State)}
-    state = State(
-        **{key: value for key, value in raw.items() if key in known}
-    )
+    state = State(**{key: value for key, value in raw.items() if key in known})
     return validate_state(state, source=str(STATE_REL_PATH))
 
 
@@ -111,9 +108,7 @@ def write(project_dir: Path, state: State) -> State:
             os.fsync(handle.fileno())
         os.replace(tmp_name, path)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
     return state

@@ -6,7 +6,6 @@ from ariadex.terminal import (
     DeliveryFailed,
     FakeTerminalDriver,
     SessionMissing,
-    TerminalError,
     TmuxDriver,
     TmuxNotAvailable,
     session_name_for,

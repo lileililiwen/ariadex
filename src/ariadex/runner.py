@@ -20,7 +20,14 @@ from . import handoff as handoff_mod
 from . import logging as logging_mod
 from .adapters import AdapterError, AgentAdapter, StartupError, select_reset
 from .config import Config
-from .verify import ShellVerifier, UnavailableVerifier, Verifier, VerificationResult
+from .verify import (
+    ShellVerifier,
+    UnavailableVerifier,
+    Verifier,
+)
+from .verify import (
+    VerificationResult as VerificationResult,
+)
 
 CONTEXT_STRATEGIES = ("per-spec", "per-task", "token-threshold", "manual", "never")
 
@@ -290,9 +297,7 @@ class Runner:
             )
             return self._stop_for_blocker(handoff, "spec directory missing")
 
-        blockers = [
-            item for item in handoff.unresolved if item.status == "BLOCKED"
-        ]
+        blockers = [item for item in handoff.unresolved if item.status == "BLOCKED"]
         if blockers and self.config.blocker_policy == "stop-on-blocker":
             return self._stop_for_blocker(
                 handoff, f"{len(blockers)} BLOCKED item(s) present"
@@ -313,15 +318,21 @@ class Runner:
             self._ctx["output"] = target
             self._save(handoff)
             result = CycleResult(
-                kind=kind, action="none — idle", outcome="idle",
-                detail=target, stopped=True, stop_reason="idle",
+                kind=kind,
+                action="none — idle",
+                outcome="idle",
+                detail=target,
+                stopped=True,
+                stop_reason="idle",
             )
             self.cycles.append(result)
             return result
         if kind == ACTION_STOP:
             handoff_mod.add_item(
-                handoff, type="blocker",
-                description=target, priority="high",
+                handoff,
+                type="blocker",
+                description=target,
+                priority="high",
             )
             result = self._stop_for_blocker(handoff, target)
             self.cycles.append(result)
@@ -336,7 +347,8 @@ class Runner:
             self.adapter.start()
         except StartupError as exc:
             handoff_mod.add_item(
-                handoff, type="blocker",
+                handoff,
+                type="blocker",
                 description=f"provider failed to start for `{action}`: {exc}",
                 priority="high",
             )
@@ -354,7 +366,8 @@ class Runner:
             output = self.adapter.capture_output()
         except AdapterError as exc:
             handoff_mod.add_item(
-                handoff, type="blocker",
+                handoff,
+                type="blocker",
                 description=f"adapter failed during `{action}`: {exc}",
                 priority="high",
             )
@@ -379,8 +392,11 @@ class Runner:
             handoff.next_action = action
             self._save(handoff)
             result = CycleResult(
-                kind=kind, action=action, outcome="unverified",
-                detail=verdict.detail, stopped=True,
+                kind=kind,
+                action=action,
+                outcome="unverified",
+                detail=verdict.detail,
+                stopped=True,
                 stop_reason="verification-unavailable",
             )
             self.cycles.append(result)
@@ -401,18 +417,24 @@ class Runner:
                 item = handoff_mod.get_item(handoff, item_id)
             except handoff_mod.HandoffError:
                 item = handoff_mod.add_item(
-                    handoff, type="issue",
+                    handoff,
+                    type="issue",
                     description=f"verification failed: {action}",
                     priority="high",
                 )
         else:
             description = f"verification failed: {action}"
             matches = [
-                item for item in handoff.unresolved
+                item
+                for item in handoff.unresolved
                 if item.status == "OPEN" and item.description == description
             ]
-            item = matches[0] if matches else handoff_mod.add_item(
-                handoff, type="issue", description=description, priority="high"
+            item = (
+                matches[0]
+                if matches
+                else handoff_mod.add_item(
+                    handoff, type="issue", description=description, priority="high"
+                )
             )
         item.attempts += 1
         item.history.append(
@@ -440,16 +462,21 @@ class Runner:
             handoff.next_action = f"resolve-issue {item.id}: {item.description}"
             self._save(handoff)
             result = CycleResult(
-                kind=kind, action=action, outcome="verification-failed",
+                kind=kind,
+                action=action,
+                outcome="verification-failed",
                 detail=f"{detail}; repair scheduled "
                 f"(attempt {item.attempts}/{self.config.retry_limit})",
-                stopped=False, stop_reason=None,
+                stopped=False,
+                stop_reason=None,
             )
             self.cycles.append(result)
             return result
         if self.config.blocker_policy == "stop-on-blocker":
             handoff_mod.set_item_status(
-                handoff, item.id, "BLOCKED",
+                handoff,
+                item.id,
+                "BLOCKED",
                 note=f"retry limit reached: {detail}",
             )
             result = self._stop_for_blocker(handoff, "retry limit reached")
@@ -458,9 +485,12 @@ class Runner:
         handoff.next_action = self._plan_next(handoff)
         self._save(handoff)
         result = CycleResult(
-            kind=kind, action=action, outcome="verification-failed",
+            kind=kind,
+            action=action,
+            outcome="verification-failed",
             detail=f"{detail}; retry limit reached, recorded per policy",
-            stopped=False, stop_reason=None,
+            stopped=False,
+            stop_reason=None,
         )
         self.cycles.append(result)
         return result
@@ -486,7 +516,8 @@ class Runner:
                 reset = apply_reset(self.adapter, self.config.reset_mode, boundary)
             except AdapterError as exc:
                 handoff_mod.add_item(
-                    handoff, type="blocker",
+                    handoff,
+                    type="blocker",
                     description=f"reset failed after `{action}`: {exc}",
                     priority="high",
                 )
@@ -497,9 +528,12 @@ class Runner:
         handoff.next_action = self._plan_next(handoff)
         self._save(handoff)
         result = CycleResult(
-            kind=kind, action=action, outcome="completed",
+            kind=kind,
+            action=action,
+            outcome="completed",
             detail=f"verified; reset={reset}; next: {handoff.next_action}",
-            stopped=False, stop_reason=None,
+            stopped=False,
+            stop_reason=None,
         )
         self.cycles.append(result)
         return result
@@ -525,7 +559,8 @@ class Runner:
             handoff.current_spec = handoff.next_spec
             handoff.current_spec_file = (
                 f"{self.config.spec_dir}/{handoff.next_spec}"
-                if handoff.next_spec else None
+                if handoff.next_spec
+                else None
             )
             handoff.next_spec = None
             handoff.status = (
@@ -534,9 +569,7 @@ class Runner:
             return True
         if kind == ACTION_START_SPEC:
             handoff.current_spec = handoff.next_spec
-            handoff.current_spec_file = (
-                f"{self.config.spec_dir}/{handoff.next_spec}"
-            )
+            handoff.current_spec_file = f"{self.config.spec_dir}/{handoff.next_spec}"
             handoff.next_spec = None
             handoff.status = "in-progress"
             return True

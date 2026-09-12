@@ -1,17 +1,16 @@
 """Tests for takeover, resume guards, auto resync, and mode-gated runs."""
 
+import io
 import shutil
 import tempfile
 import unittest
+from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from ariadex import cli, handoff, providers, state
 from ariadex.handoff import add_item, write_handoff
 from ariadex.runner import Runner
 from ariadex.terminal import FakeTerminalDriver
-
-import io
-from contextlib import chdir, redirect_stderr, redirect_stdout
 
 
 def run_cli(root: Path, *argv: str) -> tuple[int, str, str]:

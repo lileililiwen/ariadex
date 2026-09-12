@@ -47,7 +47,8 @@ class InitTest(unittest.TestCase):
         code, out, _ = run_cli(self.root, "init")
         self.assertEqual(code, 0)
         self.assertIn("preserved", out)
-        self.assertIn("agent_provider: codex", (self.root / config.CONFIG_REL_PATH).read_text())
+        text = (self.root / config.CONFIG_REL_PATH).read_text()
+        self.assertIn("agent_provider: codex", text)
         self.assertEqual(handoff.read_text(encoding="utf-8"), "human content\n")
 
     def test_init_preserves_existing_state_session(self):
@@ -146,8 +147,10 @@ class RunAttachTest(unittest.TestCase):
         # Either the tmux prerequisite stops the run, or the runner stops
         # safely (blocker/idle/unverified) without advancing work.
         self.assertTrue(
-            "tmux" in combined or "blocked" in combined
-            or "idle" in combined or "verification" in combined,
+            "tmux" in combined
+            or "blocked" in combined
+            or "idle" in combined
+            or "verification" in combined,
             combined,
         )
 

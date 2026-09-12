@@ -52,7 +52,9 @@ class StateTest(unittest.TestCase):
     def test_invalid_mode_rejected(self):
         path = state.state_path(self.root)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"mode": "SLEEP", "session_id": "x"}), encoding="utf-8")
+        path.write_text(
+            json.dumps({"mode": "SLEEP", "session_id": "x"}), encoding="utf-8"
+        )
         with self.assertRaises(state.StateError):
             state.read(self.root)
 

@@ -44,17 +44,15 @@ class PackagingMetadataTests(unittest.TestCase):
         self.assertEqual(project["name"], "ariadex")
         self.assertIn("version", data["tool"]["setuptools"]["dynamic"])
         self.assertNotIn("version", project, "version must be dynamic (single source)")
-        self.assertEqual(
-            project["scripts"], {"ariadex": "ariadex.cli:main"}
-        )
+        self.assertEqual(project["scripts"], {"ariadex": "ariadex.cli:main"})
         self.assertIn("PyYAML", " ".join(project["dependencies"]))
         requires = project["requires-python"]
         self.assertIn("3.11", requires)
 
     def test_version_flag_reports_package_version(self):
-        with contextlib.redirect_stdout(io.StringIO()):
-            with self.assertRaises(SystemExit) as ctx:
-                cli_mod.build_parser().parse_args(["--version"])
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit) as ctx:
+            cli_mod.build_parser().parse_args(["--version"])
         self.assertEqual(ctx.exception.code, 0)
 
     def test_version_flag_output_matches_single_source(self):

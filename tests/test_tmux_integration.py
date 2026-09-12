@@ -7,7 +7,6 @@ so this test skips and the blocker is recorded in HANDOFF.md.
 import shutil
 import tempfile
 import unittest
-from pathlib import Path
 
 from ariadex import providers
 from ariadex.adapters import select_reset
@@ -27,11 +26,10 @@ class LiveTmuxTest(unittest.TestCase):
             adapter.send("echo live-probe")
             captured = adapter.capture_output()
             self.assertIsInstance(captured, str)
+            self.assertEqual(select_reset("auto", adapter.capabilities), "soft")
             self.assertEqual(
-                select_reset("auto", adapter.capabilities), "soft"
+                driver.attach_command(name)[:2], ["tmux", "attach-session"]
             )
-            self.assertEqual(driver.attach_command(name)[:2],
-                             ["tmux", "attach-session"])
         finally:
             driver.terminate(name)
             self.assertFalse(driver.session_alive(name))

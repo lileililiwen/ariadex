@@ -4,11 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ariadex import config, handoff, providers, runner, state
+from ariadex import config, handoff, providers, state
 from ariadex.handoff import add_item, read_handoff, set_item_status, write_handoff
 from ariadex.runner import (
     Runner,
-    UnavailableVerifier,
     VerificationResult,
     Verifier,
     apply_reset,
@@ -34,7 +33,7 @@ def make_project(root: Path, specs=("demo",), **overrides) -> config.Config:
     spec_dir = Path(root) / "openspec" / "changes"
     for name in specs:
         (spec_dir / name).mkdir(parents=True, exist_ok=True)
-    values = dict(spec_dir="openspec/changes", handoff_file=".ariadex/handoff.md")
+    values = {"spec_dir": "openspec/changes", "handoff_file": ".ariadex/handoff.md"}
     values.update(overrides)
     raw = {
         "agent_provider": "opencode",
@@ -56,9 +55,7 @@ def make_runner(root: Path, cfg=None, verifier=None, provider="opencode"):
     stored.mode = "AUTO"
     state.write(root, stored)
     driver = FakeTerminalDriver()
-    adapter = providers.get_adapter(
-        provider, driver, "test-session", root
-    )
+    adapter = providers.get_adapter(provider, driver, "test-session", root)
     return Runner(root, cfg, adapter, verifier), driver
 
 
@@ -93,9 +90,7 @@ class SelectionTest(unittest.TestCase):
         cfg = make_project(self.root)
         doc = handoff.empty_handoff()
         doc.current_spec = "ghost"
-        kind, _ = select_next_action(
-            doc, inspect_repository(self.root, cfg.spec_dir)
-        )
+        kind, _ = select_next_action(doc, inspect_repository(self.root, cfg.spec_dir))
         self.assertEqual(kind, "stop")
 
     def test_nothing_to_do_is_idle(self):
@@ -199,7 +194,9 @@ class ExecutionTest(unittest.TestCase):
         self.write_doc(doc)
         cycles = run.run(max_cycles=5)
         # start-spec, advance-spec (demo -> None), idle.
-        self.assertEqual([c.kind for c in cycles], ["start-spec", "advance-spec", "idle"])
+        self.assertEqual(
+            [c.kind for c in cycles], ["start-spec", "advance-spec", "idle"]
+        )
         reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
         self.assertEqual(reloaded.status, "complete")
 
@@ -257,7 +254,7 @@ class VerificationGateTest(unittest.TestCase):
         write_handoff(self.root / ".ariadex" / "handoff.md", doc)
 
     def failing_run(self, **overrides):
-        values = dict(retry_limit=2)
+        values = {"retry_limit": 2}
         values.update(overrides)
         cfg = make_project(self.root, **values)
         return make_runner(
@@ -304,7 +301,8 @@ class VerificationGateTest(unittest.TestCase):
         self.write_doc(doc)
         run.run_once()
         fresh, _ = make_runner(
-            self.root, cfg=run.config,
+            self.root,
+            cfg=run.config,
             verifier=ShellVerifier(["exit 1"], self.root),
         )
         fresh.run_once()

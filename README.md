@@ -147,9 +147,23 @@ executes them in order after adapter work and advances only on full pass.
 ## Development
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests   # 179 tests
+pip install -e ".[dev]"                              # pinned QA toolchain
+python -m unittest discover -s tests                 # 221 tests, stdlib only
 openspec validate --changes --strict --no-interactive
+ruff check src tests
+ruff format --check src tests
+mypy src/ariadex
+coverage run -m unittest discover -s tests && coverage report  # gate: 82%
+pip-audit --desc=on .
+python -m build                                      # sdist + wheel in dist/
 ```
+
+Every CI command above runs locally with the pinned `dev` extra. The
+coverage threshold is the measured baseline: raise it, never lower it.
+Bandit/pylint-style rules are intentionally out of the ruff set (they
+demand behavior-affecting changes; deferred to a hardening pass).
+Releases additionally require `ariadex evidence --gate` (no skips
+allowed) via the tag-triggered release workflow.
 
 See [AGENTS.md](AGENTS.md) for the OpenSpec delivery workflow (one change
 at a time, two-commit handoff) and [HANDOFF.md](HANDOFF.md) for current

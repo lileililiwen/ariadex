@@ -1,0 +1,149 @@
+# Ariadex CI: reproducible verification for every branch and release.
+#
+# Required checks fail closed: any non-zero step fails the gate and the
+# log names the exact command. Environment-dependent live evidence runs
+# in report mode here (skips stay visible, blocked fails); only the
+# release workflow may claim release evidence, via `evidence --gate`.
+#
+# Windows is excluded: tmux has no supported install path there and the
+# driver shell assumptions are POSIX-only.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    name: unit (py${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e .
+      - run: python -m unittest discover -s tests -v
+
+  openspec:
+    name: openspec strict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install -g @fission-ai/openspec@1.6.0
+      - run: openspec validate --changes --strict --no-interactive
+
+  quality:
+    name: quality (ruff, mypy, coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+      - run: mypy src/ariadex
+      - run: coverage run -m unittest discover -s tests
+      - run: coverage report
+
+  security:
+    name: security (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "pip-audit==2.10.1"
+      - run: pip-audit --desc=on .
+
+  live:
+    name: live evidence (report mode)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: ensure tmux and a provider CLI
+        run: |
+          command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
+          command -v opencode || npm install -g opencode-ai@1
+          tmux -V
+          opencode --version
+      - run: pip install -e .
+      - name: run evidence in report mode
+        run: python -m ariadex evidence --timeout 120 | tee evidence-report.txt
+      - name: fail on blocked, surface skips
+        run: |
+          python3 - <<'EOF'
+          import os
+          import re
+          import sys
+          text = open("evidence-report.txt").read()
+          match = re.search(
+              r"summary: (\d+) passed, (\d+) skipped, (\d+) blocked", text
+          )
+          if not match:
+              print("::error::could not parse evidence summary")
+              raise SystemExit(1)
+          passed, skipped, blocked = map(int, match.groups())
+          print(f"live evidence: {passed} passed, "
+                f"{skipped} skipped, {blocked} blocked")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write("## Live evidence\n\n```\n" + text + "\n```\n")
+          if skipped:
+              print(f"::warning::{skipped} live scenario(s) skipped; "
+                    "skips are visible and are not passing evidence")
+          if blocked:
+              print(f"::error::{blocked} live scenario(s) blocked")
+              raise SystemExit(1)
+          EOF
+
+  clean-install:
+    name: clean install (sdist+wheel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "build==1.6.1"
+      - run: python -m build
+      - name: check artifacts and record hashes
+        run: |
+          ls dist/ariadex-*.tar.gz dist/ariadex-*-py3-none-any.whl
+          sha256sum dist/ariadex-*.tar.gz dist/ariadex-*-py3-none-any.whl | tee dist/SHA256SUMS.txt
+          python3 - <<'EOF'
+          import glob
+          import zipfile
+          for path in glob.glob("dist/ariadex-*-py3-none-any.whl"):
+              names = zipfile.ZipFile(path).namelist()
+              assert any(n.endswith(".dist-info/RECORD") for n in names), path
+              assert any(n.endswith(".dist-info/entry_points.txt") for n in names), path
+              print(f"wheel OK: {path}")
+          EOF
+      - name: install wheel in a fresh venv and smoke-test
+        run: |
+          python -m venv /tmp/smokevenv
+          /tmp/smokevenv/bin/pip install dist/ariadex-*-py3-none-any.whl
+          /tmp/smokevenv/bin/ariadex --help
+          /tmp/smokevenv/bin/ariadex --version
+          mkdir -p /tmp/ariadex-smoke && cd /tmp/ariadex-smoke
+          rm -rf .ariadex
+          /tmp/smokevenv/bin/ariadex init
+          /tmp/smokevenv/bin/ariadex status

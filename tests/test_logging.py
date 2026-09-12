@@ -1,11 +1,9 @@
 """Tests for run logs, metrics records, and redaction."""
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from ariadex import logging as logging_mod
 from ariadex.logging import (
     RunLogRecord,
     append_metrics,
@@ -17,17 +15,17 @@ from ariadex.logging import (
 
 
 def make_record(**overrides) -> RunLogRecord:
-    values = dict(
-        session_id="s1",
-        spec="demo",
-        action="resolve-issue u-1",
-        input="prompt",
-        output="done",
-        exit_code=0,
-        validation_result="passed",
-        reset_reason="soft",
-        retry_count=0,
-    )
+    values = {
+        "session_id": "s1",
+        "spec": "demo",
+        "action": "resolve-issue u-1",
+        "input": "prompt",
+        "output": "done",
+        "exit_code": 0,
+        "validation_result": "passed",
+        "reset_reason": "soft",
+        "retry_count": 0,
+    }
     values.update(overrides)
     return RunLogRecord(**values)
 
@@ -37,18 +35,16 @@ class RedactionTest(unittest.TestCase):
         self.assertEqual(redact("key sk-abcdefghijklmnop123"), "key <redacted>")
 
     def test_aws_key_redacted(self):
-        self.assertEqual(
-            redact("id AKIAIOSFODNN7EXAMPLE"), "id <redacted>"
-        )
+        self.assertEqual(redact("id AKIAIOSFODNN7EXAMPLE"), "id <redacted>")
 
     def test_private_key_block_redacted(self):
-        text = "x\n-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----\ny"
+        text = (
+            "x\n-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----\ny"
+        )
         self.assertEqual(redact(text), "x\n<redacted>\ny")
 
     def test_password_assignment_redacted(self):
-        self.assertEqual(
-            redact("password=hunter2 ok"), "password=<redacted> ok"
-        )
+        self.assertEqual(redact("password=hunter2 ok"), "password=<redacted> ok")
 
     def test_plain_text_untouched(self):
         text = "build passed in 12s, 3 tests green"
@@ -73,8 +69,10 @@ class RunLogTest(unittest.TestCase):
         path = write_run_log(
             self.runs,
             make_record(
-                action="none — blocked", exit_code=None,
-                validation_result="unavailable", output="provider gone",
+                action="none — blocked",
+                exit_code=None,
+                validation_result="unavailable",
+                output="provider gone",
             ),
         )
         text = path.read_text(encoding="utf-8")

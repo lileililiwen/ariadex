@@ -12,11 +12,12 @@ are never deleted, so nothing disappears silently.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import os
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -75,7 +76,7 @@ class Handoff:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def new_item_id() -> str:
@@ -115,9 +116,7 @@ def _validate_item(raw: dict) -> UnresolvedItem:
         )
     history = raw.get("history", [])
     if not isinstance(history, list):
-        raise HandoffError(
-            f"invalid history for item `{raw.get('id')}`: list required"
-        )
+        raise HandoffError(f"invalid history for item `{raw.get('id')}`: list required")
     attempts = raw.get("attempts", 0)
     if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0:
         raise HandoffError(
@@ -152,9 +151,7 @@ def _split_front_matter(text: str) -> tuple[dict | None, str]:
             if data is None:
                 return {}, body
             if not isinstance(data, dict):
-                raise HandoffError(
-                    "malformed handoff front matter: mapping required"
-                )
+                raise HandoffError("malformed handoff front matter: mapping required")
             return data, body
     raise HandoffError("malformed handoff: unclosed front-matter block")
 
@@ -178,8 +175,7 @@ def read_handoff(path: Path) -> Handoff:
     version = data.get("version", HANDOFF_VERSION)
     if version != HANDOFF_VERSION:
         raise HandoffError(
-            f"unsupported handoff version `{version}`: "
-            f"expected {HANDOFF_VERSION}"
+            f"unsupported handoff version `{version}`: expected {HANDOFF_VERSION}"
         )
     status = data.get("status", "idle")
     _require_enum(status, HANDOFF_STATUSES, "handoff status")
@@ -269,10 +265,8 @@ def write_handoff(path: Path, handoff: Handoff) -> Handoff:
             os.fsync(handle.fileno())
         os.replace(tmp_name, path)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
     return handoff
 
@@ -285,7 +279,9 @@ def add_item(
     item_id: str | None = None,
 ) -> UnresolvedItem:
     if not type.strip() or not description.strip():
-        raise HandoffError("unresolved item requires non-empty `type` and `description`")
+        raise HandoffError(
+            "unresolved item requires non-empty `type` and `description`"
+        )
     _require_enum(priority, PRIORITIES, "priority")
     item_id = item_id or new_item_id()
     if any(item.id == item_id for item in handoff.unresolved):

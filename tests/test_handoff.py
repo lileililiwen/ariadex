@@ -110,12 +110,18 @@ class LifecycleTest(unittest.TestCase):
 
     def test_deferred_billing_issue_remains_traceable(self):
         add_item(
-            self.doc, "issue", "billing is not yet implemented",
-            priority="high", item_id="u-bill",
+            self.doc,
+            "issue",
+            "billing is not yet implemented",
+            priority="high",
+            item_id="u-bill",
         )
         set_item_status(
-            self.doc, "u-bill", "DEFERRED",
-            target_spec="billing-change", reason="billing is not yet implemented",
+            self.doc,
+            "u-bill",
+            "DEFERRED",
+            target_spec="billing-change",
+            reason="billing is not yet implemented",
             note="deferred by operator",
         )
         item = get_item(self.doc, "u-bill")

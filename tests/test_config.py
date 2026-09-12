@@ -113,8 +113,7 @@ class ValidationTest(unittest.TestCase):
         buf = io.StringIO()
         with redirect_stdout(buf):
             cfg = self.load_text(
-                "context_strategy: fresh-session\n"
-                "blocker_policy: record-and-stop\n"
+                "context_strategy: fresh-session\nblocker_policy: record-and-stop\n"
             )
         self.assertEqual(cfg.context_strategy, "per-spec")
         self.assertEqual(cfg.blocker_policy, "stop-on-blocker")

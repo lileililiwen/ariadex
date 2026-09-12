@@ -6,7 +6,7 @@ PASS from an absent verification record.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def format_elapsed(total_seconds: float) -> str:
@@ -28,8 +28,8 @@ def elapsed_since(updated_at: str, now: datetime | None = None) -> str:
     except (ValueError, TypeError):
         return "unknown"
     if updated.tzinfo is None:
-        updated = updated.replace(tzinfo=timezone.utc)
-    now = now or datetime.now(timezone.utc)
+        updated = updated.replace(tzinfo=UTC)
+    now = now or datetime.now(UTC)
     return format_elapsed((now - updated).total_seconds())
 
 

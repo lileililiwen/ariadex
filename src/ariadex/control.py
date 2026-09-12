@@ -51,9 +51,7 @@ def transition(current: str, target: str, via: str) -> str:
     if expected is None:
         raise TransitionError(f"unknown transition `{via}`")
     if target != expected:
-        raise TransitionError(
-            f"`{via}` cannot enter {target}: it enters {expected}"
-        )
+        raise TransitionError(f"`{via}` cannot enter {target}: it enters {expected}")
     if via == "resume" and current != "PAUSE":
         raise TransitionError(
             f"resume rejected from {current}: only a PAUSED project may resume "

@@ -22,6 +22,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 DEFAULT_TIMEOUT_S = 30
@@ -74,9 +75,7 @@ def temp_project():
             encoding="utf-8",
         )
         (ariadex_dir / "handoff.md").write_text(
-            "# Ariadex handoff\n\n"
-            "## Current state\n\n"
-            "- Evidence probe project.\n",
+            "# Ariadex handoff\n\n## Current state\n\n- Evidence probe project.\n",
             encoding="utf-8",
         )
         (ariadex_dir / "state.json").write_text(
@@ -91,17 +90,14 @@ def temp_project():
 
 
 @contextlib.contextmanager
-def isolated_tmux_session(driver, name: str, workdir: Path | str,
-                           command: list[str]):
+def isolated_tmux_session(driver, name: str, workdir: Path | str, command: list[str]):
     """Create a tmux session, always terminating it on exit."""
     driver.create_or_connect(name, workdir, command)
     try:
         yield name
     finally:
-        try:
+        with contextlib.suppress(Exception):
             driver.terminate(name)
-        except Exception:
-            pass
 
 
 def write_fake_provider(directory: Path | str, name: str = "fake-provider") -> Path:
@@ -126,7 +122,10 @@ def write_fake_provider(directory: Path | str, name: str = "fake-provider") -> P
 
 def _run_probe(command: list[str], timeout_s: int = DEFAULT_TIMEOUT_S) -> str:
     proc = subprocess.run(
-        command, capture_output=True, text=True, timeout=timeout_s,
+        command,
+        capture_output=True,
+        text=True,
+        timeout=timeout_s,
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -150,8 +149,9 @@ def resolve_tmux(executable: str = "tmux") -> tuple[str | None, str]:
     return found, ""
 
 
-def scenario_tmux_lifecycle(timeout_s: int = DEFAULT_TIMEOUT_S,
-                            executable: str = "tmux") -> EvidenceResult:
+def scenario_tmux_lifecycle(
+    timeout_s: int = DEFAULT_TIMEOUT_S, executable: str = "tmux"
+) -> EvidenceResult:
     """Live tmux create/send/capture/terminate with a fake provider."""
     from . import terminal as terminal_mod
 
@@ -177,11 +177,15 @@ def scenario_tmux_lifecycle(timeout_s: int = DEFAULT_TIMEOUT_S,
         diagnostics = ""
         try:
             with isolated_tmux_session(
-                driver, name, tmp, [str(fake)],
+                driver,
+                name,
+                tmp,
+                [str(fake)],
             ):
                 if not driver.session_alive(name):
                     return EvidenceResult(
-                        name="tmux-lifecycle", status=BLOCKED,
+                        name="tmux-lifecycle",
+                        status=BLOCKED,
                         reason="tmux session did not become alive after create",
                         diagnostics=f"session `{name}` missing right after create",
                     )
@@ -196,13 +200,15 @@ def scenario_tmux_lifecycle(timeout_s: int = DEFAULT_TIMEOUT_S,
                 diagnostics = captured[-2000:]
                 if "hello-live" not in captured:
                     return EvidenceResult(
-                        name="tmux-lifecycle", status=BLOCKED,
+                        name="tmux-lifecycle",
+                        status=BLOCKED,
                         reason="sent input was not visible in pane capture",
                         diagnostics=diagnostics,
                     )
         except terminal_mod.TerminalError as exc:
             return EvidenceResult(
-                name="tmux-lifecycle", status=BLOCKED,
+                name="tmux-lifecycle",
+                status=BLOCKED,
                 reason=f"tmux transport failed: {exc}",
                 diagnostics=diagnostics or str(exc),
             )
@@ -212,12 +218,14 @@ def scenario_tmux_lifecycle(timeout_s: int = DEFAULT_TIMEOUT_S,
             alive = False
         if alive:
             return EvidenceResult(
-                name="tmux-lifecycle", status=BLOCKED,
+                name="tmux-lifecycle",
+                status=BLOCKED,
                 reason="tmux session survived terminate; cleanup failed",
                 diagnostics=f"session `{name}` still alive",
             )
     return EvidenceResult(
-        name="tmux-lifecycle", status=PASSED,
+        name="tmux-lifecycle",
+        status=PASSED,
         reason="create/send/capture/terminate round-trip succeeded",
     )
 
@@ -229,7 +237,6 @@ def scenario_provider_startup(timeout_s: int = DEFAULT_TIMEOUT_S) -> EvidenceRes
 
     class FakeProviderAdapter(AgentAdapter):
         provider_name = "fake-provider"
-        launch_command: tuple[str, ...] = ()
         new_session_input = "/new"
 
         def __init__(self, driver, session_name, workdir, launch):
@@ -239,13 +246,17 @@ def scenario_provider_startup(timeout_s: int = DEFAULT_TIMEOUT_S) -> EvidenceRes
         @property
         def capabilities(self) -> Capabilities:
             return Capabilities(
-                interactive=True, soft_reset=True, hard_reset=True,
-                token_usage=False, structured_output=False,
-                interrupt=True, manual_takeover=True,
+                interactive=True,
+                soft_reset=True,
+                hard_reset=True,
+                token_usage=False,
+                structured_output=False,
+                interrupt=True,
+                manual_takeover=True,
             )
 
         @property
-        def launch_command(self):  # type: ignore[override]
+        def launch_command(self):
             return self._launch
 
     with tempfile.TemporaryDirectory(prefix="ariadex-fake-") as tmp:
@@ -264,17 +275,17 @@ def scenario_provider_startup(timeout_s: int = DEFAULT_TIMEOUT_S) -> EvidenceRes
             adapter.terminate()
             assert not driver.session_alive(name)
         except Exception as exc:
-            try:
+            with contextlib.suppress(Exception):
                 driver.terminate(name)
-            except Exception:
-                pass
             return EvidenceResult(
-                name="provider-startup", status=BLOCKED,
+                name="provider-startup",
+                status=BLOCKED,
                 reason=f"fake provider lifecycle failed: {exc}",
                 diagnostics=str(exc)[:2000],
             )
     return EvidenceResult(
-        name="provider-startup", status=PASSED,
+        name="provider-startup",
+        status=PASSED,
         reason="startup, input, capture, soft-reset, interrupt, exit all behaved",
     )
 
@@ -306,7 +317,9 @@ def scenario_continuity_restart() -> EvidenceResult:
             def make_runner():
                 driver = terminal_mod.FakeTerminalDriver()
                 adapter = OpenCodeAdapter(
-                    driver, unique_session_name("continuity"), root,
+                    driver,
+                    unique_session_name("continuity"),
+                    root,
                 )
                 return Runner(root, cfg, adapter, verifier=AlwaysPass())
 
@@ -330,12 +343,14 @@ def scenario_continuity_restart() -> EvidenceResult:
             )
         except Exception as exc:
             return EvidenceResult(
-                name="continuity-restart", status=BLOCKED,
+                name="continuity-restart",
+                status=BLOCKED,
                 reason=f"continuity across restart failed: {exc}",
                 diagnostics=str(exc)[:2000],
             )
     return EvidenceResult(
-        name="continuity-restart", status=PASSED,
+        name="continuity-restart",
+        status=PASSED,
         reason="spec completions survived Runner restart; queue drained",
     )
 
@@ -359,12 +374,16 @@ def scenario_verification_gating() -> EvidenceResult:
             handoff_mod.write_handoff(root / cfg.handoff_file, handoff)
 
             object.__setattr__(
-                cfg, "verification_commands", ["exit 1"],
+                cfg,
+                "verification_commands",
+                ["exit 1"],
             )
             object.__setattr__(cfg, "retry_limit", 2)
             driver = terminal_mod.FakeTerminalDriver()
             adapter = OpenCodeAdapter(
-                driver, unique_session_name("verify"), root,
+                driver,
+                unique_session_name("verify"),
+                root,
             )
             runner = Runner(root, cfg, adapter)
             first = runner.run_once()
@@ -383,12 +402,14 @@ def scenario_verification_gating() -> EvidenceResult:
             assert attempts <= 3, f"retry limit exceeded: {attempts}"
         except Exception as exc:
             return EvidenceResult(
-                name="verification-gating", status=BLOCKED,
+                name="verification-gating",
+                status=BLOCKED,
                 reason=f"verification gating failed: {exc}",
                 diagnostics=str(exc)[:2000],
             )
     return EvidenceResult(
-        name="verification-gating", status=PASSED,
+        name="verification-gating",
+        status=PASSED,
         reason="exit-nonzero verification blocked completion and persisted retries",
     )
 
@@ -428,13 +449,15 @@ def scenario_takeover_resync() -> EvidenceResult:
             )
         except Exception as exc:
             return EvidenceResult(
-                name="takeover-resync", status=BLOCKED,
+                name="takeover-resync",
+                status=BLOCKED,
                 reason=f"takeover/pause/resync failed: {exc}",
                 diagnostics=str(exc)[:2000],
             )
     return EvidenceResult(
-        name="takeover-resync", status=PASSED,
-        reason="MANUAL/PAUSE ownership held; resync preserved session, recomputed action",
+        name="takeover-resync",
+        status=PASSED,
+        reason="manual hold; resync preserved session, recomputed action",
     )
 
 
@@ -452,7 +475,7 @@ def scenario_install_fixture() -> EvidenceResult:
         fake_tmux = Path(tmp) / "tmux"
         fake_tmux.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         fake_tmux.chmod(fake_tmux.stat().st_mode | stat.S_IXUSR)
-        probes = {"calls": []}
+        probes: dict[str, list[list[str]]] = {"calls": []}
 
         def fake_which(name):
             if name == "tmux":
@@ -468,12 +491,22 @@ def scenario_install_fixture() -> EvidenceResult:
             return CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
         try:
-            with mock.patch.object(
-                setup_mod.shutil, "which", side_effect=fake_which,
-            ), mock.patch.object(
-                setup_mod.subprocess, "run", side_effect=fake_run,
-            ), mock.patch.object(
-                setup_mod, "needs_sudo", return_value=False,
+            with (
+                mock.patch.object(
+                    setup_mod.shutil,
+                    "which",
+                    side_effect=fake_which,
+                ),
+                mock.patch.object(
+                    setup_mod.subprocess,
+                    "run",
+                    side_effect=fake_run,
+                ),
+                mock.patch.object(
+                    setup_mod,
+                    "needs_sudo",
+                    return_value=False,
+                ),
             ):
                 resolved = setup_mod.ensure_tmux()
             assert resolved == str(fake_tmux), f"unexpected path: {resolved}"
@@ -482,12 +515,14 @@ def scenario_install_fixture() -> EvidenceResult:
             )
         except Exception as exc:
             return EvidenceResult(
-                name="install-fixture", status=BLOCKED,
+                name="install-fixture",
+                status=BLOCKED,
                 reason=f"install fixture failed: {exc}",
                 diagnostics=str(exc)[:2000],
             )
     return EvidenceResult(
-        name="install-fixture", status=PASSED,
+        name="install-fixture",
+        status=PASSED,
         reason="controlled package-manager fixture resolved tmux without host install",
     )
 
@@ -510,13 +545,15 @@ def scenario_provider_smoke(timeout_s: int = DEFAULT_TIMEOUT_S) -> EvidenceResul
                 found.append(binary)
             except Exception as exc:
                 return EvidenceResult(
-                    name="provider-smoke", status=BLOCKED,
+                    name="provider-smoke",
+                    status=BLOCKED,
                     reason=f"`{binary}` present but `--version`/`--help` failed: {exc}",
                     diagnostics=str(exc)[:2000],
                 )
     if not found:
         return EvidenceResult(
-            name="provider-smoke", status=SKIPPED,
+            name="provider-smoke",
+            status=SKIPPED,
             reason="neither `opencode` nor `codex` on PATH; nothing to smoke-test",
             diagnostics="prerequisite: `opencode` or `codex` on PATH",
         )
@@ -524,11 +561,13 @@ def scenario_provider_smoke(timeout_s: int = DEFAULT_TIMEOUT_S) -> EvidenceResul
     if missing:
         detail += f"; absent (not failures): {', '.join(missing)}"
     return EvidenceResult(
-        name="provider-smoke", status=PASSED, reason=detail,
+        name="provider-smoke",
+        status=PASSED,
+        reason=detail,
     )
 
 
-SCENARIOS = (
+SCENARIOS: tuple[tuple[str, Callable[..., EvidenceResult]], ...] = (
     ("tmux-lifecycle", scenario_tmux_lifecycle),
     ("provider-startup", scenario_provider_startup),
     ("continuity-restart", scenario_continuity_restart),
@@ -576,11 +615,13 @@ def unprovision_tmux(provisioned: bool) -> str:
     return f"provisional tmux removed via {manager}"
 
 
-def run_all(timeout_s: int = DEFAULT_TIMEOUT_S,
-            only: list[str] | None = None,
-            provision: bool = False,
-            tmux_bin: str | None = None,
-            local_tmux: bool = False) -> list[EvidenceResult]:
+def run_all(
+    timeout_s: int = DEFAULT_TIMEOUT_S,
+    only: list[str] | None = None,
+    provision: bool = False,
+    tmux_bin: str | None = None,
+    local_tmux: bool = False,
+) -> list[EvidenceResult]:
     """Run every scenario with isolation; unexpected errors become BLOCKED.
 
     With `provision=True`, tmux is installed when missing before the live
@@ -603,26 +644,27 @@ def run_all(timeout_s: int = DEFAULT_TIMEOUT_S,
     try:
         if local_tmux and (only is None or "tmux-lifecycle" in only):
             from . import tmux_setup as setup_mod
+
             try:
-                local_dir = tempfile.TemporaryDirectory(
-                    prefix="ariadex-local-tmux-")
+                local_dir = tempfile.TemporaryDirectory(prefix="ariadex-local-tmux-")
                 wrapper = setup_mod.fetch_local_tmux(local_dir.name)
                 executable = str(wrapper)
                 provision_note = (
-                    "local tmux fetched without privileges into an "
-                    "isolated directory"
+                    "local tmux fetched without privileges into an isolated directory"
                 )
             except setup_mod.TmuxSetupError as exc:
                 skip_tmux = True
                 results.append(
                     EvidenceResult(
-                        name="tmux-lifecycle", status=BLOCKED,
+                        name="tmux-lifecycle",
+                        status=BLOCKED,
                         reason=f"local tmux fetch failed: {exc}",
                         diagnostics=str(exc)[:2000],
                     )
                 )
         if provision and not skip_tmux and (only is None or "tmux-lifecycle" in only):
             from .tmux_setup import TmuxSetupError
+
             provision_attempted = True
             try:
                 _, note = provision_tmux()
@@ -633,7 +675,8 @@ def run_all(timeout_s: int = DEFAULT_TIMEOUT_S,
                 skip_tmux = True
                 results.append(
                     EvidenceResult(
-                        name="tmux-lifecycle", status=BLOCKED,
+                        name="tmux-lifecycle",
+                        status=BLOCKED,
                         reason=f"provisioning failed: {exc}",
                         diagnostics=str(exc)[:2000],
                     )
@@ -653,7 +696,8 @@ def run_all(timeout_s: int = DEFAULT_TIMEOUT_S,
             except Exception as exc:  # harness must classify, never raise
                 results.append(
                     EvidenceResult(
-                        name=name, status=BLOCKED,
+                        name=name,
+                        status=BLOCKED,
                         reason=f"harness error: {exc}",
                         diagnostics=str(exc)[:2000],
                     )
@@ -672,14 +716,14 @@ def run_all(timeout_s: int = DEFAULT_TIMEOUT_S,
                 )
         if local_dir is not None:
             local_dir.cleanup()  # unpath the temporary tmux: full uninstall
-            if any(r.name == "tmux-lifecycle" and r.status == PASSED
-                   for r in results):
+            if any(r.name == "tmux-lifecycle" and r.status == PASSED for r in results):
                 results.append(
                     EvidenceResult(
                         name="tmux-provision",
                         status=PASSED,
                         reason=(provision_note + "; isolated directory removed")
-                        if provision_note else "isolated directory removed",
+                        if provision_note
+                        else "isolated directory removed",
                     )
                 )
     return results
@@ -714,33 +758,44 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="ariadex evidence")
     parser.add_argument(
-        "--gate", action="store_true",
+        "--gate",
+        action="store_true",
         help="exit non-zero unless every scenario passed",
     )
     parser.add_argument(
-        "--timeout", type=int, default=DEFAULT_TIMEOUT_S,
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT_S,
         help="per-probe timeout in seconds",
     )
-    parser.add_argument("--only", default=None,
-                        help="comma-separated scenario names to run")
     parser.add_argument(
-        "--provision", action="store_true",
+        "--only", default=None, help="comma-separated scenario names to run"
+    )
+    parser.add_argument(
+        "--provision",
+        action="store_true",
         help="install tmux when missing, uninstall afterwards only if installed here",
     )
     parser.add_argument(
-        "--tmux-bin", default=None,
+        "--tmux-bin",
+        default=None,
         help="explicit local tmux binary for the live scenario (no install)",
     )
     parser.add_argument(
-        "--local-tmux", action="store_true",
+        "--local-tmux",
+        action="store_true",
         help="fetch tmux without privileges into an isolated temp dir, "
         "use it for the live scenario, delete the dir afterwards",
     )
     args = parser.parse_args(argv)
     only = args.only.split(",") if args.only else None
-    results = run_all(timeout_s=args.timeout, only=only,
-                      provision=args.provision, tmux_bin=args.tmux_bin,
-                      local_tmux=args.local_tmux)
+    results = run_all(
+        timeout_s=args.timeout,
+        only=only,
+        provision=args.provision,
+        tmux_bin=args.tmux_bin,
+        local_tmux=args.local_tmux,
+    )
     print(format_report(results))
     if args.gate:
         return gate_exit_code(results)

@@ -10,17 +10,17 @@ from ariadex.handoff import HandoffError, add_item, read_handoff, write_handoff
 
 
 def make_config(root: Path, **overrides) -> config.Config:
-    values = dict(
-        agent_provider="opencode",
-        terminal_driver="tmux",
-        context_strategy="per-spec",
-        reset_mode="auto",
-        spec_dir="openspec/changes",
-        handoff_file=".ariadex/handoff.md",
-        verification_commands=[],
-        retry_limit=2,
-        blocker_policy="stop-on-blocker",
-    )
+    values = {
+        "agent_provider": "opencode",
+        "terminal_driver": "tmux",
+        "context_strategy": "per-spec",
+        "reset_mode": "auto",
+        "spec_dir": "openspec/changes",
+        "handoff_file": ".ariadex/handoff.md",
+        "verification_commands": [],
+        "retry_limit": 2,
+        "blocker_policy": "stop-on-blocker",
+    }
     values.update(overrides)
     return config.validate(values)
 
@@ -31,13 +31,9 @@ def init_git(root: Path) -> None:
     subprocess.run(
         ["git", "-C", str(root), "config", "user.email", "t@t.t"], check=True
     )
-    subprocess.run(
-        ["git", "-C", str(root), "config", "user.name", "t"], check=True
-    )
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "t"], check=True)
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
-    subprocess.run(
-        ["git", "-C", str(root), "commit", "-qm", "init"], check=True
-    )
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "init"], check=True)
 
 
 class ResyncTest(unittest.TestCase):
@@ -60,9 +56,7 @@ class ResyncTest(unittest.TestCase):
         self.write_doc(doc)
         _, report = resync.resync(self.root, self.cfg)
         self.assertTrue(report.next_action.startswith("resolve-issue u-1"))
-        self.assertTrue(
-            any("recomputed" in note for note in report.notes)
-        )
+        self.assertTrue(any("recomputed" in note for note in report.notes))
         reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
         self.assertTrue(reloaded.next_action.startswith("resolve-issue u-1"))
 
@@ -75,14 +69,10 @@ class ResyncTest(unittest.TestCase):
         self.write_doc(doc)
         _, report = resync.resync(self.root, self.cfg)
         self.assertIn("app.py", report.changed_files)
-        self.assertTrue(
-            any("evidence" in note for note in report.notes)
-        )
+        self.assertTrue(any("evidence" in note for note in report.notes))
         reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
         # The issue stays OPEN; resync fabricates no completion.
-        self.assertEqual(
-            handoff.get_item(reloaded, "u-1").status, "OPEN"
-        )
+        self.assertEqual(handoff.get_item(reloaded, "u-1").status, "OPEN")
         self.assertEqual(reloaded.current_spec, "demo")
         self.assertEqual(reloaded.completed, [])
 
@@ -90,18 +80,14 @@ class ResyncTest(unittest.TestCase):
         doc = handoff.empty_handoff()
         add_item(doc, "issue", "still open", priority="medium", item_id="u-1")
         self.write_doc(doc)
-        subprocess.run(
-            ["git", "-C", str(self.root), "add", "-A"], check=True
-        )
+        subprocess.run(["git", "-C", str(self.root), "add", "-A"], check=True)
         subprocess.run(
             ["git", "-C", str(self.root), "commit", "-qm", "handoff"], check=True
         )
         _, report = resync.resync(self.root, self.cfg)
         self.assertEqual(report.changed_files, [])
         self.assertTrue(report.next_action.startswith("resolve-issue u-1"))
-        self.assertTrue(
-            any("clean tree" in note for note in report.notes)
-        )
+        self.assertTrue(any("clean tree" in note for note in report.notes))
 
     def test_non_git_project_still_resyncs(self):
         (self.root / ".git").rename(self.root / ".git-bak")

@@ -9,7 +9,6 @@ from pathlib import Path
 from unittest import mock
 
 from ariadex import cli, state
-from ariadex import tmux_setup
 from ariadex.tmux_setup import (
     TmuxSetupError,
     detect_manager,
@@ -26,10 +25,12 @@ def completed(returncode=0, stderr=""):
 
 class DetectionTest(unittest.TestCase):
     def test_present_binary_returned_without_install(self):
-        with mock.patch("shutil.which", return_value="/usr/bin/tmux"):
-            with mock.patch("subprocess.run") as run:
-                self.assertEqual(ensure_tmux(), "/usr/bin/tmux")
-                run.assert_not_called()
+        with (
+            mock.patch("shutil.which", return_value="/usr/bin/tmux"),
+            mock.patch("subprocess.run") as run,
+        ):
+            self.assertEqual(ensure_tmux(), "/usr/bin/tmux")
+            run.assert_not_called()
 
     def test_first_manager_wins(self):
         def which(name):
@@ -57,19 +58,21 @@ class InstallCommandTest(unittest.TestCase):
         def which(name):
             return f"/bin/{name}" if name == "sudo" else None
 
-        with mock.patch("os.geteuid", return_value=1000):
-            with mock.patch("shutil.which", side_effect=which):
-                self.assertEqual(
-                    install_command("dnf"),
-                    ["sudo", "-n", "dnf", "install", "-y", "tmux"],
-                )
+        with (
+            mock.patch("os.geteuid", return_value=1000),
+            mock.patch("shutil.which", side_effect=which),
+        ):
+            self.assertEqual(
+                install_command("dnf"),
+                ["sudo", "-n", "dnf", "install", "-y", "tmux"],
+            )
 
     def test_no_sudo_prefix_without_sudo_binary(self):
-        with mock.patch("os.geteuid", return_value=1000):
-            with mock.patch("shutil.which", return_value=None):
-                self.assertEqual(
-                    install_command("apk"), ["apk", "add", "tmux"]
-                )
+        with (
+            mock.patch("os.geteuid", return_value=1000),
+            mock.patch("shutil.which", return_value=None),
+        ):
+            self.assertEqual(install_command("apk"), ["apk", "add", "tmux"])
 
     def test_unsupported_manager_rejected(self):
         with self.assertRaises(TmuxSetupError):
@@ -96,29 +99,30 @@ class EnsureTest(unittest.TestCase):
                 return "/usr/bin/tmux" if len(tmux_probes) > 1 else None
             return f"/bin/{name}"
 
-        with mock.patch("shutil.which", side_effect=which):
-            with mock.patch("os.geteuid", return_value=0):
-                with mock.patch("subprocess.run",
-                                return_value=completed()) as run:
-                    self.assertEqual(ensure_tmux(), "/usr/bin/tmux")
+        with (
+            mock.patch("shutil.which", side_effect=which),
+            mock.patch("os.geteuid", return_value=0),
+            mock.patch("subprocess.run", return_value=completed()) as run,
+        ):
+            self.assertEqual(ensure_tmux(), "/usr/bin/tmux")
         invocations = [call.args[0] for call in run.call_args_list]
         self.assertEqual(invocations[0], ["apt-get", "update"])
-        self.assertEqual(
-            invocations[1], ["apt-get", "install", "-y", "tmux"]
-        )
+        self.assertEqual(invocations[1], ["apt-get", "install", "-y", "tmux"])
 
     def test_failed_install_is_actionable(self):
         def which(name):
             return "/bin/apt-get" if name == "apt-get" else None
 
-        with mock.patch("shutil.which", side_effect=which):
-            with mock.patch("os.geteuid", return_value=0):
-                with mock.patch(
-                    "subprocess.run",
-                    return_value=completed(1, "boom"),
-                ):
-                    with self.assertRaises(TmuxSetupError) as ctx:
-                        ensure_tmux()
+        with (
+            mock.patch("shutil.which", side_effect=which),
+            mock.patch("os.geteuid", return_value=0),
+            mock.patch(
+                "subprocess.run",
+                return_value=completed(1, "boom"),
+            ),
+            self.assertRaises(TmuxSetupError) as ctx,
+        ):
+            ensure_tmux()
         message = str(ctx.exception)
         self.assertIn("boom", message)
         self.assertIn("apt-get install", message)
@@ -127,12 +131,12 @@ class EnsureTest(unittest.TestCase):
         def which(name):
             return "/bin/brew" if name == "brew" else None
 
-        with mock.patch("shutil.which", side_effect=which):
-            with mock.patch(
-                "subprocess.run", return_value=completed()
-            ):
-                with self.assertRaises(TmuxSetupError) as ctx:
-                    ensure_tmux()
+        with (
+            mock.patch("shutil.which", side_effect=which),
+            mock.patch("subprocess.run", return_value=completed()),
+            self.assertRaises(TmuxSetupError) as ctx,
+        ):
+            ensure_tmux()
         self.assertIn("still not on PATH", str(ctx.exception))
 
 
@@ -142,9 +146,11 @@ class RequireTest(unittest.TestCase):
             self.assertEqual(require_tmux(), "/usr/bin/tmux")
 
     def test_missing_binary_stops_before_work(self):
-        with mock.patch("shutil.which", return_value=None):
-            with self.assertRaises(TmuxSetupError) as ctx:
-                require_tmux()
+        with (
+            mock.patch("shutil.which", return_value=None),
+            self.assertRaises(TmuxSetupError) as ctx,
+        ):
+            require_tmux()
         self.assertIn("before sending work", str(ctx.exception))
 
 
@@ -178,9 +184,11 @@ class WiringTest(unittest.TestCase):
         self.assertIn("no manager here", err)
 
     def test_opt_out_skips_install_attempt(self):
-        with mock.patch("shutil.which", return_value=None):
-            with mock.patch("subprocess.run") as run:
-                code, _, err = run_cli(self.root, "--no-auto-install", "run")
+        with (
+            mock.patch("shutil.which", return_value=None),
+            mock.patch("subprocess.run") as run,
+        ):
+            code, _, err = run_cli(self.root, "--no-auto-install", "run")
         self.assertNotEqual(code, 0)
         self.assertIn("before sending work", err)
         run.assert_not_called()

@@ -10,6 +10,13 @@ coverage/
 node_modules/
 .venv/
 __pycache__/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+evidence-report.txt
 *.log
 *.tmp
 .env

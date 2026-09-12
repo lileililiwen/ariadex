@@ -49,17 +49,20 @@ def _git_capture(project_dir: Path, args: list[str]) -> str | None:
     return proc.stdout
 
 
-def resync(project_dir: Path, config: Config) -> tuple[handoff_mod.Handoff, ResyncReport]:
+def resync(
+    project_dir: Path, config: Config
+) -> tuple[handoff_mod.Handoff, ResyncReport]:
     """Reconcile durable state. Raises HandoffError on unreadable handoff."""
     handoff = handoff_mod.read_handoff(project_dir / config.handoff_file)
     notes: list[str] = []
 
     status_out = _git_capture(project_dir, ["status", "--porcelain"])
-    git_available = status_out is not None
     changed_files: list[str] = []
-    if not git_available:
+    if status_out is None:
+        git_available = False
         notes.append("git unavailable: resync used handoff and spec state only")
     else:
+        git_available = True
         for line in status_out.splitlines():
             name = line[3:].strip().strip('"')
             if name:
@@ -81,12 +84,9 @@ def resync(project_dir: Path, config: Config) -> tuple[handoff_mod.Handoff, Resy
         notes.append(f"spec directory `{config.spec_dir}` is missing")
 
     previous_action = handoff.next_action
-    kind, target = select_next_action(
-        handoff, repo, retry_limit=config.retry_limit
-    )
+    kind, target = select_next_action(handoff, repo, retry_limit=config.retry_limit)
     next_action = (
-        "none — idle" if kind in (ACTION_IDLE, ACTION_STOP)
-        else f"{kind} {target}"
+        "none — idle" if kind in (ACTION_IDLE, ACTION_STOP) else f"{kind} {target}"
     )
     handoff.next_action = next_action
     if previous_action != next_action:

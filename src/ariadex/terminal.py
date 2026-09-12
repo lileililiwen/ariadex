@@ -65,7 +65,7 @@ class TerminalDriver(abc.ABC):
 
     @abc.abstractmethod
     def attach_command(self, name: str) -> list[str]:
-        """ argv that attaches the user's terminal to the session."""
+        """argv that attaches the user's terminal to the session."""
 
     @abc.abstractmethod
     def terminate(self, name: str) -> None:
@@ -78,9 +78,7 @@ class TmuxDriver(TerminalDriver):
     def __init__(self, executable: str = "tmux") -> None:
         self.executable = executable
 
-    def _run(
-        self, args: list[str], context: str
-    ) -> subprocess.CompletedProcess[str]:
+    def _run(self, args: list[str], context: str) -> subprocess.CompletedProcess[str]:
         try:
             proc = subprocess.run(
                 [self.executable, *args],
@@ -199,7 +197,11 @@ class FakeTerminalDriver(TerminalDriver):
             return "connected"
         if not command:
             raise TerminalError("no provider command to start in tmux session")
-        self.sessions[name] = {"command": list(command), "output": "", "workdir": str(workdir)}
+        self.sessions[name] = {
+            "command": list(command),
+            "output": "",
+            "workdir": str(workdir),
+        }
         return "created"
 
     def session_alive(self, name: str) -> bool:
@@ -214,7 +216,11 @@ class FakeTerminalDriver(TerminalDriver):
         self.sessions[name]["output"] += text
 
     def sent_inputs(self, name: str) -> list[str]:
-        return [args for op, *args in self.calls if op == "send_input" and args[0] == name]
+        texts: list[str] = []
+        for op, *args in self.calls:
+            if op == "send_input" and args[0] == name:
+                texts.append(args[1])
+        return texts
 
     def send_input(self, name: str, text: str) -> None:
         self._check_binary()

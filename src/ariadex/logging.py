@@ -10,13 +10,14 @@ invented estimate.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
 import re
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 RUNS_DIRNAME = "runs"
@@ -31,9 +32,7 @@ _SECRET_PATTERNS = [
         r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?"
         r"-----END [A-Z ]*PRIVATE KEY-----"
     ),
-    re.compile(
-        r"(?i)((?:password|passwd|secret|api[_-]?key|token)\s*[:=]\s*)\S+"
-    ),
+    re.compile(r"(?i)((?:password|passwd|secret|api[_-]?key|token)\s*[:=]\s*)\S+"),
 ]
 
 
@@ -50,7 +49,7 @@ def redact(text: str) -> str:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 @dataclasses.dataclass
@@ -101,9 +100,7 @@ def write_run_log(runs_dir: Path, record: RunLogRecord) -> Path:
     stamp = record.ended_at.replace(":", "").replace("+", "")
     name = f"{stamp}-{uuid.uuid4().hex[:6]}.log"
     path = session_dir / name
-    fd, tmp_name = tempfile.mkstemp(
-        dir=str(session_dir), prefix=".run.", suffix=".tmp"
-    )
+    fd, tmp_name = tempfile.mkstemp(dir=str(session_dir), prefix=".run.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(render_log(record))
@@ -111,10 +108,8 @@ def write_run_log(runs_dir: Path, record: RunLogRecord) -> Path:
             os.fsync(handle.fileno())
         os.replace(tmp_name, path)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
     return path
 
