@@ -296,7 +296,9 @@ def run_doctor(project_dir: Path) -> tuple[list[DoctorCheck], dict]:
     except companion_mod.CompanionError as exc:
         companion_hotkey = companion_mod.DEFAULT_HOTKEY
         hotkey_note = f"hotkey invalid ({exc}); default `{companion_hotkey}` applies"
-    if desktop.supported and companion_mod.tkinter_available():
+    tkinter_ok = companion_mod.tkinter_available()
+    display_ok = tkinter_ok and companion_mod.display_available()
+    if desktop.supported and display_ok:
         checks.append(
             DoctorCheck(
                 "companion",
@@ -311,11 +313,13 @@ def run_doctor(project_dir: Path) -> tuple[list[DoctorCheck], dict]:
         reasons = []
         if not desktop.supported:
             reasons.append(desktop.detail)
-        if not companion_mod.tkinter_available():
+        if not tkinter_ok:
             from . import deploy as _deploy_mod
 
             hint = _deploy_mod.tkinter_manual_hint(tmux_setup_mod.detect_manager())
             reasons.append(f"Tkinter is not installed (run `{hint}`)")
+        elif not display_ok:
+            reasons.append("cannot connect to the desktop display")
         checks.append(
             DoctorCheck(
                 "companion",
