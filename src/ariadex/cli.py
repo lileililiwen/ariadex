@@ -1137,7 +1137,9 @@ def cmd_attach(project_dir: Path, auto_install: bool = True) -> int:
             file=sys.stderr,
         )
         return EXIT_ERROR
-    os.execvp(driver.attach_command(name)[0], driver.attach_command(name))
+    # Attach replaces this process with tmux attach; argv comes from the
+    # terminal driver, never from provider output.
+    os.execvp(driver.attach_command(name)[0], driver.attach_command(name))  # noqa: S606
     return EXIT_ERROR
 
 

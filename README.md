@@ -6,18 +6,19 @@ Ariadex keeps Coding CLI work moving across fresh contexts without losing unfini
 
 ## Status
 
-MVP, all eight post-MVP changes, and three audit runtime fixes are
-implemented, tested, archived, and committed: project foundation and
-CLI, agent adapters and tmux driver, state-driven runner and handoff,
-verification/logging/observability, human control and resync,
+MVP, all eight post-MVP changes, and all six audit remediation fixes
+are implemented, tested, archived, and committed: project foundation
+and CLI, agent adapters and tmux driver, state-driven runner and
+handoff, verification/logging/observability, human control and resync,
 unattended tmux installation, live runtime evidence, packaging and
 distribution, CI/quality/security gates, human supervision ergonomics,
 single-runner concurrency and recovery, log data governance, spec
 dependency and execution governance, metrics export and notifications,
 active-spec discovery and archive isolation, bounded run completion and
-cycle limit, and takeover cancellation and scheduler coordination
-(424 tests, stdlib only). All six audit remediation changes are
-archived; no active changes remain. See [ROADMAP.md](ROADMAP.md) and
+cycle limit, takeover cancellation and scheduler coordination,
+canonical spec and doc governance, real-provider live validation, and
+ repository identity and release readiness (505 tests, stdlib only). Three
+ follow-up planning changes are active; see [ROADMAP.md](ROADMAP.md) and
 [HANDOFF.md](HANDOFF.md).
 
 ## Requirements
@@ -196,7 +197,7 @@ instead of silently substituting another spec.
 
 ```bash
 pip install -e ".[dev]"                              # pinned QA toolchain
-python -m unittest discover -s tests                 # 424 tests, stdlib only
+python -m unittest discover -s tests                 # 505 tests, stdlib only
 openspec validate --changes --strict --no-interactive
 ruff check src tests
 ruff format --check src tests

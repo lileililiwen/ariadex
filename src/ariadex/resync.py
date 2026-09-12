@@ -36,7 +36,8 @@ class ResyncReport:
 
 def _git_capture(project_dir: Path, args: list[str]) -> str | None:
     try:
-        proc = subprocess.run(
+        # Fixed git argv (status/diff inspection); read-only, no shell.
+        proc = subprocess.run(  # noqa: S603
             ["git", "-C", str(project_dir), *args],
             capture_output=True,
             text=True,

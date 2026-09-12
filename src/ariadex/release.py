@@ -1,9 +1,11 @@
 """Release-readiness dry run: fail-closed checks, no publishing.
 
 Verifies that published metadata identifies Ariadex-owned resources, the
-release tag matches the single-source package version, build artifacts
-exist with recorded hashes, and the security-reporting route resolves to
-the canonical tracker. Never uploads anything; PyPI stays manual.
+canonical `origin` remote is configured, the release tag matches the
+single-source package version, build artifacts exist with recorded hashes,
+and the security-reporting route resolves to the canonical tracker. Never
+uploads anything; PyPI publication happens only in the tag-triggered
+release workflow via scoped trusted publishing after every gate passes.
 """
 
 from __future__ import annotations
@@ -12,11 +14,16 @@ import argparse
 import dataclasses
 import hashlib
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
 CANONICAL_REPO_URL = "https://github.com/lileililiwen/ariadex"
 CANONICAL_ISSUES_URL = CANONICAL_REPO_URL + "/issues"
+CANONICAL_SSH_PREFIXES = (
+    "git@github.com:lileililiwen/ariadex",
+    "ssh://git@github.com/lileililiwen/ariadex",
+)
 FOREIGN_MARKERS = ("anomalyco/opencode", "github.com/anomalyco")
 REQUIRED_URL_KEYS = ("Homepage", "Security", "Changelog")
 
@@ -132,8 +139,87 @@ def check_artifacts(dist_dir: Path | str, version: str) -> CheckResult:
     return CheckResult("artifacts", True, "; ".join(hashes))
 
 
-def dry_run(root: Path | str, tag: str, dist: str = "dist") -> list[CheckResult]:
-    """Run every readiness check against a project root (no publishing)."""
+def normalize_remote_url(remote_url: str) -> str:
+    """Normalize a git remote URL for canonical comparison.
+
+    Accepts the canonical HTTPS URL with an optional `.git` suffix or
+    trailing slash, and the equivalent GitHub SSH forms. Anything else is
+    returned stripped but unmapped so the caller reports it as foreign.
+    """
+    cleaned = remote_url.strip().removesuffix("/").removesuffix(".git").strip()
+    if cleaned in CANONICAL_SSH_PREFIXES:
+        return CANONICAL_REPO_URL
+    return cleaned
+
+
+def check_canonical_remote(remote_url: str) -> CheckResult:
+    """The `origin` remote must identify the canonical repository.
+
+    A missing or non-canonical remote records the absent external
+    prerequisite and fails closed: CI and publication success must never
+    be claimed without it.
+    """
+    if not remote_url.strip():
+        return CheckResult(
+            "canonical-remote",
+            False,
+            "no `origin` remote configured; run "
+            f"`git remote add origin {CANONICAL_REPO_URL}.git`",
+        )
+    for marker in FOREIGN_MARKERS:
+        if marker in remote_url:
+            return CheckResult(
+                "canonical-remote",
+                False,
+                f"foreign-project reference `{marker}` "
+                f"in remote `{remote_url.strip()}`",
+            )
+    if "<" in remote_url or ">" in remote_url:
+        return CheckResult(
+            "canonical-remote",
+            False,
+            f"placeholder brackets `<...>` in remote `{remote_url.strip()}`",
+        )
+    if normalize_remote_url(remote_url) != CANONICAL_REPO_URL:
+        return CheckResult(
+            "canonical-remote",
+            False,
+            f"remote `{remote_url.strip()}` does not identify {CANONICAL_REPO_URL}",
+        )
+    return CheckResult(
+        "canonical-remote", True, f"origin identifies {CANONICAL_REPO_URL}"
+    )
+
+
+def resolve_origin_remote(workdir: Path | str) -> str:
+    """Best-effort `git remote get-url origin`; `""` when unavailable."""
+    try:
+        proc = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(workdir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
+
+
+def dry_run(
+    root: Path | str,
+    tag: str,
+    dist: str = "dist",
+    remote_url: str | None = None,
+) -> list[CheckResult]:
+    """Run every readiness check against a project root (no publishing).
+
+    `remote_url=None` resolves `origin` via git in `root`; pass an explicit
+    URL (or `""`) to check a value without touching git.
+    """
     from . import __version__
 
     base = Path(root)
@@ -162,6 +248,9 @@ def dry_run(root: Path | str, tag: str, dist: str = "dist") -> list[CheckResult]
         results.append(check_security_route(security_text))
     results.append(check_version_tag(__version__, tag))
     results.append(check_artifacts(base / dist, __version__))
+    if remote_url is None:
+        remote_url = resolve_origin_remote(base)
+    results.append(check_canonical_remote(remote_url))
     return results
 
 
@@ -184,8 +273,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tag", default="", help="release tag, e.g. ariadex-v0.1.0")
     parser.add_argument("--root", default=".", help="project root to check")
     parser.add_argument("--dist", default="dist", help="artifact directory")
+    parser.add_argument(
+        "--remote-url",
+        default=None,
+        help="explicit `origin` URL to check (default: resolve via git)",
+    )
     args = parser.parse_args(argv)
-    results = dry_run(args.root, args.tag, args.dist)
+    results = dry_run(args.root, args.tag, args.dist, args.remote_url)
     print(format_report(results))
     return 0 if all(r.ok for r in results) else 1
 

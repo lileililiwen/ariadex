@@ -41,8 +41,25 @@ lives in exactly one place: `src/ariadex/__init__.py` (`__version__`), and
   `openspec/specs/`). Notable surface: `doctor`, `preview`, `queue`,
   `history`, `resolve`/`defer`/`reopen`/`reprioritize`, `recover`,
   `prune-logs`, `export-logs`, `events`, `export-events`, per-change
-  `depends_on` ordering, single-scheduler lease with crash recovery,
-  telemetry retention/redaction, and opt-in redacted notifications.
+   `depends_on` ordering, single-scheduler lease with crash recovery,
+   telemetry retention/redaction, and opt-in redacted notifications.
+
+## [Unreleased audit remediation]
+
+- `active-spec-discovery-and-archive-isolation`: archived changes are
+  never scheduled as active work.
+- `bounded-run-completion-and-cycle-limit`: cycle-limit exhaustion is an
+  explicit incomplete outcome, never success.
+- `takeover-cancellation-and-scheduler-coordination`: takeover and pause
+  cancel in-flight scheduling without new provider input.
+- `canonical-spec-and-doc-governance`: complete canonical purposes,
+  reconciled current/historical docs, and a consistency test.
+- `real-provider-live-validation`: isolated real OpenCode/Codex lifecycle
+  evidence (startup, probe, interrupt, reset, termination, restart).
+- `repository-identity-security-and-release-readiness`: canonical
+  repository `https://github.com/lileililiwen/ariadex`, issues-based
+  security contact, and a fail-closed release dry run
+  (`python -m ariadex.release --tag ...`).
 
 ## Release guidance
 
@@ -55,6 +72,9 @@ lives in exactly one place: `src/ariadex/__init__.py` (`__version__`), and
    then `ariadex --help` and `ariadex init` in a scratch directory.
 5. Tag the release commit (`git tag ariadex-v<version>`).
 6. Dry run (publishes nothing, must pass):
-   `python -m ariadex.release --tag ariadex-v<version>` checks package
-   identity URLs, tag/version alignment, artifacts, and the
-   security-reporting route. PyPI upload stays manual.
+   `python -m ariadex.release --tag ariadex-v<version>` checks the
+   canonical `origin` remote, package identity URLs, tag/version
+   alignment, artifacts, and the security-reporting route. Pushing the
+   tag runs the release workflow, which re-verifies every gate and then
+   publishes to PyPI via scoped trusted publishing followed by a
+   clean-index install check (`--version`, `init`, `status`).

@@ -83,7 +83,9 @@ def run_command(
 ) -> CommandResult:
     start = time.monotonic()
     try:
-        proc = subprocess.run(
+        # Verification commands are project-configured shell strings by
+        # contract; shell semantics are intended, output captured and bounded.
+        proc = subprocess.run(  # noqa: S602
             command,
             shell=True,
             cwd=str(workdir),

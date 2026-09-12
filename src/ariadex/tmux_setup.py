@@ -125,7 +125,8 @@ def ensure_tmux(executable: str = EXECUTABLE) -> str:
     if manager == "apt-get":
         _run_update(manager)
     cmd = install_command(manager)
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    # Fixed argv from the pinned manager table; no shell, no user input.
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)  # noqa: S603
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "unknown error").strip()
         raise TmuxSetupError(
@@ -146,7 +147,8 @@ def _run_update(manager: str) -> None:
     cmd = ["apt-get", "update"]
     if needs_sudo() and shutil.which("sudo") is not None:
         cmd = ["sudo", "-n", *cmd]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    # Fixed `apt-get update` argv; non-interactive by contract.
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)  # noqa: S603
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "unknown error").strip()
         raise TmuxSetupError(
@@ -181,7 +183,8 @@ def uninstall_tmux() -> str:
             "cannot uninstall tmux: no supported package manager detected"
         )
     cmd = remove_command(manager)
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    # Fixed argv from the pinned removal table; provisional uninstalls only.
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)  # noqa: S603
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "unknown error").strip()
         raise TmuxSetupError(
@@ -207,7 +210,8 @@ def read_depends(package: str = "tmux") -> list[str]:
     """Direct `Depends:` package names for `package` via `apt-cache`."""
     if shutil.which("apt-cache") is None:
         raise TmuxSetupError("local tmux fetch needs `apt-cache` on PATH")
-    proc = subprocess.run(
+    # Fixed `apt-cache depends` argv; output parsed as package names only.
+    proc = subprocess.run(  # noqa: S603
         ["apt-cache", "depends", "--no-recommends", package],
         capture_output=True,
         text=True,
@@ -241,7 +245,8 @@ def missing_shared_libs(
     if lib_dirs:
         extra = ":".join(str(d) for d in lib_dirs)
         env["LD_LIBRARY_PATH"] = f"{extra}:{env.get('LD_LIBRARY_PATH', '')}"
-    proc = subprocess.run(
+    # Fixed `ldd` argv; output scanned for "not found" lines only.
+    proc = subprocess.run(  # noqa: S603
         ["ldd", str(binary)],
         capture_output=True,
         text=True,
@@ -290,7 +295,8 @@ def fetch_local_tmux(dest_dir: str | Path) -> Path:
     try:
         deps = [d for d in read_depends("tmux") if d not in _SYSTEM_LIBS]
         wanted = ["tmux", *[d for d in deps if d != "tmux"]]
-        proc = subprocess.run(
+        # Fixed `apt-get download` argv; downloads only, never installs.
+        proc = subprocess.run(  # noqa: S603
             ["apt-get", "download", *wanted],
             capture_output=True,
             text=True,
@@ -304,7 +310,8 @@ def fetch_local_tmux(dest_dir: str | Path) -> Path:
         if not any(p.name.startswith("tmux_") for p in debs):
             raise TmuxSetupError("`apt-get download tmux` produced no tmux .deb")
         for deb in debs:
-            proc = subprocess.run(
+            # Fixed `dpkg-deb -x` argv extracting into the isolated dir.
+            proc = subprocess.run(  # noqa: S603
                 ["dpkg-deb", "-x", str(deb), str(root)],
                 capture_output=True,
                 text=True,

@@ -80,7 +80,8 @@ class TmuxDriver(TerminalDriver):
 
     def _run(self, args: list[str], context: str) -> subprocess.CompletedProcess[str]:
         try:
-            proc = subprocess.run(
+            # Fixed tmux argv (`executable` is a resolved binary path); no shell.
+            proc = subprocess.run(  # noqa: S603
                 [self.executable, *args],
                 capture_output=True,
                 text=True,
@@ -102,7 +103,8 @@ class TmuxDriver(TerminalDriver):
 
     def session_alive(self, name: str) -> bool:
         try:
-            proc = subprocess.run(
+            # Fixed `has-session` probe argv; read-only tmux query.
+            proc = subprocess.run(  # noqa: S603
                 [self.executable, "has-session", "-t", name],
                 capture_output=True,
                 text=True,

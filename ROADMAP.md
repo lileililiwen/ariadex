@@ -43,17 +43,23 @@ archived, and committed (see `HANDOFF.md` for per-change evidence):
    repository identity, corrected provenance links, and a fail-closed
    release dry run.
 
-No active changes remain (`openspec list` is empty).
+Three follow-up changes are now active as planning packages:
 
-## Next: live-environment evidence
+1. `release-publication-and-remote-verification` — verify the canonical remote, CI execution, protected release environment, PyPI trusted publishing, and clean installation from the published package.
+2. `reproducible-release-and-security-evidence` — make build, pip-audit, and local/supplied-tmux evidence reproducible and explicitly current.
+3. `quality-gate-hardening` — strengthen critical-path coverage, documentation fixtures, workflow security, and CI structure checks.
 
-Before V2, demonstrate on a tmux host with install rights:
+## Next: follow-up release and quality evidence
+
+Before V2, complete the active follow-up changes, then demonstrate on a tmux host or explicit local tmux binary:
 
 - fresh-session continuity across a real multi-spec run
 - unresolved-work preservation across process restarts
 - reliable shell verification gating a real completion
 - human takeover in a live CLI session and resync back to AUTO
 - unattended tmux install success path
+- canonical GitHub CI execution and protected release review
+- clean PyPI installation after a maintainer-approved release
 
 ## Audit remediation queue
 
@@ -66,7 +72,7 @@ The completed implementation audit produced six remediation changes, all archive
 5. `real-provider-live-validation`
 6. `repository-identity-security-and-release-readiness`
 
-See [HANDOFF.md](HANDOFF.md) for findings, dependencies, and verification evidence.
+See [HANDOFF.md](HANDOFF.md) for findings, dependencies, and verification evidence. Only one active change may be implemented at a time.
 
 ## Next: deferred V2 capabilities
 
