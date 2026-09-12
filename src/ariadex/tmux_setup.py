@@ -37,6 +37,19 @@ _MANUAL_HINTS = {
     "brew": "brew install tmux",
 }
 
+# Manager -> argv that removes tmux non-interactively. Used only to undo a
+# provisional install performed by this module; a pre-existing tmux is
+# never removed.
+_REMOVE_ARGS: dict[str, tuple[str, ...]] = {
+    "apt-get": ("remove", "-y"),
+    "dnf": ("remove", "-y"),
+    "yum": ("remove", "-y"),
+    "pacman": ("-R", "--noconfirm"),
+    "zypper": ("--non-interactive", "remove"),
+    "apk": ("del",),
+    "brew": ("uninstall",),
+}
+
 
 class TmuxSetupError(Exception):
     """tmux is missing and could not be installed automatically."""
@@ -132,3 +145,38 @@ def _run_update(manager: str) -> None:
             f"automatic tmux install failed ({' '.join(cmd)}): {detail}; "
             f"install manually with `{manual_hint(manager)}`"
         )
+
+
+def remove_command(manager: str) -> list[str]:
+    """Full argv to remove tmux with `manager`, sudo-prefixed if needed."""
+    try:
+        args = _REMOVE_ARGS[manager]
+    except KeyError:
+        raise TmuxSetupError(f"unsupported package manager `{manager}`") from None
+    cmd = [manager, *args, "tmux"]
+    if needs_sudo() and shutil.which("sudo") is not None:
+        cmd = ["sudo", "-n", *cmd]
+    return cmd
+
+
+def uninstall_tmux() -> str:
+    """Remove tmux via the host package manager.
+
+    Call only to undo a provisional install performed by `ensure_tmux`;
+    a pre-existing tmux must never be removed by the caller. Returns the
+    removed manager name. Failures raise TmuxSetupError but the caller
+    should treat a failed uninstall as a warning, not a test failure.
+    """
+    manager = detect_manager()
+    if manager is None:
+        raise TmuxSetupError(
+            "cannot uninstall tmux: no supported package manager detected"
+        )
+    cmd = remove_command(manager)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "unknown error").strip()
+        raise TmuxSetupError(
+            f"automatic tmux removal failed ({' '.join(cmd)}): {detail}"
+        )
+    return manager

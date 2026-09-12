@@ -517,26 +517,106 @@ SCENARIOS = (
 )
 
 
+def provision_tmux() -> tuple[str | None, str]:
+    """Ensure tmux exists, installing it when missing.
+
+    Returns (path, note) where note is "" when tmux was already present,
+    "provisioned" when this call installed it. Raises TmuxSetupError with
+    an actionable message when installation is impossible.
+    """
+    from . import tmux_setup as setup_mod
+
+    if setup_mod.find_tmux() is not None:
+        return setup_mod.find_tmux(), ""
+    path = setup_mod.ensure_tmux()
+    return path, "provisioned"
+
+
+def unprovision_tmux(provisioned: bool) -> str:
+    """Undo a provisional install. No-op unless `provisioned` is True.
+
+    Only ever removes a tmux this harness installed; a pre-existing tmux
+    is never touched. Returns a human-readable note.
+    """
+    if not provisioned:
+        return ""
+    from . import tmux_setup as setup_mod
+
+    try:
+        manager = setup_mod.uninstall_tmux()
+    except Exception as exc:
+        return f"warning: provisional tmux could not be removed: {exc}"
+    if setup_mod.find_tmux() is not None:
+        return (
+            f"warning: provisional tmux removal via {manager} reported "
+            "success but tmux is still on PATH"
+        )
+    return f"provisional tmux removed via {manager}"
+
+
 def run_all(timeout_s: int = DEFAULT_TIMEOUT_S,
-            only: list[str] | None = None) -> list[EvidenceResult]:
-    """Run every scenario with isolation; unexpected errors become BLOCKED."""
+            only: list[str] | None = None,
+            provision: bool = False) -> list[EvidenceResult]:
+    """Run every scenario with isolation; unexpected errors become BLOCKED.
+
+    With `provision=True`, tmux is installed when missing before the live
+    scenario runs and uninstalled afterwards if this call installed it. A
+    pre-existing tmux is never removed. Without provisioning, a missing
+    tmux is honestly reported as skipped.
+    """
     results: list[EvidenceResult] = []
-    for name, func in SCENARIOS:
-        if only and name not in only:
-            continue
+    provisioned = False
+    provision_attempted = False
+    provision_note = ""
+    skip_tmux = False
+    if provision and (only is None or "tmux-lifecycle" in only):
+        provision_attempted = True
+        from .tmux_setup import TmuxSetupError
         try:
-            if name in ("tmux-lifecycle", "provider-smoke"):
-                results.append(func(timeout_s=timeout_s))
-            else:
-                results.append(func())
-        except Exception as exc:  # harness must classify, never raise
+            _, note = provision_tmux()
+            provisioned = note == "provisioned"
+            if provisioned:
+                provision_note = "tmux was missing; provisional install performed"
+        except TmuxSetupError as exc:
+            skip_tmux = True
             results.append(
                 EvidenceResult(
-                    name=name, status=BLOCKED,
-                    reason=f"harness error: {exc}",
+                    name="tmux-lifecycle", status=BLOCKED,
+                    reason=f"provisioning failed: {exc}",
                     diagnostics=str(exc)[:2000],
                 )
             )
+    try:
+        for name, func in SCENARIOS:
+            if only and name not in only:
+                continue
+            if name == "tmux-lifecycle" and skip_tmux:
+                continue  # provisioning already classified it
+            try:
+                if name in ("tmux-lifecycle", "provider-smoke"):
+                    results.append(func(timeout_s=timeout_s))
+                else:
+                    results.append(func())
+            except Exception as exc:  # harness must classify, never raise
+                results.append(
+                    EvidenceResult(
+                        name=name, status=BLOCKED,
+                        reason=f"harness error: {exc}",
+                        diagnostics=str(exc)[:2000],
+                    )
+                )
+    finally:
+        if provision_attempted:
+            note = unprovision_tmux(provisioned)
+            combined = "; ".join(n for n in (provision_note, note) if n)
+            if combined:
+                results.append(
+                    EvidenceResult(
+                        name="tmux-provision",
+                        status=PASSED if provisioned else SKIPPED,
+                        reason=combined,
+                    )
+                )
     return results
 
 
@@ -578,9 +658,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--only", default=None,
                         help="comma-separated scenario names to run")
+    parser.add_argument(
+        "--provision", action="store_true",
+        help="install tmux when missing, uninstall afterwards only if installed here",
+    )
     args = parser.parse_args(argv)
     only = args.only.split(",") if args.only else None
-    results = run_all(timeout_s=args.timeout, only=only)
+    results = run_all(timeout_s=args.timeout, only=only,
+                      provision=args.provision)
     print(format_report(results))
     if args.gate:
         return gate_exit_code(results)

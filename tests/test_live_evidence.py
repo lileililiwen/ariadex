@@ -127,6 +127,101 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(result.status, PASSED)
 
 
+class ProvisionTest(unittest.TestCase):
+    def test_provision_installs_only_when_missing(self):
+        from ariadex import tmux_setup
+        with mock.patch.object(tmux_setup, "find_tmux", return_value="/usr/bin/tmux"):
+            with mock.patch.object(tmux_setup, "ensure_tmux") as ensure:
+                path, note = live_evidence.provision_tmux()
+        self.assertEqual(path, "/usr/bin/tmux")
+        self.assertEqual(note, "")
+        ensure.assert_not_called()
+
+    def test_provision_marks_provisional_install(self):
+        from ariadex import tmux_setup
+        with mock.patch.object(tmux_setup, "find_tmux", return_value=None):
+            with mock.patch.object(
+                tmux_setup, "ensure_tmux", return_value="/usr/bin/tmux",
+            ):
+                path, note = live_evidence.provision_tmux()
+        self.assertEqual(note, "provisioned")
+
+    def test_unprovision_never_touches_preexisting_tmux(self):
+        from ariadex import tmux_setup
+        with mock.patch.object(tmux_setup, "uninstall_tmux") as uninstall:
+            self.assertEqual(live_evidence.unprovision_tmux(False), "")
+        uninstall.assert_not_called()
+
+    def test_unprovision_removes_only_provisional_tmux(self):
+        from ariadex import tmux_setup
+        with mock.patch.object(
+            tmux_setup, "uninstall_tmux", return_value="apt-get",
+        ):
+            with mock.patch.object(tmux_setup, "find_tmux", return_value=None):
+                note = live_evidence.unprovision_tmux(True)
+        self.assertIn("removed via apt-get", note)
+
+    def test_unprovision_failure_is_warning_not_crash(self):
+        from ariadex import tmux_setup
+        with mock.patch.object(
+            tmux_setup, "uninstall_tmux",
+            side_effect=tmux_setup.TmuxSetupError("dpkg locked"),
+        ):
+            note = live_evidence.unprovision_tmux(True)
+        self.assertIn("warning", note)
+
+    def test_failed_provision_blocks_live_scenario_honestly(self):
+        from ariadex import tmux_setup
+        with mock.patch.object(
+            live_evidence, "provision_tmux",
+            side_effect=tmux_setup.TmuxSetupError("no passwordless sudo"),
+        ):
+            results = run_all(only=["tmux-lifecycle"], provision=True)
+        by_name = {r.name: r for r in results}
+        self.assertEqual(by_name["tmux-lifecycle"].status, BLOCKED)
+        self.assertIn("provisioning failed", by_name["tmux-lifecycle"].reason)
+
+    def test_provision_roundtrip_recorded_as_evidence(self):
+        with mock.patch.object(
+            live_evidence, "provision_tmux", return_value=("/usr/bin/tmux", "provisioned"),
+        ):
+            with mock.patch.object(
+                live_evidence, "unprovision_tmux", return_value="provisional tmux removed",
+            ):
+                results = run_all(only=["provider-startup"], provision=True)
+        by_name = {r.name: r for r in results}
+        # tmux-lifecycle not requested, so no provisioning attempted at all
+        self.assertNotIn("tmux-provision", by_name)
+        self.assertEqual(by_name["provider-startup"].status, PASSED)
+
+    def test_remove_command_per_manager(self):
+        from ariadex import tmux_setup
+        with mock.patch.object(tmux_setup, "needs_sudo", return_value=False):
+            self.assertEqual(
+                tmux_setup.remove_command("apt-get"),
+                ["apt-get", "remove", "-y", "tmux"],
+            )
+            self.assertEqual(
+                tmux_setup.remove_command("brew"), ["brew", "uninstall", "tmux"],
+            )
+        with self.assertRaises(tmux_setup.TmuxSetupError):
+            tmux_setup.remove_command("choco")
+
+    def test_uninstall_uses_detected_manager(self):
+        from subprocess import CompletedProcess
+        from ariadex import tmux_setup
+        with mock.patch.object(tmux_setup.shutil, "which",
+                               side_effect=lambda n: "/usr/bin/apt-get" if n == "apt-get" else None):
+            with mock.patch.object(tmux_setup, "needs_sudo", return_value=True):
+                # no sudo binary -> no sudo prefix
+                with mock.patch.object(
+                    tmux_setup.subprocess, "run",
+                    return_value=CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+                ) as run:
+                    self.assertEqual(tmux_setup.uninstall_tmux(), "apt-get")
+        self.assertEqual(run.call_args.args[0], ["apt-get", "remove", "-y", "tmux"])
+
+
 def run_cli(root: Path, *argv: str) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     with chdir(root), redirect_stdout(out), redirect_stderr(err):
@@ -158,6 +253,15 @@ class EvidenceCliTest(unittest.TestCase):
                                    "tmux-lifecycle")
         self.assertNotEqual(code, 0)
         self.assertIn("skipped", out)
+
+    def test_evidence_provision_flag_reaches_runner(self):
+        with mock.patch.object(
+            live_evidence, "run_all", return_value=[],
+        ) as run_all_mock:
+            code, _, _ = run_cli(self.root, "evidence", "--provision", "--only",
+                                 "provider-startup")
+        self.assertEqual(code, 0)
+        self.assertTrue(run_all_mock.call_args.kwargs["provision"])
 
     def test_other_commands_still_work(self):
         code, _, _ = run_cli(self.root, "status")

@@ -95,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="comma-separated scenario names to run",
     )
+    evidence.add_argument(
+        "--provision",
+        action="store_true",
+        help="install tmux when missing for the live scenario; "
+        "uninstall afterwards only if installed here",
+    )
     return parser
 
 
@@ -271,12 +277,14 @@ def cmd_takeover(project_dir: Path) -> int:
 
 def cmd_evidence(project_dir: Path, gate: bool = False,
                  timeout_s: int = live_evidence_mod.DEFAULT_TIMEOUT_S,
-                 only: str | None = None) -> int:
+                 only: str | None = None,
+                 provision: bool = False) -> int:
     # Diagnostics only: never schedules work, sends input, or installs
     # anything. Honest classification: skipped/blocked are reported, and
     # --gate exits non-zero unless everything passed.
     names = only.split(",") if only else None
-    results = live_evidence_mod.run_all(timeout_s=timeout_s, only=names)
+    results = live_evidence_mod.run_all(timeout_s=timeout_s, only=names,
+                                        provision=provision)
     print(live_evidence_mod.format_report(results))
     if gate:
         return live_evidence_mod.gate_exit_code(results)
@@ -447,6 +455,7 @@ def main(argv: list[str] | None = None) -> int:
             timeout_s=getattr(args, "timeout",
                               live_evidence_mod.DEFAULT_TIMEOUT_S),
             only=getattr(args, "only", None),
+            provision=getattr(args, "provision", False),
         ),
     }
     return handlers[args.command]()
