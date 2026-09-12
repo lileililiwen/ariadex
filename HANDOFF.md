@@ -98,6 +98,13 @@ change before implementation.
 
 ## Latest verification evidence
 
+- Widget display readiness was corrected in commit `3890929`. Tkinter import
+  success is no longer treated as display availability: managed prerequisites
+  now perform a bounded create/destroy Tk probe, so `start` reports a missing
+  or inaccessible X11 display before launching the widget. The full suite now
+  passes 895 tests with 0 failures, including the regression test for this
+  condition.
+
 - `2026-09-13-managed-runtime-upsert-and-minimal-cli` was implemented and
   archived in commit `2394e50`. `widget_runtime.py` durably records widget
   ownership and verifies PID/start-time/token identity; live `start` reuses a
