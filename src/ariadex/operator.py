@@ -37,10 +37,23 @@ def _spec_dir_ok(project_dir: Path, cfg: config_mod.Config) -> tuple[bool, str]:
     path = project_dir / cfg.spec_dir
     if not path.is_dir():
         return False, f"spec directory `{cfg.spec_dir}` is missing"
-    specs = sorted(e.name for e in path.iterdir() if e.is_dir())
+    from . import spec_graph as spec_graph_mod
+
+    specs, ignored = spec_graph_mod.discover_active_changes(path)
     if not specs:
-        return True, f"spec directory `{cfg.spec_dir}` exists but holds no changes"
-    return True, f"spec directory `{cfg.spec_dir}` holds {len(specs)} change(s)"
+        detail = f"spec directory `{cfg.spec_dir}` exists but holds no active changes"
+    else:
+        detail = f"spec directory `{cfg.spec_dir}` holds {len(specs)} active change(s)"
+    if ignored:
+        kinds: dict[str, int] = {}
+        for reason in ignored.values():
+            kinds[reason] = kinds.get(reason, 0) + 1
+        summary = ", ".join(
+            f"{count} {reason}" for reason, count in sorted(kinds.items())
+        )
+        noun = "entry" if len(ignored) == 1 else "entries"
+        detail += f"; ignored {len(ignored)} {noun}: {summary}"
+    return True, detail
 
 
 def run_doctor(project_dir: Path) -> tuple[list[DoctorCheck], dict]:

@@ -57,25 +57,31 @@ class RepositoryView:
     missing_spec_dir: bool = False
     dependencies: dict = dataclasses.field(default_factory=dict)
     graph_errors: dict = dataclasses.field(default_factory=dict)
+    ignored_specs: dict = dataclasses.field(default_factory=dict)
 
 
 def inspect_repository(project_dir: Path, spec_dir: str) -> RepositoryView:
     """Inspect durable repository state: which spec changes exist.
 
-    Also loads optional per-change dependency metadata
-    (`depends_on` in `.openspec.yaml`). Malformed metadata is reported in
-    `graph_errors` and never raises; scheduling treats it as a blocker.
+    Active discovery shares one boundary with graph loading, doctor,
+    preview, and resync: the reserved `archive` directory, hidden
+    entries, and non-directories are ignored with operator-visible
+    reasons in `ignored_specs` and never scheduled. Also loads optional
+    per-change dependency metadata (`depends_on` in `.openspec.yaml`).
+    Malformed metadata is reported in `graph_errors` and never raises;
+    scheduling treats it as a blocker.
     """
     path = project_dir / spec_dir
     if not path.is_dir():
         return RepositoryView(spec_dir=spec_dir, specs=[], missing_spec_dir=True)
-    specs = sorted(entry.name for entry in path.iterdir() if entry.is_dir())
+    specs, ignored = spec_graph_mod.discover_active_changes(path)
     graph, errors = spec_graph_mod.load_graph(project_dir, spec_dir)
     return RepositoryView(
         spec_dir=spec_dir,
         specs=specs,
         dependencies=graph,
         graph_errors=errors,
+        ignored_specs=ignored,
     )
 
 

@@ -29,6 +29,7 @@ from . import handoff as handoff_mod
 
 METADATA_FILENAME = ".openspec.yaml"
 DEPENDENCY_KEYS = ("depends_on", "dependencies")
+ARCHIVE_DIRNAME = "archive"
 
 _COMPLETED_SPEC_RE = re.compile(r"completed spec `([^`]+)`")
 
@@ -87,6 +88,48 @@ def read_spec_dependencies(spec_dir: Path, name: str) -> list[str]:
     return declared
 
 
+def is_active_change_name(name: str) -> bool:
+    """Predicate for an active change directory entry name.
+
+    Reserved storage (`archive`) and hidden entries (`.`-prefixed) are
+    never active. A valid active entry is a non-hidden directory whose
+    name is not the reserved archive name. Ordinary files are excluded
+    by the caller via `is_dir`, not by this name check.
+    """
+    return bool(name) and name != ARCHIVE_DIRNAME and not name.startswith(".")
+
+
+def discover_active_changes(base: Path) -> tuple[list[str], dict[str, str]]:
+    """List active change names with operator-visible ignore reasons.
+
+    Returns (active, ignored) where active is sorted and ignored maps
+    each skipped entry name to why it was skipped (archived, hidden, or
+    not a change directory). Descendants of `archive/` are excluded by
+    excluding the top-level reserved directory itself.
+    """
+    active: list[str] = []
+    ignored: dict[str, str] = {}
+    if not base.is_dir():
+        return active, ignored
+    try:
+        entries = sorted(base.iterdir(), key=lambda e: e.name)
+    except OSError:
+        return active, ignored
+    for entry in entries:
+        name = entry.name
+        if not entry.is_dir():
+            ignored[name] = "not a change directory; ignored"
+            continue
+        if name == ARCHIVE_DIRNAME:
+            ignored[name] = "archived change storage; never scheduled"
+            continue
+        if name.startswith("."):
+            ignored[name] = "hidden entry; ignored"
+            continue
+        active.append(name)
+    return active, ignored
+
+
 def load_graph(
     project_dir: Path, spec_dir: str
 ) -> tuple[dict[str, list[str]], dict[str, str]]:
@@ -102,7 +145,7 @@ def load_graph(
     errors: dict[str, str] = {}
     if not base.is_dir():
         return graph, errors
-    names = sorted(entry.name for entry in base.iterdir() if entry.is_dir())
+    names, _ = discover_active_changes(base)
     for name in names:
         try:
             graph[name] = read_spec_dependencies(base, name)
