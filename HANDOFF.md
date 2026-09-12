@@ -36,11 +36,18 @@
 - Tests: `tests/test_concurrency.py` (19 tests: metadata/heartbeat/release-ownership, active/stale refusal without deletion, run/auto guard with no input and lease release on failure, before-send safe retry, each uncertain phase records a blocker, bounded no-duplicate recovery, live-owner refusal, runner interruption stop, phase cleared on success, recover/doctor in every mode, history preserved).
 - Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (271 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
 - Live proof on this host: ruff check/format clean, mypy clean on 19 files, coverage 82% (gate met), `openspec validate --changes --strict --no-interactive` 3 passed after archiving.
+- `log-data-governance` implemented, verified, and archived as `2026-09-12-log-data-governance` (commit `deb83d0`).
+- Config: `log_retention_days` (default 30, 0 keeps everything), `log_max_bytes` (default 10485760), `metrics_max_bytes` (default 5242880, 0 disables that cap); validated as integers >= 0 with defaults in `default_config_text`.
+- `logging.py`: extended redaction (Bearer, ghp/gho/github_pat/glpat/xox, JWT, AWS secret fields) via `redact_with_report` (count only, never stores secrets); `RunLogRecord` gains `redaction_count` + `schema_version` rendered as `redactions:`/`schema:`; `ensure_secure_permissions` applies 0700/0600 best-effort with Windows/unreadable diagnostics; `apply_retention` prunes expired logs then oldest-first size caps plus metrics age/size rotation (malformed lines retained for age, trimmed by size) and reports removed/retained; `export_logs` copies telemetry only with a byte bound refusal; `LOG/METRICS_SCHEMA_VERSION = 1`.
+- `runner.py` enforces retention after every cycle (suppressed, never fails the cycle) and records `schema_version` + `redactions` in metrics; `operator.py` doctor gains a non-required `logs` check (bounds + group/other-accessible + Windows fallback) plus `prune_telemetry`/`export_telemetry` and retention/export formatters; `cli.py` gains `prune-logs [--yes] [--json]` (interactive deletion confirmation, telemetry only) and `export-logs --out --max-bytes [--json]` (bounded, refuses above the cap); `SECURITY.md` documents sensitive-data handling, permissions, retention/backup/recovery.
+- Tests: `tests/test_log_governance.py` (29 tests: age/size rotation oldest-first, zero-disables-bounds, metrics age/size with malformed-line retention, permissions + fallback diagnostics, extended redaction + count metadata, export scope/bounds, prune CLI preserves handoff history, config validation, doctor logs check, runner observe bounds).
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (300 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
+- Live proof on this host: ruff check/format clean, mypy clean on 19 files, coverage 82% (gate met), `openspec validate --changes --strict --no-interactive` 2 passed after archiving.
 - No implementation work for the remaining post-MVP changes has started; the queue below is planning-only.
 
 ## Next change
 
-Next is `log-data-governance`. Select only one active change at a time with `openspec list`; remaining packages are planning-only until implementation is explicitly started.
+Next is `spec-dependency-and-execution-governance`. Select only one active change at a time with `openspec list`; remaining packages are planning-only until implementation is explicitly started.
 
 ## Feature-to-change sequence
 
