@@ -48,6 +48,8 @@ jobs:
       - name: live evidence release gate (no skips allowed)
         run: python -m ariadex evidence --gate --timeout 180
       - run: python -m build
+      - name: release readiness dry run (identity, tag, security, artifacts)
+        run: python -m ariadex.release --tag "${GITHUB_REF_NAME}"
       - name: verify artifacts and record hashes
         run: |
           ls dist/ariadex-*.tar.gz dist/ariadex-*-py3-none-any.whl

@@ -25,7 +25,7 @@ committed (see `HANDOFF.md` for per-change evidence):
 7. `spec-dependency-and-execution-governance` — deterministic dependency graph and eligible-spec selection.
 8. `metrics-export-and-notifications` — versioned metrics, provider-neutral export, and bounded attention signals.
 
-Five audit fixes are additionally implemented, tested,
+Six audit fixes are additionally implemented, tested,
 archived, and committed (see `HANDOFF.md` for per-change evidence):
 
 1. `active-spec-discovery-and-archive-isolation` — archived changes are
@@ -39,8 +39,11 @@ archived, and committed (see `HANDOFF.md` for per-change evidence):
 5. `real-provider-live-validation` — isolated real OpenCode/Codex
    lifecycle evidence (startup, probe, interrupt, reset, termination,
    restart) with honest skip/block classification.
+6. `repository-identity-security-and-release-readiness` — canonical
+   repository identity, corrected provenance links, and a fail-closed
+   release dry run.
 
-One remediation change remains active (`openspec list` is non-empty).
+No active changes remain (`openspec list` is empty).
 
 ## Next: live-environment evidence
 
@@ -54,7 +57,7 @@ Before V2, demonstrate on a tmux host with install rights:
 
 ## Audit remediation queue
 
-The completed implementation audit produced six remediation changes, five of which are archived above. They are ordered so runtime correctness is fixed before evidence and release hygiene:
+The completed implementation audit produced six remediation changes, all archived above. They are ordered so runtime correctness is fixed before evidence and release hygiene:
 
 1. `active-spec-discovery-and-archive-isolation`
 2. `bounded-run-completion-and-cycle-limit`

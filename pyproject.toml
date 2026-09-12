@@ -38,9 +38,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/anomalyco/opencode"
-Security = "https://github.com/anomalyco/opencode/blob/main/SECURITY.md"
-Changelog = "https://github.com/anomalyco/opencode/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/lileililiwen/ariadex"
+Security = "https://github.com/lileililiwen/ariadex/blob/main/SECURITY.md"
+Changelog = "https://github.com/lileililiwen/ariadex/blob/main/CHANGELOG.md"
 
 [project.scripts]
 ariadex = "ariadex.cli:main"

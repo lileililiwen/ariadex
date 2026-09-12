@@ -54,3 +54,7 @@ lives in exactly one place: `src/ariadex/__init__.py` (`__version__`), and
    `pip install dist/ariadex-<version>-py3-none-any.whl`,
    then `ariadex --help` and `ariadex init` in a scratch directory.
 5. Tag the release commit (`git tag ariadex-v<version>`).
+6. Dry run (publishes nothing, must pass):
+   `python -m ariadex.release --tag ariadex-v<version>` checks package
+   identity URLs, tag/version alignment, artifacts, and the
+   security-reporting route. PyPI upload stays manual.

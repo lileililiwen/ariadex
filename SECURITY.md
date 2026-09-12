@@ -50,7 +50,7 @@ Pre-release `0.x` versions are supported on a best-effort basis.
 
 ## Reporting a vulnerability
 
-Open a GitHub issue at <https://github.com/anomalyco/opencode/issues>
+Open a GitHub issue at <https://github.com/lileililiwen/ariadex/issues>
 with the `security` label, or contact the maintainers through the same
 tracker. Include:
 

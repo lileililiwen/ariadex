@@ -1,0 +1,4 @@
+depends_on:
+  - canonical-spec-and-doc-governance
+  - real-provider-live-validation
+

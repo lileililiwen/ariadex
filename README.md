@@ -16,8 +16,8 @@ single-runner concurrency and recovery, log data governance, spec
 dependency and execution governance, metrics export and notifications,
 active-spec discovery and archive isolation, bounded run completion and
 cycle limit, and takeover cancellation and scheduler coordination
-(408 tests, stdlib only). An audit remediation queue remains active
-(five of six changes archived); see [ROADMAP.md](ROADMAP.md) and
+(424 tests, stdlib only). All six audit remediation changes are
+archived; no active changes remain. See [ROADMAP.md](ROADMAP.md) and
 [HANDOFF.md](HANDOFF.md).
 
 ## Requirements
@@ -60,7 +60,7 @@ ariadex --help
 From a source checkout (no install; uses `./ariadex` wrapper):
 
 ```bash
-git clone <ariadex> && cd ariadex
+git clone https://github.com/lileililiwen/ariadex.git && cd ariadex
 ./ariadex --help
 ```
 
@@ -78,7 +78,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and
 ## Quickstart
 
 ```bash
-git clone <ariadex> && cd ariadex
+git clone https://github.com/lileililiwen/ariadex.git && cd ariadex
 ./ariadex init          # create .ariadex/ defaults, never overwrites
 ./ariadex auto          # resync from handoff+git+specs, enter AUTO, schedule
 ./ariadex status        # mode, agent, spec, session, unresolved, tests, next
@@ -196,7 +196,7 @@ instead of silently substituting another spec.
 
 ```bash
 pip install -e ".[dev]"                              # pinned QA toolchain
-python -m unittest discover -s tests                 # 408 tests, stdlib only
+python -m unittest discover -s tests                 # 424 tests, stdlib only
 openspec validate --changes --strict --no-interactive
 ruff check src tests
 ruff format --check src tests
