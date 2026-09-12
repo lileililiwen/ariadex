@@ -1,0 +1,18 @@
+schema: spec-driven
+
+context: |
+  Project: Ariadex, a human-supervised runtime for long-running AI coding workflows.
+  Product boundary: orchestrate existing Coding CLIs; do not implement an IDE or call LLM APIs.
+  MVP: OpenCode and Codex through tmux, state-driven execution, handoff persistence, AUTO/MANUAL/PAUSE, shell verification, and session logs.
+  Delivery: implement one active change at a time; preserve application-owned repository state and human takeover.
+  Verification: every completion claim requires the configured verification commands and strict OpenSpec validation.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours

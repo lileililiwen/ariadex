@@ -1,0 +1,17 @@
+.ariadex/
+.codegraph/
+bin/
+obj/
+dist/
+build/
+coverage/
+node_modules/
+.venv/
+__pycache__/
+*.log
+*.tmp
+.env
+.env.*
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,12 @@
+.git/
+.codegraph/
+.ariadex/runs/
+.ariadex/metrics.jsonl
+bin/
+obj/
+build/
+dist/
+coverage/
+node_modules/
+*.log
+*.tmp
