@@ -2,7 +2,7 @@
 
 ## Current state
 
-- Implemented, verified, and archived: all five MVP changes, `tmux-auto-install`, all eight post-MVP changes, all six audit fixes (`active-spec-discovery-and-archive-isolation` as `78f6375`, `bounded-run-completion-and-cycle-limit` as `6c83615`, `takeover-cancellation-and-scheduler-coordination` as `814f2d7`, `canonical-spec-and-doc-governance` as `c1373cd`, `real-provider-live-validation` as `a8080f7`, `repository-identity-security-and-release-readiness` as `40494ef`), all three follow-up changes (`release-publication-and-remote-verification`, `reproducible-release-and-security-evidence`, `quality-gate-hardening`), all three daemon UX changes (`daemon-first-runtime-and-simple-cli`, `human-yield-hotkey-and-floating-control`, and `local-install-and-user-deployment`, see Verification evidence below), `companion-prerequisite-auto-install` (commit `4d447a7`), `tagged-version-pypi-release-alignment` (commit `8e879ab`), `dev-environment-bootstrap`, `daemon-widget-command`, `robot-agent-supervisor`, `provider-auto-continuation` (commit `1890950`), `robot-widget-runtime` (commit `dd0a8d4`), and `robot-watch-stability` (commit `5829174`). All 41 canonical purposes under `openspec/specs` are complete. `ariadex 0.1.0` is published on PyPI. No active changes remain.
+- Implemented, verified, and archived: all five MVP changes, `tmux-auto-install`, all eight post-MVP changes, all six audit fixes (`active-spec-discovery-and-archive-isolation` as `78f6375`, `bounded-run-completion-and-cycle-limit` as `6c83615`, `takeover-cancellation-and-scheduler-coordination` as `814f2d7`, `canonical-spec-and-doc-governance` as `c1373cd`, `real-provider-live-validation` as `a8080f7`, `repository-identity-security-and-release-readiness` as `40494ef`), all three follow-up changes (`release-publication-and-remote-verification`, `reproducible-release-and-security-evidence`, `quality-gate-hardening`), all three daemon UX changes (`daemon-first-runtime-and-simple-cli`, `human-yield-hotkey-and-floating-control`, and `local-install-and-user-deployment`, see Verification evidence below), `companion-prerequisite-auto-install` (commit `4d447a7`), `tagged-version-pypi-release-alignment` (commit `8e879ab`), `dev-environment-bootstrap`, `daemon-widget-command`, `robot-agent-supervisor`, `provider-auto-continuation` (commit `1890950`), `robot-widget-runtime` (commit `dd0a8d4`), `robot-watch-stability` (commit `5829174`), and `robot-boundary-evidence` (commit `e49f3db`). All 42 canonical purposes under `openspec/specs` are complete. `ariadex 0.1.0` is published on PyPI. No active changes remain.
 - Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 797 tests, 0 skips (fully hermetic; stdlib only; runtime requires PyYAML). Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (no publishing).
 - Follow-up `simple-widget-workflow` is implemented and archived: `widget` checks Tkinter before daemon startup, supports explicit `--yes` prerequisite installation, and hides the historical `companion` command from normal help.
 - Added [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md), a detailed user/developer reference for the current daemon, widget controls, modes, durable files, cycle flow, and troubleshooting. It explicitly separates the implemented runtime from deferred arbitrary-agent observation behavior.
@@ -114,6 +114,11 @@ approval.
   Classification uses the current pane tail so stale approval/error text does
   not block a later ready state. Focused verification: 169 tests passed, 1
   expected display-dependent skip; 41 canonical specs validate.
+- `robot-boundary-evidence` was archived as
+  `2026-09-12-robot-boundary-evidence` (`e49f3db`). Without
+  `--finished-change`, the watcher now reads `HANDOFF.md` `current_spec` and
+  checks that change's `tasks.md` before opening the next conversation.
+  Focused verification: 106 tests passed; 42 canonical specs validate.
 
 ## Audit remediation sequence
 
