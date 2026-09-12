@@ -15,6 +15,7 @@ from pathlib import Path
 from . import config as config_mod
 from . import control as control_mod
 from . import handoff as handoff_mod
+from . import live_evidence as live_evidence_mod
 from . import logging as logging_mod
 from . import providers as providers_mod
 from . import resync as resync_mod
@@ -73,6 +74,26 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "auto",
         help="resynchronize from handoff and specs, then resume scheduling",
+    )
+    evidence = sub.add_parser(
+        "evidence",
+        help="run opt-in live runtime evidence (passed/skipped/blocked)",
+    )
+    evidence.add_argument(
+        "--gate",
+        action="store_true",
+        help="exit non-zero unless every scenario passed",
+    )
+    evidence.add_argument(
+        "--timeout",
+        type=int,
+        default=live_evidence_mod.DEFAULT_TIMEOUT_S,
+        help="per-probe timeout in seconds",
+    )
+    evidence.add_argument(
+        "--only",
+        default=None,
+        help="comma-separated scenario names to run",
     )
     return parser
 
@@ -248,6 +269,20 @@ def cmd_takeover(project_dir: Path) -> int:
     )
 
 
+def cmd_evidence(project_dir: Path, gate: bool = False,
+                 timeout_s: int = live_evidence_mod.DEFAULT_TIMEOUT_S,
+                 only: str | None = None) -> int:
+    # Diagnostics only: never schedules work, sends input, or installs
+    # anything. Honest classification: skipped/blocked are reported, and
+    # --gate exits non-zero unless everything passed.
+    names = only.split(",") if only else None
+    results = live_evidence_mod.run_all(timeout_s=timeout_s, only=names)
+    print(live_evidence_mod.format_report(results))
+    if gate:
+        return live_evidence_mod.gate_exit_code(results)
+    return EXIT_OK
+
+
 def cmd_auto(project_dir: Path, auto_install: bool = True) -> int:
     # Resynchronize from handoff, git, specs, and queue; persist; enter
     # AUTO; then resume the runner. Manual edits are evidence, never
@@ -406,6 +441,13 @@ def main(argv: list[str] | None = None) -> int:
         "resume": lambda: cmd_resume(project_dir),
         "takeover": lambda: cmd_takeover(project_dir),
         "auto": lambda: cmd_auto(project_dir, auto_install=auto_install),
+        "evidence": lambda: cmd_evidence(
+            project_dir,
+            gate=getattr(args, "gate", False),
+            timeout_s=getattr(args, "timeout",
+                              live_evidence_mod.DEFAULT_TIMEOUT_S),
+            only=getattr(args, "only", None),
+        ),
     }
     return handlers[args.command]()
 
