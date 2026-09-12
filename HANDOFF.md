@@ -2,18 +2,16 @@
 
 ## Current state
 
-- `verification-logging-and-observability` is implemented, verified, and archived as `2026-09-12-verification-logging-and-observability` (commit `bf0816d`).
-- New modules: `src/ariadex/verify.py` (`ShellVerifier`, ordered commands, exit/duration/timeout capture, 20k bounded output), `src/ariadex/logging.py` (per-cycle logs under `.ariadex/runs/`, metrics JSONL with explicit `usage: unavailable`, secret redaction), `src/ariadex/status.py` (operator projection: mode/agent/spec/session/context/elapsed/unresolved/tests/next; absent record shows `no verification record`, never PASS).
-- Runner now: `ShellVerifier` by default when commands are configured; failed verification bumps persisted `attempts`, schedules repair while `attempts <= retry_limit`, then BLOCKED (stop-on-blocker) or skip-and-continue (record-and-continue); exhausted issues are skipped by selection; every cycle writes one log + one metrics record.
-- Environment blocker (unchanged): no `tmux` binary, so live-tmux test skips and `run` stops before sending work in this environment.
-- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (139 tests, 1 skip; stdlib only; runtime requires PyYAML).
-- Active queue is the final MVP change in [ROADMAP.md](ROADMAP.md).
+- MVP COMPLETE: all five changes implemented, verified, and archived. `human-control-and-resync` archived as `2026-09-12-human-control-and-resync` (commit `13d2f01`).
+- New modules: `src/ariadex/control.py` (AUTO/MANUAL/PAUSE machine, `owns_input`/`allows_scheduling`, idempotent transitions, `resume`-only-from-PAUSE rejection), `src/ariadex/resync.py` (handoff + `git status --porcelain` + `git diff --stat` + spec + queue reconciliation; manual edits are evidence, never completion).
+- Enforcement: `run` requires AUTO (MANUAL refuses, PAUSE refuses); `Runner.run_once` mode-guards without touching the adapter; `takeover`/`pause` preserve the tmux session and write observation logs; `auto` resyncs, persists, enters AUTO, then schedules; malformed handoff refuses resync.
+- Environment blocker (unchanged): no `tmux` binary, so live-tmux test skips and scheduling stops before sending work in this environment. Live-session proof (fresh-session continuity, takeover with a real CLI) still requires a tmux host.
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (164 tests, 1 skip; stdlib only; runtime requires PyYAML).
+- No V2 work started, per the sequence rule.
 
 ## Next change
 
-`human-control-and-resync`
-
-It implements AUTO/MANUAL/PAUSE transitions, manual takeover, resume, and git/spec/handoff resync on top of the full runtime.
+MVP delivery is complete. Next step is live-environment evidence (tmux host) or V2 planning, by human decision.
 
 ## Feature-to-change sequence
 
@@ -57,6 +55,7 @@ Incomplete or blocked work must not be claimed complete. Record the exact failed
 
 ## Verification evidence
 
-- `PYTHONPATH=src python3 -m unittest discover -s tests`: 139 tests ran, OK (1 skipped: live tmux lifecycle, `tmux` binary unavailable).
-- `openspec validate --changes --strict --no-interactive`: 2 passed, 0 failed (before archiving; archive generated `openspec/specs/runner-verification/spec.md` and `openspec/specs/session-observability/spec.md`).
-- Scratch exercise: `init` + `status` shows the full projection (`tests: no verification record`); `run` without tmux exits 1 before sending work.
+- `PYTHONPATH=src python3 -m unittest discover -s tests`: 164 tests ran, OK (1 skipped: live tmux lifecycle, `tmux` binary unavailable).
+- `openspec validate --changes --strict --no-interactive`: 1 passed, 0 failed (before archiving; archive generated `openspec/specs/human-control/spec.md` and `openspec/specs/resync/spec.md`). No active changes remain.
+- Scratch exercise: `takeover` idempotent, MANUAL `run` refused, `resume` rejected from MANUAL, `pause` -> `resume` works with session preserved, `auto` resyncs (uncommitted changes observed, next action recomputed) then stops on missing tmux.
+- MVP evidence per change is recorded in this file's history (commits `608bc22` through `13d2f01`).
