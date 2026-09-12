@@ -15,9 +15,11 @@ from pathlib import Path
 
 from . import config as config_mod
 from . import handoff as handoff_mod
+from . import logging as logging_mod
 from . import providers as providers_mod
 from . import runner as runner_mod
 from . import state as state_mod
+from . import status as status_mod
 from . import terminal as terminal_mod
 
 EXIT_OK = 0
@@ -134,26 +136,32 @@ def cmd_status(project_dir: Path) -> int:
     st = _load_state(project_dir)
     if st is None:
         return EXIT_ERROR
-    print(f"mode: {st.mode}")
-    print(f"session: {st.session_id}")
-    print(f"current spec: {st.current_spec or '(none)'}")
-    print(f"unresolved: {st.unresolved_count}")
-    print(f"updated: {st.updated_at}")
-    print(f"provider: {cfg.agent_provider} (terminal: {cfg.terminal_driver})")
     try:
         handoff = handoff_mod.read_handoff(project_dir / cfg.handoff_file)
     except handoff_mod.HandoffError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
-    blocked = sum(1 for item in handoff.unresolved if item.status == "BLOCKED")
+    records = logging_mod.read_metrics(
+        project_dir / ".ariadex" / logging_mod.METRICS_FILENAME
+    )
+    blocked = [item for item in handoff.unresolved if item.status == "BLOCKED"]
     opened = sum(1 for item in handoff.unresolved if item.status == "OPEN")
-    print(f"handoff status: {handoff.status}")
-    print(f"handoff spec: {handoff.current_spec or '(none)'}")
-    print(f"open issues: {opened} (blocked: {blocked})")
-    for item in handoff.unresolved:
-        if item.status == "BLOCKED":
-            print(f"blocker {item.id}: {item.description}")
-    print(f"next action: {handoff.next_action or '(none)'}")
+    print(
+        status_mod.render_status(
+            mode=st.mode,
+            agent=f"{cfg.agent_provider} (terminal: {cfg.terminal_driver})",
+            spec=st.current_spec or handoff.current_spec,
+            session=st.session_id,
+            context_strategy=cfg.context_strategy,
+            elapsed=status_mod.elapsed_since(st.updated_at),
+            open_count=opened,
+            blocked_count=len(blocked),
+            tests=status_mod.tests_summary(records[-1] if records else None),
+            next_action=handoff.next_action,
+        )
+    )
+    for item in blocked:
+        print(f"blocker {item.id}: {item.description}")
     return EXIT_OK
 
 

@@ -17,11 +17,12 @@ from ariadex.runner import (
     select_next_action,
 )
 from ariadex.terminal import FakeTerminalDriver
+from ariadex.verify import ShellVerifier
 
 
 class PassVerifier(Verifier):
     def verify(self, action, output):
-        return VerificationResult(passed=True, detail="stub pass")
+        return VerificationResult(passed=True, detail="stub pass", exit_code=0)
 
 
 class FailVerifier(Verifier):
@@ -42,6 +43,7 @@ def make_project(root: Path, specs=("demo",), **overrides) -> config.Config:
         "reset_mode": "auto",
         "retry_limit": 0,
         "blocker_policy": "stop-on-blocker",
+        "verification_commands": [],
         **values,
     }
     return config.validate(raw)
@@ -241,6 +243,140 @@ class ResetTest(unittest.TestCase):
         root = Path(tmp.name)
         cfg = make_project(root, context_strategy="manual")
         self.assertEqual(select_context_strategy(cfg), "manual")
+
+
+class VerificationGateTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def write_doc(self, doc):
+        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+
+    def failing_run(self, **overrides):
+        values = dict(retry_limit=2)
+        values.update(overrides)
+        cfg = make_project(self.root, **values)
+        return make_runner(
+            self.root, cfg=cfg, verifier=ShellVerifier(["exit 1"], self.root)
+        )
+
+    def test_failed_tests_schedule_bounded_repair_then_block(self):
+        run, _ = self.failing_run()
+        doc = handoff.empty_handoff()
+        add_item(doc, "issue", "broken", priority="high", item_id="u-1")
+        self.write_doc(doc)
+        first = run.run_once()
+        self.assertEqual(first.outcome, "verification-failed")
+        self.assertFalse(first.stopped)
+        second = run.run_once()
+        self.assertFalse(second.stopped)
+        third = run.run_once()
+        self.assertTrue(third.stopped)
+        reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
+        item = handoff.get_item(reloaded, "u-1")
+        self.assertEqual(item.status, "BLOCKED")
+        self.assertEqual(item.attempts, 3)
+        # Three failure notes plus the BLOCKED transition: history retained.
+        self.assertEqual(len(item.history), 4)
+        self.assertEqual(item.history[-1]["to"], "BLOCKED")
+
+    def test_retry_limit_reached_continues_per_policy(self):
+        run, _ = self.failing_run(retry_limit=0, blocker_policy="record-and-continue")
+        doc = handoff.empty_handoff()
+        add_item(doc, "issue", "broken", priority="high", item_id="u-1")
+        add_item(doc, "issue", "other", priority="low", item_id="u-2")
+        self.write_doc(doc)
+        result = run.run_once()
+        self.assertFalse(result.stopped)
+        reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
+        # u-1 stays OPEN but exhausted; the runner moves to u-2.
+        self.assertEqual(handoff.get_item(reloaded, "u-1").status, "OPEN")
+        self.assertTrue(reloaded.next_action.startswith("resolve-issue u-2"))
+
+    def test_attempts_survive_restart(self):
+        run, _ = self.failing_run()
+        doc = handoff.empty_handoff()
+        add_item(doc, "issue", "broken", priority="high", item_id="u-1")
+        self.write_doc(doc)
+        run.run_once()
+        fresh, _ = make_runner(
+            self.root, cfg=run.config,
+            verifier=ShellVerifier(["exit 1"], self.root),
+        )
+        fresh.run_once()
+        reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
+        self.assertEqual(handoff.get_item(reloaded, "u-1").attempts, 2)
+
+    def test_failing_spec_verification_keeps_spec_incomplete(self):
+        run, _ = self.failing_run()
+        doc = handoff.empty_handoff()
+        doc.current_spec = "demo"
+        self.write_doc(doc)
+        result = run.run_once()
+        self.assertEqual(result.kind, "advance-spec")
+        self.assertEqual(result.outcome, "verification-failed")
+        reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
+        self.assertEqual(reloaded.current_spec, "demo")
+        self.assertEqual(reloaded.completed, [])
+
+    def test_eventual_pass_completes_after_repair(self):
+        marker = self.root / "pass-marker"
+        cfg = make_project(self.root, retry_limit=2)
+        verifier = ShellVerifier([f"test -f {marker}"], self.root)
+        run, _ = make_runner(self.root, cfg=cfg, verifier=verifier)
+        doc = handoff.empty_handoff()
+        add_item(doc, "issue", "broken", priority="high", item_id="u-1")
+        self.write_doc(doc)
+        self.assertEqual(run.run_once().outcome, "verification-failed")
+        marker.write_text("ok", encoding="utf-8")
+        result = run.run_once()
+        self.assertEqual(result.outcome, "completed")
+        reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
+        self.assertEqual(handoff.get_item(reloaded, "u-1").status, "RESOLVED")
+
+
+class ObservabilityTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def test_cycle_writes_log_and_metrics(self):
+        run, _ = make_runner(self.root, verifier=PassVerifier())
+        doc = handoff.empty_handoff()
+        doc.next_spec = "demo"
+        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+        run.run_once()
+        logs = list((self.root / ".ariadex" / "runs").rglob("*.log"))
+        self.assertEqual(len(logs), 1)
+        from ariadex.logging import read_metrics
+
+        records = read_metrics(self.root / ".ariadex" / "metrics.jsonl")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["usage"], "unavailable")
+        self.assertEqual(records[0]["validation_result"], "passed")
+        self.assertEqual(records[0]["exit_code"], 0)
+
+    def test_available_usage_persisted(self):
+        class UsageAdapter(providers.OpenCodeAdapter):
+            def get_usage(self):
+                return {"input_tokens": 10, "output_tokens": 4, "cost": 0.02}
+
+        cfg = make_project(self.root)
+        (self.root / ".ariadex").mkdir(parents=True, exist_ok=True)
+        state.write(self.root, state.initial_state())
+        adapter = UsageAdapter(FakeTerminalDriver(), "s", self.root)
+        run = Runner(self.root, cfg, adapter, PassVerifier())
+        doc = handoff.empty_handoff()
+        doc.next_spec = "demo"
+        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+        run.run_once()
+        from ariadex.logging import read_metrics
+
+        records = read_metrics(self.root / ".ariadex" / "metrics.jsonl")
+        self.assertEqual(records[0]["usage"]["input_tokens"], 10)
 
 
 if __name__ == "__main__":

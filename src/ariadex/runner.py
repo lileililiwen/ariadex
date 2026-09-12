@@ -1,25 +1,26 @@
 """State-driven orchestration: inspect, determine, execute, persist.
 
 Data flow per cycle: read handoff -> inspect repository -> determine next
-action -> run adapter -> collect outcome -> persist handoff -> reset or stop.
+action -> run adapter -> collect outcome -> verify -> persist handoff ->
+log and record metrics -> reset or stop.
 
 The runner never selects work by enumerating spec files alone, never marks
 work complete from agent prose, and persists before ending so a restart
-resumes from durable state. Verification is a boundary here
-(`UnavailableVerifier` until verification-logging-and-observability ships):
-without a passed verification nothing advances and the runner stops after
-persisting the outcome.
+resumes from durable state. Completion requires every configured shell
+verification command to exit zero; failures schedule bounded retries and
+then persist as unresolved or blocked.
 """
 
 from __future__ import annotations
 
-import abc
 import dataclasses
 from pathlib import Path
 
 from . import handoff as handoff_mod
+from . import logging as logging_mod
 from .adapters import AdapterError, AgentAdapter, StartupError, select_reset
 from .config import Config
+from .verify import ShellVerifier, UnavailableVerifier, Verifier, VerificationResult
 
 CONTEXT_STRATEGIES = ("per-spec", "per-task", "token-threshold", "manual", "never")
 
@@ -28,34 +29,6 @@ ACTION_ADVANCE_SPEC = "advance-spec"
 ACTION_START_SPEC = "start-spec"
 ACTION_STOP = "stop"
 ACTION_IDLE = "idle"
-
-
-@dataclasses.dataclass
-class VerificationResult:
-    passed: bool
-    detail: str
-
-
-class Verifier(abc.ABC):
-    """Verification boundary consumed by the runner."""
-
-    @abc.abstractmethod
-    def verify(self, action: str, output: str) -> VerificationResult:
-        """Judge an adapter outcome. Never called with trusted completion."""
-
-
-class UnavailableVerifier(Verifier):
-    """Placeholder until shell verification is implemented."""
-
-    def verify(self, action: str, output: str) -> VerificationResult:
-        return VerificationResult(
-            passed=False,
-            detail=(
-                "verification unavailable: shell verification arrives with "
-                "`verification-logging-and-observability`; "
-                "no work is marked complete"
-            ),
-        )
 
 
 @dataclasses.dataclass
@@ -85,10 +58,18 @@ def inspect_repository(project_dir: Path, spec_dir: str) -> RepositoryView:
 
 
 def select_next_action(
-    handoff: handoff_mod.Handoff, repo: RepositoryView
+    handoff: handoff_mod.Handoff,
+    repo: RepositoryView,
+    retry_limit: int | None = None,
 ) -> tuple[str, str]:
-    """Determine the next action. OPEN issues precede spec advancement."""
+    """Determine the next action. OPEN issues precede spec advancement.
+
+    Issues whose attempts exceed `retry_limit` are skipped: no additional
+    automatic attempt is scheduled for them.
+    """
     opens = handoff_mod.open_items(handoff)
+    if retry_limit is not None:
+        opens = [item for item in opens if item.attempts <= retry_limit]
     if opens:
         top = opens[0]
         return ACTION_RESOLVE_ISSUE, f"{top.id}: {top.description}"
@@ -141,9 +122,17 @@ class Runner:
         self.project_dir = project_dir
         self.config = config
         self.adapter = adapter
-        self.verifier = verifier or UnavailableVerifier()
+        if verifier is not None:
+            self.verifier = verifier
+        elif config.verification_commands:
+            self.verifier = ShellVerifier(config.verification_commands, project_dir)
+        else:
+            self.verifier = UnavailableVerifier()
         self.handoff_path = project_dir / config.handoff_file
+        self.runs_dir = project_dir / ".ariadex" / logging_mod.RUNS_DIRNAME
+        self.metrics_path = project_dir / ".ariadex" / logging_mod.METRICS_FILENAME
         self.cycles: list[CycleResult] = []
+        self._ctx: dict = {}
 
     def _load(self) -> handoff_mod.Handoff:
         handoff = handoff_mod.read_handoff(self.handoff_path)
@@ -173,6 +162,7 @@ class Runner:
     ) -> CycleResult:
         handoff.status = "blocked"
         handoff.next_action = "none — blocked"
+        self._ctx["output"] = reason
         self._save(handoff)
         if self.config.blocker_policy == "stop-on-blocker":
             return CycleResult(
@@ -193,9 +183,67 @@ class Runner:
         )
 
     def run_once(self) -> CycleResult:
+        self._ctx = {
+            "input": "",
+            "output": "",
+            "exit_code": None,
+            "validation": "unavailable",
+            "reset": None,
+            "retries": 0,
+        }
+        started = logging_mod.now_iso()
+        result = self._cycle()
+        self._observe(result, started)
+        return result
+
+    def _observe(self, result: CycleResult, started: str) -> None:
+        """Persist one run log and one metrics record per cycle."""
+        try:
+            handoff = handoff_mod.read_handoff(self.handoff_path)
+        except handoff_mod.HandoffError:
+            handoff = None
+        ctx = self._ctx
+        try:
+            usage: object = logging_mod.usage_record(self.adapter.get_usage())
+        except Exception:
+            usage = "unavailable"
+        ended = logging_mod.now_iso()
+        record = logging_mod.RunLogRecord(
+            session_id=handoff.session_id if handoff else "",
+            spec=handoff.current_spec if handoff else None,
+            action=result.action,
+            input=ctx["input"],
+            output=ctx["output"],
+            exit_code=ctx["exit_code"],
+            validation_result=ctx["validation"],
+            reset_reason=ctx["reset"],
+            retry_count=ctx["retries"],
+            started_at=started,
+            ended_at=ended,
+        )
+        logging_mod.write_run_log(self.runs_dir, record)
+        logging_mod.append_metrics(
+            self.metrics_path,
+            {
+                "session": record.session_id,
+                "spec": record.spec,
+                "action": result.action,
+                "outcome": result.outcome,
+                "started_at": started,
+                "ended_at": ended,
+                "exit_code": ctx["exit_code"],
+                "validation_result": ctx["validation"],
+                "reset": ctx["reset"],
+                "retry_count": ctx["retries"],
+                "usage": usage,
+            },
+        )
+
+    def _cycle(self) -> CycleResult:
         try:
             handoff = self._load()
         except handoff_mod.HandoffError as exc:
+            self._ctx["output"] = str(exc)
             return CycleResult(
                 kind=ACTION_STOP,
                 action="none — unreadable handoff",
@@ -222,7 +270,9 @@ class Runner:
                 handoff, f"{len(blockers)} BLOCKED item(s) present"
             )
 
-        kind, target = select_next_action(handoff, repo)
+        kind, target = select_next_action(
+            handoff, repo, retry_limit=self.config.retry_limit
+        )
         if kind == ACTION_IDLE:
             handoff.status = (
                 "complete"
@@ -232,6 +282,7 @@ class Runner:
                 else "idle"
             )
             handoff.next_action = "none — idle"
+            self._ctx["output"] = target
             self._save(handoff)
             result = CycleResult(
                 kind=kind, action="none — idle", outcome="idle",
@@ -284,18 +335,18 @@ class Runner:
             return result
 
         verdict = self.verifier.verify(action, output)
-        if not verdict.passed:
-            if kind == ACTION_RESOLVE_ISSUE:
-                item_id = target.split(":", 1)[0]
-                try:
-                    item = handoff_mod.get_item(handoff, item_id)
-                    item.history.append(
-                        {"from": "OPEN", "to": "OPEN",
-                         "at": handoff_mod.now_iso(),
-                         "note": f"attempted; {verdict.detail}"}
-                    )
-                except handoff_mod.HandoffError:
-                    pass
+        self._ctx["input"] = prompt
+        self._ctx["output"] = output
+        self._ctx["exit_code"] = verdict.exit_code
+        if verdict.passed:
+            self._ctx["validation"] = "passed"
+        elif isinstance(self.verifier, UnavailableVerifier):
+            self._ctx["validation"] = "unavailable"
+        else:
+            self._ctx["validation"] = "failed"
+        if verdict.passed:
+            return self._complete(handoff, kind, target, action)
+        if isinstance(self.verifier, UnavailableVerifier):
             handoff.status = "in-progress"
             handoff.next_action = action
             self._save(handoff)
@@ -306,7 +357,99 @@ class Runner:
             )
             self.cycles.append(result)
             return result
+        return self._retry_or_persist(handoff, kind, target, action, verdict.detail)
 
+    def _failure_item(
+        self,
+        handoff: handoff_mod.Handoff,
+        kind: str,
+        target: str,
+        action: str,
+        detail: str,
+    ) -> handoff_mod.UnresolvedItem:
+        if kind == ACTION_RESOLVE_ISSUE:
+            item_id = target.split(":", 1)[0]
+            try:
+                item = handoff_mod.get_item(handoff, item_id)
+            except handoff_mod.HandoffError:
+                item = handoff_mod.add_item(
+                    handoff, type="issue",
+                    description=f"verification failed: {action}",
+                    priority="high",
+                )
+        else:
+            description = f"verification failed: {action}"
+            matches = [
+                item for item in handoff.unresolved
+                if item.status == "OPEN" and item.description == description
+            ]
+            item = matches[0] if matches else handoff_mod.add_item(
+                handoff, type="issue", description=description, priority="high"
+            )
+        item.attempts += 1
+        item.history.append(
+            {
+                "from": item.status,
+                "to": item.status,
+                "at": handoff_mod.now_iso(),
+                "note": f"verification failed (attempt {item.attempts}): {detail}",
+            }
+        )
+        return item
+
+    def _retry_or_persist(
+        self,
+        handoff: handoff_mod.Handoff,
+        kind: str,
+        target: str,
+        action: str,
+        detail: str,
+    ) -> CycleResult:
+        item = self._failure_item(handoff, kind, target, action, detail)
+        self._ctx["retries"] = item.attempts
+        handoff.status = "in-progress"
+        if item.attempts <= self.config.retry_limit:
+            handoff.next_action = f"resolve-issue {item.id}: {item.description}"
+            self._save(handoff)
+            result = CycleResult(
+                kind=kind, action=action, outcome="verification-failed",
+                detail=f"{detail}; repair scheduled "
+                f"(attempt {item.attempts}/{self.config.retry_limit})",
+                stopped=False, stop_reason=None,
+            )
+            self.cycles.append(result)
+            return result
+        if self.config.blocker_policy == "stop-on-blocker":
+            handoff_mod.set_item_status(
+                handoff, item.id, "BLOCKED",
+                note=f"retry limit reached: {detail}",
+            )
+            result = self._stop_for_blocker(handoff, "retry limit reached")
+            self.cycles.append(result)
+            return result
+        handoff.next_action = self._plan_next(handoff)
+        self._save(handoff)
+        result = CycleResult(
+            kind=kind, action=action, outcome="verification-failed",
+            detail=f"{detail}; retry limit reached, recorded per policy",
+            stopped=False, stop_reason=None,
+        )
+        self.cycles.append(result)
+        return result
+
+    def _plan_next(self, handoff: handoff_mod.Handoff) -> str:
+        next_kind, next_target = select_next_action(
+            handoff,
+            inspect_repository(self.project_dir, self.config.spec_dir),
+            retry_limit=self.config.retry_limit,
+        )
+        if next_kind in (ACTION_IDLE, ACTION_STOP):
+            return "none — idle"
+        return f"{next_kind} {next_target}"
+
+    def _complete(
+        self, handoff: handoff_mod.Handoff, kind: str, target: str, action: str
+    ) -> CycleResult:
         boundary = self._apply_completion(handoff, kind, target)
         strategy = select_context_strategy(self.config)
         reset = None
@@ -322,13 +465,8 @@ class Runner:
                 result = self._stop_for_blocker(handoff, "reset failed")
                 self.cycles.append(result)
                 return result
-        next_kind, next_target = select_next_action(
-            handoff, inspect_repository(self.project_dir, self.config.spec_dir)
-        )
-        handoff.next_action = (
-            "none — idle" if next_kind in (ACTION_IDLE, ACTION_STOP)
-            else f"{next_kind} {next_target}"
-        )
+        self._ctx["reset"] = reset
+        handoff.next_action = self._plan_next(handoff)
         self._save(handoff)
         result = CycleResult(
             kind=kind, action=action, outcome="completed",
@@ -344,6 +482,7 @@ class Runner:
         """Record a verified completion. Returns whether a boundary closed."""
         if kind == ACTION_RESOLVE_ISSUE:
             item_id = target.split(":", 1)[0]
+            self._ctx["retries"] = handoff_mod.get_item(handoff, item_id).attempts
             handoff_mod.set_item_status(
                 handoff, item_id, "RESOLVED", note="verified completion"
             )

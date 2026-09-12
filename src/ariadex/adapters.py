@@ -173,6 +173,14 @@ class AgentAdapter(abc.ABC):
         """Conservative default: never claim idle without evidence."""
         return False
 
+    def get_usage(self) -> dict | None:
+        """Provider token/cost usage, or None when not exposed.
+
+        Metrics must record `usage: unavailable` in that case and never
+        invent an estimate.
+        """
+        return None
+
     def terminate(self) -> None:
         try:
             self.driver.terminate(self.session_name)

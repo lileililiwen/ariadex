@@ -44,6 +44,7 @@ class UnresolvedItem:
     target_spec: str | None = None
     reason: str | None = None
     history: list = dataclasses.field(default_factory=list)
+    attempts: int = 0
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -117,6 +118,11 @@ def _validate_item(raw: dict) -> UnresolvedItem:
         raise HandoffError(
             f"invalid history for item `{raw.get('id')}`: list required"
         )
+    attempts = raw.get("attempts", 0)
+    if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0:
+        raise HandoffError(
+            f"invalid attempts for item `{raw.get('id')}`: integer >= 0 required"
+        )
     return UnresolvedItem(
         id=raw["id"],
         type=raw["type"],
@@ -126,6 +132,7 @@ def _validate_item(raw: dict) -> UnresolvedItem:
         target_spec=target_spec,
         reason=reason,
         history=history,
+        attempts=attempts,
     )
 
 
