@@ -4,15 +4,19 @@ Capability notes (verified live by `ariadex evidence --only
 opencode-lifecycle,codex-lifecycle`: real startup, `/help` probe,
 interrupt, reset, termination, and restart in isolated tmux sessions):
 - OpenCode runs its attachable TUI by default (`opencode [project]`) and
-  accepts `/new` as its new-session input, so `soft_reset` is declared.
+  accepts `/new` as its new-session input, so `soft_reset` is declared and
+  automatic continuation uses that in-session operation.
 - Codex runs its interactive CLI by default with no in-session
-  new-session key, so `soft_reset` is NOT declared and the runner must use
-  hard reset (terminate and restart) for it.
+  new-session key, so `soft_reset` is NOT declared; automatic continuation
+  uses the provider-safe hard reset (terminate and restart the same tmux
+  session via the declared `codex` launch command).
 - CodeBuddy shares the adapter boundary (`codebuddy` CLI) with the same
   conservative contract: no in-session new-session key is assumed, so
-  `soft_reset` is NOT declared. Its ready markers are declared, not
-  live-verified; the robot supervisor treats unknown surfaces as
-  working, never as finished.
+  `soft_reset` is NOT declared; automatic continuation uses the
+  provider-safe hard reset (terminate and restart the same tmux session
+  via the declared `codebuddy` launch command). Its ready markers are
+  declared, not live-verified; the robot supervisor treats unknown
+  surfaces as working, never as finished.
 - No adapter can read provider token usage from the terminal pane, so
   `token_usage` is false and metrics must record `usage: unavailable`.
 """

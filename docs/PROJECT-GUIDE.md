@@ -165,9 +165,14 @@ Behavior:
   exact reason; an empty active list stops the watcher with a completion
   report and no further prompt. `--max-polls` bounds a run (0 means
   unbounded); `--poll-interval` sets the seconds between pane polls.
-- Providers without an in-session new-conversation operation (Codex,
-  CodeBuddy) block with a manual instruction instead of terminating the
-  user-owned session.
+- Providers continue automatically once the durable boundary is verified:
+  OpenCode opens a fresh conversation with its verified in-session
+  operation; Codex and CodeBuddy restart the provider inside the selected
+  tmux session (provider-safe terminate/restart, same session name) and
+  the watcher waits for the fresh input-ready surface before sending the
+  continuation prompt. A failed restart or missing readiness enters
+  `BLOCKED` with the provider, operation, and recovery reason, and no
+  prompt is sent.
 - The robot widget is minimal: fixed middle-right, provider/session
   identity plus robot state, Pause (no new input, session keeps running),
   and Quit (watcher exits, session left attachable).

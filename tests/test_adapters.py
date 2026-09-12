@@ -158,6 +158,81 @@ class UnsupportedCapabilityTest(unittest.TestCase):
         )
 
 
+class NewConversationTest(unittest.TestCase):
+    def test_opencode_uses_soft_path_without_terminate(self):
+        adapter, driver = make_open_code()
+        adapter.start()
+        calls_before = len(driver.calls)
+        adapter.new_conversation()
+        self.assertIn(("send_input", "test-session", "/new"), driver.calls)
+        ops = [op for op, *_ in driver.calls[calls_before:]]
+        self.assertNotIn("terminate", ops)
+
+    def test_codex_uses_hard_restart_in_same_session(self):
+        driver = FakeTerminalDriver()
+        adapter = providers.CodexAdapter(driver, "codex-session", "/tmp")
+        adapter.start()
+        driver.sessions["codex-session"]["output"] = "stale"
+        adapter.new_conversation()
+        ops = [op for op, *_ in driver.calls]
+        self.assertIn("terminate", ops)
+        self.assertIn("create_or_connect", ops)
+        self.assertIn("codex-session", driver.sessions)
+        self.assertEqual(driver.sessions["codex-session"]["command"], ["codex"])
+
+    def test_codebuddy_uses_hard_restart_in_same_session(self):
+        driver = FakeTerminalDriver()
+        adapter = providers.CodeBuddyAdapter(driver, "buddy-session", "/tmp")
+        adapter.start()
+        adapter.new_conversation()
+        self.assertIn("buddy-session", driver.sessions)
+        self.assertEqual(driver.sessions["buddy-session"]["command"], ["codebuddy"])
+
+    def test_every_supported_provider_declares_automatic_continuation(self):
+        for provider in ("opencode", "codex", "codebuddy"):
+            adapter = providers.get_adapter(provider, FakeTerminalDriver(), "s", "/tmp")
+            self.assertTrue(
+                adapter.auto_continuation_available,
+                f"{provider} must declare automatic continuation",
+            )
+
+    def test_no_reset_capability_reports_unavailable(self):
+        from ariadex.adapters import AgentAdapter, Capabilities
+
+        class NoReset(AgentAdapter):
+            provider_name = "noreset"
+            launch_command = ("noreset",)
+
+            @property
+            def capabilities(self):
+                return Capabilities(soft_reset=False, hard_reset=False, interrupt=False)
+
+        adapter = NoReset(FakeTerminalDriver(), "s", "/tmp")
+        self.assertFalse(adapter.auto_continuation_available)
+        with self.assertRaises(UnsupportedOperation):
+            adapter.new_conversation()
+
+    def test_failed_restart_propagates_typed_error(self):
+        class BrokenDriver(FakeTerminalDriver):
+            def terminate(self, name):
+                raise SessionMissing("boom")
+
+        adapter = providers.CodexAdapter(BrokenDriver(), "s", "/tmp")
+        from ariadex.adapters import AdapterError
+
+        with self.assertRaises(AdapterError):
+            adapter.new_conversation()
+
+    def test_failed_start_propagates_typed_error(self):
+        driver = FakeTerminalDriver()
+        driver.missing_binary = True
+        adapter = providers.CodexAdapter(driver, "s", "/tmp")
+        from ariadex.adapters import AdapterError
+
+        with self.assertRaises(AdapterError):
+            adapter.new_conversation()
+
+
 class SelectResetTest(unittest.TestCase):
     def test_auto_prefers_soft_when_available(self):
         self.assertEqual(

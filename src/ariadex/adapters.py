@@ -157,6 +157,36 @@ class AgentAdapter(abc.ABC):
                 f"failed to reset {self.provider_name} session: {exc}"
             ) from exc
 
+    @property
+    def auto_continuation_available(self) -> bool:
+        """Whether this adapter can open a fresh conversation automatically."""
+        if self.capabilities.soft_reset and self.new_session_input is not None:
+            return True
+        return bool(self.capabilities.hard_reset)
+
+    def new_conversation(self) -> None:
+        """Open a fresh conversation automatically (provider-safe).
+
+        Prefers the in-session new-session input when the adapter declares
+        `soft_reset`; otherwise performs a provider-safe terminate/restart
+        of the same session via the declared `launch_command` when the
+        adapter declares `hard_reset`. Raises UnsupportedOperation when
+        neither path is available so the caller fails closed instead of
+        claiming continuation. Transport/termination/startup failures
+        propagate as typed AdapterError and must also fail closed.
+        """
+        if self.capabilities.soft_reset and self.new_session_input is not None:
+            self.new_session()
+            return
+        if self.capabilities.hard_reset:
+            self.terminate()
+            self.start()
+            return
+        raise UnsupportedOperation(
+            f"{self.provider_name} has no automatic new-conversation "
+            "operation; open a new conversation manually"
+        )
+
     def capture_output(self) -> str:
         """Return raw pane output verbatim for the logger.
 

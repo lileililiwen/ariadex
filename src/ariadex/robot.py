@@ -27,7 +27,7 @@ from pathlib import Path
 
 from . import handoff as handoff_mod
 from . import spec_graph as spec_graph_mod
-from .adapters import AgentAdapter
+from .adapters import AgentAdapter, UnsupportedOperation
 from .terminal import TerminalDriver
 
 DEFAULT_CONTINUATION_PROMPT = "Please read the HANDOFF.md, and implement the next spec."
@@ -427,24 +427,32 @@ class RobotWatcher:
         return self._open_continuation()
 
     def _open_continuation(self) -> str:
+        """Open the next conversation via the adapter contract only.
+
+        Provider commands, restart details, and input-delivery rules stay
+        inside the adapter (`new_conversation`); this method never branches
+        on provider identity or command strings. Any failure enters
+        `BLOCKED` with the provider, operation, and recovery reason, and no
+        continuation prompt is sent until the fresh input surface is
+        observed.
+        """
         self.phase = NEW_CONVERSATION
-        can_soft_reset = bool(
-            self.adapter.capabilities.soft_reset
-            and self.adapter.new_session_input is not None
-        )
-        if not can_soft_reset:
+        try:
+            self.adapter.new_conversation()
+        except UnsupportedOperation as exc:
             self.phase = BLOCKED
             self.block_reason = (
-                f"`{self.adapter.provider_name}` has no in-session "
-                "new-conversation operation; open a new conversation "
-                "manually, then resume watching"
+                f"`{self.adapter.provider_name}` automatic continuation "
+                f"unavailable: {exc}"
             )
             return self.phase
-        try:
-            self.adapter.new_session()
         except Exception as exc:
             self.phase = BLOCKED
-            self.block_reason = f"new conversation failed: {exc}"
+            self.block_reason = (
+                f"new conversation failed for "
+                f"`{self.adapter.provider_name}` via automatic "
+                f"new-conversation operation: {exc}; no prompt was sent"
+            )
             return self.phase
         ready = self._await_ready()
         if not ready:

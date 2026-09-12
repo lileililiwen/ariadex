@@ -258,7 +258,11 @@ A typical session:
 user-selected existing tmux session (OpenCode, Codex, or CodeBuddy) and
 continues durable OpenSpec work across conversations. It sends no input
 while the agent works, never calls a provider LLM API, and never creates
-or terminates the session unless `--create` is passed explicitly.
+the session unless `--create` is passed explicitly. Continuation is
+automatic for every supported provider: OpenCode uses its verified
+in-session operation, while Codex and CodeBuddy restart the provider
+inside the selected tmux session (same session name) and wait for the
+fresh input-ready surface before the continuation prompt is sent.
 
 ```bash
 ariadex watch --list-sessions

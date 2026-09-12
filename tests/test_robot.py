@@ -508,7 +508,7 @@ class ContinuationTest(unittest.TestCase):
         self.assertIn("uncommitted", report.detail)
         self.assertEqual(driver.sent_inputs("agent"), ["please start"])
 
-    def test_codex_without_soft_reset_never_terminates_session(self) -> None:
+    def test_codex_continues_via_automatic_restart(self) -> None:
         project = make_project(self._tmp)
         driver = FakeDriver()
         driver.sessions["agent"] = {
@@ -517,18 +517,28 @@ class ContinuationTest(unittest.TestCase):
             "workdir": "/t",
         }
         watcher = make_watcher(project, driver, provider="codex", debounce_polls=1)
+        real_new = watcher.adapter.new_conversation
+
+        def restarting() -> None:
+            real_new()
+            driver.sessions["agent"]["output"] = READY_CODEX
+
+        watcher.adapter.new_conversation = restarting  # type: ignore[method-assign]
         real_check = robot_mod.check_boundary
         robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
         try:
             watcher.poll()  # initial prompt
-            self.assertEqual(watcher.poll(), "blocked")
+            self.assertEqual(watcher.poll(), "continuing")
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
-        self.assertIn("manually", watcher.block_reason)
-        self.assertEqual(driver.terminated(), [])
-        self.assertIn("agent", driver.sessions)
+        sent = driver.sent_inputs("agent")
+        self.assertEqual(sent, ["please start", robot_mod.DEFAULT_CONTINUATION_PROMPT])
+        ops = [op for op, *_ in driver.calls]
+        self.assertIn("terminate", ops)
+        self.assertIn("create_or_connect", ops)
+        self.assertEqual(watcher.prompts_sent, 2)
 
-    def test_codebuddy_detects_and_reports_manual_continuation(self) -> None:
+    def test_codebuddy_continues_via_automatic_restart(self) -> None:
         project = make_project(self._tmp)
         driver = FakeDriver()
         driver.sessions["agent"] = {
@@ -537,15 +547,89 @@ class ContinuationTest(unittest.TestCase):
             "workdir": "/t",
         }
         watcher = make_watcher(project, driver, provider="codebuddy", debounce_polls=1)
+        real_new = watcher.adapter.new_conversation
+
+        def restarting() -> None:
+            real_new()
+            driver.sessions["agent"]["output"] = READY_CODEBUDDY
+
+        watcher.adapter.new_conversation = restarting  # type: ignore[method-assign]
         real_check = robot_mod.check_boundary
         robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
         try:
             self.assertEqual(watcher.poll(), "continuing")  # initial prompt
+            self.assertEqual(watcher.poll(), "continuing")
+        finally:
+            robot_mod.check_boundary = real_check  # type: ignore[assignment]
+        sent = driver.sent_inputs("agent")
+        self.assertEqual(sent, ["please start", robot_mod.DEFAULT_CONTINUATION_PROMPT])
+        ops = [op for op, *_ in driver.calls]
+        self.assertIn("terminate", ops)
+        self.assertIn("create_or_connect", ops)
+
+    def test_unavailable_operation_blocks_as_capability(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": READY_OPENCODE,
+            "workdir": "/t",
+        }
+        watcher = make_watcher(project, driver, debounce_polls=1)
+
+        def unavailable() -> None:
+            raise UnsupportedOperation("no automatic operation here")
+
+        watcher.adapter.new_conversation = unavailable  # type: ignore[method-assign]
+        real_check = robot_mod.check_boundary
+        robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
+        try:
+            watcher.poll()  # initial prompt
             self.assertEqual(watcher.poll(), "blocked")
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
-        self.assertIn("codebuddy", watcher.block_reason)
+        self.assertIn("opencode", watcher.block_reason)
+        self.assertIn("unavailable", watcher.block_reason)
+        self.assertNotIn("successful", watcher.block_reason)
+        # Only the initial prompt was ever sent; the session is untouched.
         self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+        self.assertEqual(watcher.prompts_sent, 1)
+
+    def test_failed_restart_blocks_with_provider_and_operation(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": READY_CODEX,
+            "workdir": "/t",
+        }
+        watcher = make_watcher(project, driver, provider="codex", debounce_polls=1)
+
+        def failing() -> None:
+            raise RuntimeError("restart refused")
+
+        watcher.adapter.new_conversation = failing  # type: ignore[method-assign]
+        real_check = robot_mod.check_boundary
+        robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
+        try:
+            watcher.poll()  # initial prompt
+            self.assertEqual(watcher.poll(), "blocked")
+        finally:
+            robot_mod.check_boundary = real_check  # type: ignore[assignment]
+        self.assertIn("codex", watcher.block_reason)
+        self.assertIn("new-conversation", watcher.block_reason)
+        self.assertIn("no prompt was sent", watcher.block_reason)
+        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+
+    def test_watcher_stays_provider_neutral(self) -> None:
+        import inspect
+
+        source = inspect.getsource(robot_mod.RobotWatcher._open_continuation)
+        for banned in ("/new", "new_session", "soft_reset", "terminate"):
+            self.assertNotIn(banned, source)
+        for provider_literal in ("'opencode'", "'codex'", "'codebuddy'"):
+            self.assertNotIn(provider_literal, source)
+        self.assertIn("new_conversation", source)
 
     def test_failed_new_session_blocks_without_prompt(self) -> None:
         project = make_project(self._tmp)
