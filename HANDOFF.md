@@ -98,6 +98,13 @@ change before implementation.
 
 ## Latest verification evidence
 
+- Follow-up diagnosis commit `1a1b9ab` makes `admin doctor` use the same real
+  Tk display-connectivity probe as managed startup. On the current host,
+  Tkinter imports successfully but X11 window creation fails for `:0`, `:1024`,
+  and `:1025`; the widget cannot appear until the invoking shell has access to
+  a valid authorized desktop display. Focused prerequisite, companion, and
+  widget-command tests pass (45 tests).
+
 - Widget display readiness was corrected in commit `3890929`. Tkinter import
   success is no longer treated as display availability: managed prerequisites
   now perform a bounded create/destroy Tk probe, so `start` reports a missing
