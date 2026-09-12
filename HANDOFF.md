@@ -16,11 +16,16 @@
 - Environment blocker (updated): tmux still absent here, so the live tmux round-trip remains skipped; full pass needs a tmux host.
 - Follow-up (commit `58d52a4`, unarchived fix on top of `live-runtime-evidence`): `ariadex evidence --provision` preinstalls tmux via `ensure_tmux()` before the live scenario and uninstalls afterwards only if this run installed it (`tmux_setup.remove_command`/`uninstall_tmux` per manager; pre-existing tmux never touched; uninstall failure is a warning). Default stays side-effect-free. On this host `--provision` correctly reports BLOCKED (`sudo -n` has no passwordless rights) with the manual command; 206 tests OK.
 - Follow-up (commit `62da034`): `ariadex evidence --local-tmux` fetches official tmux .debs with `apt-get download` (no root, no system changes), extracts into an isolated temp dir with an `LD_LIBRARY_PATH` wrapper, runs the live scenario against it, then deletes the dir (unpath == uninstall). `--tmux-bin PATH` uses a bring-your-own binary with no install at all. Fix details: `LC_ALL=C` for parsed apt output (this host localizes it), `ldd` verification runs with the extracted lib path. Live proof on this host: `evidence --local-tmux --gate` reports 8 passed, 0 skipped, 0 blocked, exit 0; 214 tests OK.
+- `packaging-and-distribution` implemented, verified, and archived as `2026-09-12-packaging-and-distribution` (commit `9ec3cd0`).
+- New files: `pyproject.toml` (PEP 517/518, setuptools src-layout, dynamic version from `ariadex.__version__`, `ariadex = ariadex.cli:main` console script, Python `>=3.11`, `PyYAML>=6`), `MANIFEST.in` (ships LICENSE/CHANGELOG/SECURITY/README), `LICENSE` (MIT), `CHANGELOG.md` (release guidance: bump `__version__` only, build, clean-venv verify, tag), `SECURITY.md` (contact, scope notes), `src/ariadex/py.typed`; `src/ariadex/__init__.py` now holds single-source `__version__ = "0.1.0"`; `cli.py` gains `-V/--version`; README gains pipx/pip/source installation docs; `.gitignore` covers `*.egg-info/`.
+- Tests: `tests/test_packaging.py` (7 tests: semver single source, pyproject entry-point/deps metadata, `--version` output, governance files ship, unsupported provider reports without claiming work, `run` outside a project fails non-zero with `error:` and no completion claim).
+- Live proof on this host: `python -m build` produced `dist/ariadex-0.1.0.tar.gz` + `dist/ariadex-0.1.0-py3-none-any.whl`; clean venv `pip install` of the wheel then `ariadex --help`, `ariadex --version` (`0.1.0`), `ariadex init`, and `ariadex status` all succeed with no `PYTHONPATH`. sdist contains LICENSE/CHANGELOG/SECURITY/README/MANIFEST.
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (221 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
 - No implementation work for the remaining post-MVP changes has started; the queue below is planning-only.
 
 ## Next change
 
-Next is `packaging-and-distribution`. Select only one active change at a time with `openspec list`; remaining packages are planning-only until implementation is explicitly started.
+Next is `ci-quality-security-gates`. Select only one active change at a time with `openspec list`; remaining packages are planning-only until implementation is explicitly started.
 
 ## Feature-to-change sequence
 
