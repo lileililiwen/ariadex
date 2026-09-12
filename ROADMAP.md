@@ -138,9 +138,10 @@ works, and no implicit session creation or termination.
 ## Planned: managed start and unified prerequisites
 
 The following planning-only changes are active and must be implemented in
-dependency order. Items 1–2 are implemented, tested, archived, and committed
+dependency order. All three items are implemented, tested, archived, and committed
 (`2026-09-12-2026-09-13-init-prompt-config`, commit `93f20ef`;
-`2026-09-12-2026-09-13-prerequisite-coordinator`, commit `21ff82e`; see
+`2026-09-12-2026-09-13-prerequisite-coordinator`, commit `21ff82e`;
+`2026-09-12-2026-09-13-managed-start-facade`, commit `59966c6`; see
 [HANDOFF.md](HANDOFF.md)):
 
 1. `2026-09-13-init-prompt-config` — interactive first-run provider and prompt
@@ -154,10 +155,9 @@ dependency order. Items 1–2 are implemented, tested, archived, and committed
 3. `2026-09-13-managed-start-facade` — make `ariadex start` the single normal
    workflow for daemon, provider tmux session, first/continuation prompts,
    widget, supervision, queue completion, and clean shutdown, while retaining
-   advanced internals for recovery.
+   advanced internals for recovery. (Complete.)
 
-Only item 3 is a specification-only change now; its implementation and
-archival evidence are still pending.
+The managed-start track is complete; new work starts with `openspec list`.
 
 With the foundations above archived, the deferred capabilities are:
 
