@@ -2,6 +2,16 @@
 
 ## Current state
 
+- Implemented, verified, and archived: all five MVP changes, `tmux-auto-install`, all eight post-MVP changes, and three audit runtime fixes (`active-spec-discovery-and-archive-isolation` as `78f6375`, `bounded-run-completion-and-cycle-limit` as `6c83615`, `takeover-cancellation-and-scheduler-coordination` as `814f2d7`). All 23 canonical purposes under `openspec/specs` are complete (this change archived as `2026-09-12-canonical-spec-and-doc-governance`).
+- Active remediation queue (2 remaining, in dependency order): `real-provider-live-validation`, `repository-identity-security-and-release-readiness`. Order, findings, and dependencies are in Audit remediation sequence below.
+- Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 393 tests, 1 skip (live tmux lifecycle, `tmux` binary unavailable; stdlib only; runtime requires PyYAML). Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access).
+- Quality gates: ruff check/format clean, mypy clean on `src/ariadex`, coverage gate 82% met, `openspec validate --changes --strict --no-interactive` passes.
+- Environment blockers: tmux absent on this host (live tmux round-trip skipped); `pip-audit` not installed here; no git remote is configured, so the canonical Ariadex repository URL is unknown and the `pyproject.toml`/`SECURITY.md` OpenCode links stay untouched for `repository-identity-security-and-release-readiness`; real provider lifecycle evidence remains pending.
+
+## Historical evidence
+
+Point-in-time completion records. Test counts, validation tallies, and status claims below describe the moment each change was archived; they are not current claims. Current status is in Current state above.
+
 - MVP COMPLETE: all five original changes plus `tmux-auto-install` are implemented, verified, and archived. `human-control-and-resync` archived as `2026-09-12-human-control-and-resync` (commit `13d2f01`); `tmux-auto-install` archived as `2026-09-12-tmux-auto-install` (commit `19ed0e9`).
 - New modules: `src/ariadex/control.py` (AUTO/MANUAL/PAUSE machine, `owns_input`/`allows_scheduling`, idempotent transitions, `resume`-only-from-PAUSE rejection), `src/ariadex/resync.py` (handoff + `git status --porcelain` + `git diff --stat` + spec + queue reconciliation; manual edits are evidence, never completion).
 - Enforcement: `run` requires AUTO (MANUAL refuses, PAUSE refuses); `Runner.run_once` mode-guards without touching the adapter; `takeover`/`pause` preserve the tmux session and write observation logs; `auto` resyncs, persists, enters AUTO, then schedules; malformed handoff refuses resync.
@@ -80,7 +90,7 @@
 
 ## Next change
 
-Select `canonical-spec-and-doc-governance` next with `openspec list`.
+Select `real-provider-live-validation` next with `openspec list`.
 
 ## Audit remediation sequence
 
@@ -104,7 +114,7 @@ active-spec-discovery-and-archive-isolation
   -> repository-identity-security-and-release-readiness
 ```
 
-All six packages are planning-only until implemented, tested, verified, archived, and recorded below. Preserve the product boundary: no IDE, provider LLM API, or replacement Coding CLI.
+The first three packages are implemented, tested, verified, archived, and recorded below; the remaining three stay planning-only until the same is done. Preserve the product boundary: no IDE, provider LLM API, or replacement Coding CLI.
 
 ## Change selection rule
 
@@ -124,9 +134,11 @@ Use `openspec list` and select only the earliest incomplete change in the sequen
 
 Incomplete or blocked work must not be claimed complete. Record the exact failed command and the next action in this file.
 
-## Verification evidence
+## Historical verification evidence
 
-- Audit baseline: 358 unit tests passed with 1 expected tmux skip; ruff, format, mypy, coverage threshold, and strict OpenSpec validation passed. Confirmed gaps are tracked by the six active remediation changes above.
+Point-in-time tool output archived with the changes above; counts below are superseded by Current state.
+
+- Audit baseline: 358 unit tests passed with 1 expected tmux skip; ruff, format, mypy, coverage threshold, and strict OpenSpec validation passed. Confirmed gaps are tracked by the six remediation changes in the sequence above.
 - Current environment blockers: tmux live evidence is blocked by unavailable DNS/package download; `pip-audit` is not installed in this environment; real provider lifecycle evidence remains pending.
 
 - `PYTHONPATH=src python3 -m unittest discover -s tests`: 164 tests ran, OK (1 skipped: live tmux lifecycle, `tmux` binary unavailable).
@@ -137,3 +149,11 @@ Incomplete or blocked work must not be claimed complete. Record the exact failed
 - `PYTHONPATH=src python3 -m unittest discover -s tests`: 196 tests ran, OK (1 skipped: live tmux lifecycle, `tmux` binary unavailable; includes 17 new `test_live_evidence` tests).
 - `openspec validate --changes --strict --no-interactive`: 7 passed, 0 failed (after archiving; archive generated `openspec/specs/live-evidence/spec.md`).
 - `PYTHONPATH=src python3 -m ariadex.cli evidence`: 6 passed, 1 skipped (tmux-lifecycle: tmux absent), 0 blocked; with `--gate` exits 1, proving skipped work is never presented as passing release evidence.
+
+## Verification evidence
+
+- `canonical-spec-and-doc-governance` implemented, verified, and archived as `2026-09-12-canonical-spec-and-doc-governance` (commit `4a9fcc9`).
+- All 23 canonical specs under `openspec/specs` carry complete non-placeholder purposes; `rg -n "TBD" openspec/specs/` reports no matches.
+- README/ROADMAP/HANDOFF/AGENTS agree: four of six audit remediations archived, two active, 393-test baseline, no idle-claim contradictions; `tests/test_docs_consistency.py` (5 tests) enforces purposes, handoff queue agreement, and relative links with no live tmux or provider access.
+- Canonical URL scope: `git remote -v` is empty, so no canonical Ariadex URL is known; `pyproject.toml`/`SECURITY.md` OpenCode links intentionally untouched for `repository-identity-security-and-release-readiness`.
+- Live proof on this host: ruff check/format clean, mypy clean on `src/ariadex`, coverage gate 82% met, `openspec validate --changes --strict --no-interactive` passes; full suite `PYTHONPATH=src python3 -m unittest discover -s tests` reports 393 tests OK (1 skip: live tmux lifecycle).
