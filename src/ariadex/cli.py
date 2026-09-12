@@ -28,6 +28,7 @@ from . import operator as operator_mod
 from . import preflight as preflight_mod
 from . import providers as providers_mod
 from . import resync as resync_mod
+from . import robot as robot_mod
 from . import runner as runner_mod
 from . import state as state_mod
 from . import status as status_mod
@@ -214,6 +215,63 @@ def build_parser() -> argparse.ArgumentParser:
         "admin_argv",
         nargs=argparse.REMAINDER,
         help="advanced command and arguments (e.g. `admin doctor`)",
+    )
+    watch_parser = sub.add_parser(
+        "watch",
+        help="supervise an existing provider session and continue OpenSpec work",
+    )
+    watch_parser.add_argument(
+        "--session",
+        default=None,
+        help="existing tmux session to supervise (see --list-sessions)",
+    )
+    watch_parser.add_argument(
+        "--list-sessions",
+        action="store_true",
+        help="list existing tmux sessions, then exit without watching",
+    )
+    watch_parser.add_argument(
+        "--provider",
+        default=None,
+        help="provider in the session (default: configured agent_provider)",
+    )
+    watch_parser.add_argument(
+        "--initial-prompt",
+        default=None,
+        help="prompt sent once to the attached ready conversation",
+    )
+    watch_parser.add_argument(
+        "--continuation-prompt",
+        default=None,
+        help="prompt sent to every new conversation (default: HANDOFF prompt)",
+    )
+    watch_parser.add_argument(
+        "--finished-change",
+        default="",
+        help="change whose tasks.md must be complete before continuing",
+    )
+    watch_parser.add_argument(
+        "--debounce",
+        type=int,
+        default=3,
+        help="stable finished polls before acting (default: 3)",
+    )
+    watch_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=5.0,
+        help="seconds between pane polls (default: 5.0)",
+    )
+    watch_parser.add_argument(
+        "--max-polls",
+        type=int,
+        default=0,
+        help="poll budget; 0 means unbounded (default: 0)",
+    )
+    watch_parser.add_argument(
+        "--create",
+        action="store_true",
+        help="explicit fallback: create the session when missing",
     )
     sub.add_parser(
         "takeover",
@@ -1252,6 +1310,7 @@ ADMIN_COMMANDS = (
     "export-events",
     "evidence",
     "preflight",
+    "watch",
     "run",
     "auto",
     "attach",
@@ -1438,6 +1497,148 @@ def cmd_uninstall(
     if any(a.state == "manual" for a in report.artifacts):
         return EXIT_ERROR
     return EXIT_OK
+
+
+def cmd_watch(
+    project_dir: Path,
+    *,
+    session: str | None = None,
+    list_sessions: bool = False,
+    provider: str | None = None,
+    initial_prompt: str | None = None,
+    continuation_prompt: str | None = None,
+    finished_change: str = "",
+    debounce: int = 3,
+    poll_interval: float = 5.0,
+    max_polls: int = 0,
+    create: bool = False,
+    auto_install: bool = True,
+) -> int:
+    """Supervise an existing provider session and continue durable work.
+
+    Attaches to a user-selected existing tmux session, sends the initial
+    prompt once the conversation is ready, then continues verified work
+    with the continuation prompt. Sends no input while the agent works,
+    never terminates the user-owned session, and stops with a report
+    when no active OpenSpec work remains.
+    """
+    try:
+        tmux_path = (
+            tmux_setup_mod.ensure_tmux()
+            if auto_install
+            else tmux_setup_mod.require_tmux()
+        )
+    except tmux_setup_mod.TmuxSetupError as exc:
+        print(f"error: watch is unavailable: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    driver = terminal_mod.TmuxDriver(executable=tmux_path)
+    if list_sessions:
+        try:
+            names = robot_mod.list_sessions(driver)
+        except robot_mod.RobotError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        if names:
+            for name in names:
+                print(f"session: {name}")
+        else:
+            print("session: (no tmux sessions)")
+        return EXIT_OK
+    cfg = _load_config(project_dir)
+    resolved_provider = provider or (cfg.agent_provider if cfg else None)
+    if resolved_provider is None:
+        print(
+            "error: no provider selected; pass `--provider opencode|codex|codebuddy`",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    if resolved_provider not in robot_mod.SUPPORTED_ROBOT_PROVIDERS:
+        print(
+            f"error: unsupported robot provider `{resolved_provider}`; "
+            f"robot supports: {', '.join(robot_mod.SUPPORTED_ROBOT_PROVIDERS)}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    if session is None:
+        print(
+            "error: no tmux session selected; pass `--session NAME` "
+            "(see `ariadex watch --list-sessions`)",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    if initial_prompt is None:
+        print(
+            "error: no initial prompt supplied; pass `--initial-prompt TEXT`",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    try:
+        adapter = providers_mod.get_adapter(
+            resolved_provider, driver, session, project_dir
+        )
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        alive = driver.session_alive(session)
+    except terminal_mod.TerminalError as exc:
+        print(f"error: watch is unavailable: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if not alive:
+        if not create:
+            print(
+                f"error: tmux session `{session}` does not exist; "
+                "the robot never creates sessions implicitly "
+                "(see `--list-sessions`, or pass `--create` "
+                "to start it explicitly)",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        try:
+            adapter.start()
+        except Exception as exc:
+            print(f"error: explicit session creation failed: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        print(f"session: created `{session}` (explicit --create fallback)")
+    try:
+        robot_config = robot_mod.validate_config(
+            robot_mod.RobotConfig(
+                session=session,
+                provider=resolved_provider,
+                initial_prompt=initial_prompt,
+                continuation_prompt=(
+                    continuation_prompt
+                    if continuation_prompt is not None
+                    else robot_mod.DEFAULT_CONTINUATION_PROMPT
+                ),
+                debounce_polls=debounce,
+                poll_interval_s=poll_interval,
+                max_polls=max_polls,
+                spec_dir=cfg.spec_dir if cfg else "openspec/changes",
+                handoff_file=cfg.handoff_file if cfg else ".ariadex/handoff.md",
+                finished_change=finished_change,
+            )
+        )
+    except robot_mod.RobotError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    watcher = robot_mod.RobotWatcher(project_dir, robot_config, driver, adapter)
+    print(
+        f"watching: {resolved_provider} @ {session} "
+        f"(debounce {debounce}, interval {poll_interval}s)"
+    )
+    try:
+        report = watcher.run()
+    except KeyboardInterrupt:
+        print(watcher.request_quit())
+        return EXIT_OK
+    except robot_mod.RobotError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    print(report.format())
+    if report.outcome in ("done", "stopped"):
+        return EXIT_OK
+    return EXIT_ERROR
 
 
 def cmd_admin(project_dir: Path, admin_argv: list[str], no_auto_install: bool) -> int:
@@ -1945,6 +2146,20 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "preflight": lambda: preflight_mod.main(
             ["--tmux-bin", args.tmux_bin] if getattr(args, "tmux_bin", None) else []
+        ),
+        "watch": lambda: cmd_watch(
+            project_dir,
+            session=getattr(args, "session", None),
+            list_sessions=getattr(args, "list_sessions", False),
+            provider=getattr(args, "provider", None),
+            initial_prompt=getattr(args, "initial_prompt", None),
+            continuation_prompt=getattr(args, "continuation_prompt", None),
+            finished_change=getattr(args, "finished_change", "") or "",
+            debounce=getattr(args, "debounce", 3),
+            poll_interval=getattr(args, "poll_interval", 5.0),
+            max_polls=getattr(args, "max_polls", 0),
+            create=getattr(args, "create", False),
+            auto_install=auto_install,
         ),
         "dev": lambda: (
             cmd_dev_setup(

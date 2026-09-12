@@ -1,4 +1,4 @@
-"""OpenCode and Codex adapters over the terminal driver.
+"""OpenCode, Codex, and CodeBuddy adapters over the terminal driver.
 
 Capability notes (verified live by `ariadex evidence --only
 opencode-lifecycle,codex-lifecycle`: real startup, `/help` probe,
@@ -8,7 +8,12 @@ interrupt, reset, termination, and restart in isolated tmux sessions):
 - Codex runs its interactive CLI by default with no in-session
   new-session key, so `soft_reset` is NOT declared and the runner must use
   hard reset (terminate and restart) for it.
-- Neither adapter can read provider token usage from the terminal pane, so
+- CodeBuddy shares the adapter boundary (`codebuddy` CLI) with the same
+  conservative contract: no in-session new-session key is assumed, so
+  `soft_reset` is NOT declared. Its ready markers are declared, not
+  live-verified; the robot supervisor treats unknown surfaces as
+  working, never as finished.
+- No adapter can read provider token usage from the terminal pane, so
   `token_usage` is false and metrics must record `usage: unavailable`.
 """
 
@@ -21,6 +26,7 @@ from .terminal import TerminalDriver
 
 PROVIDER_OPENCODE = "opencode"
 PROVIDER_CODEX = "codex"
+PROVIDER_CODEBUDDY = "codebuddy"
 
 
 class OpenCodeAdapter(AgentAdapter):
@@ -59,9 +65,28 @@ class CodexAdapter(AgentAdapter):
         )
 
 
+class CodeBuddyAdapter(AgentAdapter):
+    provider_name = PROVIDER_CODEBUDDY
+    launch_command = ("codebuddy",)
+    new_session_input = None
+
+    @property
+    def capabilities(self) -> Capabilities:
+        return Capabilities(
+            interactive=True,
+            soft_reset=False,
+            hard_reset=True,
+            token_usage=False,
+            structured_output=False,
+            interrupt=True,
+            manual_takeover=True,
+        )
+
+
 ADAPTERS: dict[str, type[AgentAdapter]] = {
     PROVIDER_OPENCODE: OpenCodeAdapter,
     PROVIDER_CODEX: CodexAdapter,
+    PROVIDER_CODEBUDDY: CodeBuddyAdapter,
 }
 
 

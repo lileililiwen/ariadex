@@ -71,6 +71,14 @@ class TerminalDriver(abc.ABC):
     def terminate(self, name: str) -> None:
         """Terminate the session; succeeds when already gone."""
 
+    def list_sessions(self) -> list[str]:
+        """Return existing session names for explicit user selection.
+
+        Defaults to unsupported so providers that cannot enumerate stay
+        honest; tmux and test drivers override it.
+        """
+        raise TerminalError("this terminal driver cannot list sessions")
+
 
 class TmuxDriver(TerminalDriver):
     """tmux transport over subprocess. No LLM API involvement."""
@@ -168,6 +176,28 @@ class TmuxDriver(TerminalDriver):
     def attach_command(self, name: str) -> list[str]:
         return [self.executable, "attach-session", "-t", name]
 
+    def list_sessions(self) -> list[str]:
+        """Enumerate tmux sessions (read-only; empty when no server)."""
+        try:
+            # Fixed read-only `list-sessions` argv; no shell.
+            proc = subprocess.run(  # noqa: S603
+                [self.executable, "list-sessions", "-F", "#{session_name}"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (FileNotFoundError, OSError) as exc:
+            raise TmuxNotAvailable(
+                f"tmux executable `{self.executable}` not found; "
+                "install tmux to supervise Coding CLI sessions"
+            ) from exc
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip().lower()
+            if "no server" in detail or "no sessions" in detail:
+                return []
+            raise TerminalError(f"session discovery failed: {detail}")
+        return sorted(line.strip() for line in proc.stdout.splitlines() if line.strip())
+
     def terminate(self, name: str) -> None:
         if not self.session_alive(name):
             return
@@ -248,6 +278,11 @@ class FakeTerminalDriver(TerminalDriver):
 
     def attach_command(self, name: str) -> list[str]:
         return ["tmux", "attach-session", "-t", name]
+
+    def list_sessions(self) -> list[str]:
+        """In-memory session names for selection tests (no tmux needed)."""
+        self._check_binary()
+        return sorted(self.sessions)
 
     def terminate(self, name: str) -> None:
         self._check_binary()

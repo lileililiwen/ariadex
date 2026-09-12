@@ -1054,6 +1054,204 @@ class CompanionWindow:
         self.status_text.configure(state="disabled")
 
 
+ROBOT_INDICATORS = ("watching", "working", "paused", "blocked", "completed", "stopped")
+
+
+def build_robot_view_model(status: dict) -> dict:
+    """Map one robot status snapshot to widget state (pure, no I/O).
+
+    Only provider/session identity and robot state are shown; there are
+    no scheduler controls. Pause stops new input, quit stops watching,
+    and both leave the user-owned provider session untouched.
+    """
+    phase = str(status.get("phase", "unknown"))
+    provider = str(status.get("provider", "unknown"))
+    session = str(status.get("session", "unknown"))
+    paused = bool(status.get("paused"))
+    reason = str(status.get("block_reason", "") or "")
+    if phase in ("stopped",):
+        indicator = "stopped"
+    elif phase in ("done",):
+        indicator = "completed"
+    elif phase in ("blocked",):
+        indicator = "blocked"
+    elif paused or phase in ("paused",):
+        indicator = "paused"
+    elif phase in ("attached", "unknown"):
+        indicator = "watching"
+    else:
+        indicator = "working"
+    identity = f"{provider} @ {session}"
+    work_label = f"{identity} — {phase}"
+    if reason and indicator == "blocked":
+        work_label += f": {reason}"
+    return {
+        "indicator": indicator,
+        "indicator_text": indicator.upper(),
+        "phase": phase,
+        "identity": identity,
+        "work_label": work_label,
+        "failure": reason if indicator == "blocked" else None,
+        "actions": {
+            "pause": indicator in ("watching", "working"),
+            "quit": indicator != "stopped",
+        },
+    }
+
+
+def format_robot_text(model: dict) -> str:
+    """Text status equivalent of the robot widget (screen-reader use)."""
+    lines = [
+        f"robot: {model.get('indicator_text')} (phase {model.get('phase')})",
+        f"watching: {model.get('identity')}",
+    ]
+    actions = model.get("actions", {})
+    enabled = sorted(name for name, on in actions.items() if on)
+    lines.append(f"actions: {', '.join(enabled) if enabled else 'none available'}")
+    if model.get("failure"):
+        lines.append(f"blocked: {model['failure']}")
+    return "\n".join(lines)
+
+
+class RobotWindow:
+    """Minimal robot control: fixed middle-right, state, Pause, Quit.
+
+    The window polls a status function and forwards Pause/Quit to the
+    watcher callbacks. It never touches tmux, leases, or state files;
+    closing it quits watching and leaves the provider session running.
+    """
+
+    def __init__(
+        self,
+        root: object,
+        status_fn: Callable[[], dict],
+        on_pause: Callable[[], str],
+        on_quit: Callable[[], str],
+        poll_interval_s: float = POLL_INTERVAL_S,
+    ) -> None:
+        import tkinter as tk
+
+        self.root = root
+        self.status_fn = status_fn
+        self.on_pause = on_pause
+        self.on_quit = on_quit
+        self.poll_interval_ms = max(1, int(poll_interval_s * 1000))
+        self.model: dict = build_robot_view_model({})
+        self._poll_after: str | None = None
+
+        assert isinstance(root, tk.Tk)
+        root.title("Ariadex Robot")
+        root.overrideredirect(True)
+        root.attributes("-topmost", True)
+        root.geometry(f"{WIDGET_WIDTH}x{WIDGET_COLLAPSED_HEIGHT}")
+        position = default_geometry(root.winfo_screenwidth(), root.winfo_screenheight())
+        root.geometry(f"+{position[0]}+{position[1]}")
+
+        self.frame = tk.Frame(
+            root,
+            background="#20242b",
+            borderwidth=1,
+            relief="solid",
+            padx=10,
+            pady=9,
+        )
+        self.frame.pack(fill="both", expand=True)
+        self.state_label = tk.Label(
+            self.frame,
+            text="WATCHING",
+            anchor="w",
+            background="#20242b",
+            foreground="#f3f4f6",
+            font=("TkDefaultFont", 10, "bold"),
+        )
+        self.state_label.pack(fill="x")
+        self.identity_label = tk.Label(
+            self.frame,
+            text="(connecting)",
+            anchor="w",
+            justify="left",
+            wraplength=WIDGET_WIDTH - 20,
+            background="#20242b",
+            foreground="#c9d1d9",
+        )
+        self.identity_label.pack(fill="x")
+        controls = tk.Frame(self.frame, background="#20242b")
+        controls.pack(fill="x", pady=(4, 0))
+        self.pause_button = tk.Button(
+            controls,
+            text="Pause",
+            name="robot-pause-button",
+            width=8,
+            takefocus=True,
+            command=self._on_pause,
+        )
+        self.pause_button.pack(side="left", expand=True, fill="x")
+        self.quit_button = tk.Button(
+            controls,
+            text="Quit",
+            name="robot-quit-button",
+            width=8,
+            takefocus=True,
+            command=self._on_quit,
+        )
+        self.quit_button.pack(side="left", expand=True, fill="x")
+        self._refresh()
+        self._schedule_poll()
+
+    def _on_pause(self) -> None:
+        with contextlib.suppress(Exception):
+            self.on_pause()
+        self._refresh()
+
+    def _on_quit(self) -> None:
+        with contextlib.suppress(Exception):
+            self.on_quit()
+        self._cancel_poll()
+        self.root.destroy()  # type: ignore[attr-defined]
+
+    def _schedule_poll(self) -> None:
+        self._cancel_poll()
+        self._poll_after = self.root.after(  # type: ignore[attr-defined]
+            self.poll_interval_ms, self._poll
+        )
+
+    def _cancel_poll(self) -> None:
+        if self._poll_after is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(self._poll_after)  # type: ignore[attr-defined]
+            self._poll_after = None
+
+    def _poll(self) -> None:
+        self._poll_after = None
+        self._refresh()
+        self._schedule_poll()
+
+    def _refresh(self) -> None:
+        try:
+            status = self.status_fn()
+        except Exception as exc:
+            model = build_robot_view_model({})
+            model["indicator"] = "stopped"
+            model["indicator_text"] = "UNREACHABLE"
+            model["failure"] = str(exc)
+            self.model = model
+        else:
+            self.model = build_robot_view_model(status)
+        self._render()
+
+    def _render(self) -> None:
+        model = self.model
+        self.state_label.configure(text=str(model.get("indicator_text", "?")))
+        self.identity_label.configure(text=str(model.get("work_label", "")))
+        actions = model.get("actions", {})
+        self.pause_button.configure(
+            state="normal" if actions.get("pause") else "disabled"
+        )
+        self.quit_button.configure(
+            state="normal" if actions.get("quit") else "disabled"
+        )
+
+
 def run_companion(
     project_dir: Path,
     *,

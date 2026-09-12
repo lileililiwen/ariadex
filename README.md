@@ -72,6 +72,25 @@ pip install ariadex
 ariadex --help
 ```
 
+From this source checkout, install the local project globally with pipx
+(recommended when you want `ariadex` available from other projects):
+
+```bash
+cd /path/to/ariadex
+pipx install --force --editable .
+ariadex --help
+```
+
+Use `--force` when `ariadex` is already installed from PyPI or GitHub; it
+replaces that existing pipx environment with this checkout. The editable
+install then keeps the command connected to this checkout, so source changes
+take effect without reinstalling. Verify which executable is active with
+`command -v ariadex`. Remove it later with:
+
+```bash
+pipx uninstall ariadex
+```
+
 From a source checkout (no install; uses `./ariadex` wrapper):
 
 ```bash
@@ -233,6 +252,33 @@ A typical session:
 ./ariadex resume        # leave PAUSE, back to manual control
 ```
 
+## Robot supervisor
+
+`ariadex watch` supervises an already-open coding-agent conversation in a
+user-selected existing tmux session (OpenCode, Codex, or CodeBuddy) and
+continues durable OpenSpec work across conversations. It sends no input
+while the agent works, never calls a provider LLM API, and never creates
+or terminates the session unless `--create` is passed explicitly.
+
+```bash
+ariadex watch --list-sessions
+ariadex watch --session agent --provider opencode \
+  --initial-prompt "Please implement the active spec."
+```
+
+The robot waits for the provider's stable input-ready signal (debounced,
+default 3 polls), sends the initial prompt once, then verifies the
+durable boundary — handoff, task markers, git state, active OpenSpec
+list — before opening a new conversation and sending the continuation
+prompt (default `Please read the HANDOFF.md, and implement the next
+spec.`; override with `--continuation-prompt`). Approval requests and
+provider errors pause with the exact reason instead of advancing. When
+no active OpenSpec work remains, the robot stops and reports completion
+without sending another prompt. The robot widget is a minimal
+middle-right control showing provider/session identity and robot state,
+with Pause (stops new input, session keeps running) and Quit (stops
+watching, session left attachable).
+
 ## User deployment (opt-in)
 
 `ariadex install` wires the daemon and companion into your login session
@@ -373,6 +419,7 @@ unresolved or blocked work. Nothing is ever silently discarded.
 |                    | `preflight run auto attach takeover status pause resume`       |
 |                    | (top-level aliases stay)                                       |
 | `run [--yes] [--preview]` | Execute the next action from durable state (needs `AUTO`) |
+| `watch --session --initial-prompt` | Supervise an existing provider session; continue specs |
 | `auto [--yes] [--preview]` | Resync, enter `AUTO`, and resume scheduling            |
 | `attach`           | Attach your terminal to the live tmux Coding CLI session       |
 | `doctor [--json]`  | Preflight config, provider, tmux, specs, verification, lock    |

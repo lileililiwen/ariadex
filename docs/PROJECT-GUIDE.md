@@ -7,8 +7,8 @@ users. It is the detailed companion to the command examples in `README.md`.
 
 Ariadex is a project-scoped orchestration runtime for long-running coding work.
 It keeps the durable work state in the repository and uses an existing Coding
-CLI through a terminal adapter. The supported providers are OpenCode and
-Codex; the terminal transport is tmux.
+CLI through a terminal adapter. The supported providers are OpenCode, Codex,
+and CodeBuddy; the terminal transport is tmux.
 
 Ariadex is not:
 
@@ -17,10 +17,10 @@ Ariadex is not:
 - a replacement for OpenCode, Codex, or another Coding CLI;
 - an observer that can discover and control arbitrary agent windows.
 
-The last item is important: the current product drives the configured provider
-session when AUTO is enabled. A future provider-neutral observer/auto-new-
-conversation workflow would be a separate feature and is not implied by the
-current widget.
+The last item is important: the scheduler product drives the configured provider
+session when AUTO is enabled. The separate robot supervisor workflow
+(`ariadex watch`, see below) observes a user-selected existing session and
+continues durable work without duplicating handoff status.
 
 ## First use
 
@@ -136,6 +136,41 @@ current widget has no AUTO/MANUAL selector; adding that selector would require
 a separate product change because AUTO has a deliberate resynchronization
 boundary.
 
+## Robot supervisor
+
+`ariadex watch` is the provider-neutral observer: it attaches to a
+user-selected existing tmux session (never one it created, unless `--create`
+is passed explicitly) and supervises the already-open OpenCode, Codex, or
+CodeBuddy conversation there.
+
+```bash
+ariadex watch --list-sessions
+ariadex watch --session agent --provider opencode \
+  --initial-prompt "Please implement the active spec."
+```
+
+Behavior:
+
+- While the provider shows active output, a running tool, an approval
+  request, or an error, the robot sends nothing.
+- A finished conversation is recognized only when the provider-specific
+  input-ready signal is stable for `--debounce` polls (default 3) with no
+  approval, tool, or error state present.
+- The initial prompt is sent once to the attached ready conversation. The
+  continuation prompt (default `Please read the HANDOFF.md, and implement
+  the next spec.`) is sent to every subsequent new conversation.
+- Before each continuation, the robot checks the durable boundary:
+  handoff readability, task completion for `--finished-change`, a clean
+  git tree, and the active OpenSpec list. Unfinished work blocks with the
+  exact reason; an empty active list stops the watcher with a completion
+  report and no further prompt.
+- Providers without an in-session new-conversation operation (Codex,
+  CodeBuddy) block with a manual instruction instead of terminating the
+  user-owned session.
+- The robot widget is minimal: fixed middle-right, provider/session
+  identity plus robot state, Pause (no new input, session keeps running),
+  and Quit (watcher exits, session left attachable).
+
 ## Durable project files
 
 `ariadex init` creates or preserves these files:
@@ -216,8 +251,10 @@ The main runtime boundaries are:
 - `cli.py`: command parsing and user-facing lifecycle operations;
 - `daemon.py`: detached process, lease, Unix socket, and scheduler polling;
 - `runner.py`: one bounded, verified orchestration cycle;
-- `providers.py`: provider-specific OpenCode/Codex adapter behavior;
-- `terminal.py`: tmux transport and session operations;
+- `providers.py`: provider-specific OpenCode/Codex/CodeBuddy adapter behavior;
+- `terminal.py`: tmux transport, session operations, and session discovery;
+- `robot.py`: the provider-neutral watcher (classification, debounce,
+  prompts, durable boundary, pause/quit);
 - `control.py` and `resync.py`: mode transitions and durable-state reconciliation;
 - `companion.py`: Tkinter widget and IPC client, with no direct state mutation;
 - `config.py`, `state.py`, `handoff.py`: durable data contracts;
