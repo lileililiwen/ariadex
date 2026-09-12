@@ -61,6 +61,23 @@ lives in exactly one place: `src/ariadex/__init__.py` (`__version__`), and
   security contact, and a fail-closed release dry run
   (`python -m ariadex.release --tag ...`).
 
+## [Unreleased managed start]
+
+- `2026-09-13-init-prompt-config`: `ariadex init` asks for the provider and
+  first/continuation prompts (blank answers keep the built-in defaults);
+  plain `init` refuses on initialized projects and `init --force` confirms,
+  then removes only `.ariadex/` before reinitializing.
+- `2026-09-13-prerequisite-coordinator`: one readiness path (runtime,
+  provider CLI, tmux with automatic preparation, desktop/Tkinter widget)
+  with typed `present`/`installed`/`unsupported`/`declined`/`blocked`
+  results; providers are never installed and `uv` stays development-only.
+- `2026-09-13-managed-start-facade`: `ariadex start` composes guard,
+  config plus `--agent`/`--first-prompt`/`--continuation-prompt` overrides,
+  prerequisites, one daemon, one adapter-owned tmux session, the detached
+  widget, terminal attach, supervised first/continuation prompts, and
+  reconciled shutdown (queue-empty completion, provider exit, detach,
+  Ctrl+C). Duplicate starts report the live owner and create nothing.
+
 ## Release guidance
 
 Version invariants (tag, package, artifacts, and PyPI must all agree):
