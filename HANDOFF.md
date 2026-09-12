@@ -63,10 +63,17 @@
 - Tests: `tests/test_active_discovery.py` (8 tests: archive/hidden/file exclusion, graph/inspection exclusion, all-archived idle, doctor zero-active, preview idle, resync idle, empty-after-archive CLI smoke).
 - Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (366 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
 - Live proof on this host: ruff check/format clean, mypy clean on 21 files, `openspec validate --changes --strict --no-interactive` 6 passed before archiving, 5 passed after archiving.
+- `bounded-run-completion-and-cycle-limit` implemented, verified, and archived as `2026-09-12-bounded-run-completion-and-cycle-limit` (commit `6c83615`).
+- `runner.py`: new `ACTION_CYCLE_LIMIT = "cycle-limit"`; `run()` appends an explicit stopped `cycle-limit` result when the budget is exhausted with work remaining (recomputes and persists the remaining next action, sends no provider input, claims no completion) and returns it directly for zero/negative budgets; terminal outcomes at the exact bound append nothing.
+- `cli.py`: new `exit_for_cycles` helper (success is a stopped idle tail only; stopped non-idle, unstopped, and empty runs are non-zero); `_run_loop` uses it, so `cycle-limit` and zero-budget runs exit non-zero with the exhaustion line printed.
+- Status/metrics: the `cycle-limit` outcome flows through `_observe`/`summarize_metrics` as a distinct outcome count (no attention-event mapping change; stays local-only telemetry like other non-attention outcomes).
+- Tests: `tests/test_bounded_run.py` (11 tests: zero/negative budget no-input incomplete, zero-budget handoff preservation, exact-bound terminal with no appended result, 12-issue exhaustion shape/detail/twin-replay no-input proof, remaining-action persistence, metrics record + summary, exit mapping for idle/blocked/cycle-limit/unstopped/empty).
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (377 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
+- Live proof on this host: ruff check/format clean, mypy clean on 21 files, `openspec validate --changes --strict --no-interactive` 5 passed before archiving, 4 passed after archiving.
 
 ## Next change
 
-Select `bounded-run-completion-and-cycle-limit` next with `openspec list`.
+Select `takeover-cancellation-and-scheduler-coordination` next with `openspec list`.
 
 ## Audit remediation sequence
 
