@@ -44,6 +44,11 @@ class Config:
     log_retention_days: int = 30
     log_max_bytes: int = 10485760
     metrics_max_bytes: int = 5242880
+    notifications_enabled: bool = False
+    notification_command: list = dataclasses.field(default_factory=list)
+    notification_webhook: str = ""
+    notification_rate_limit: int = 5
+    notification_window_seconds: int = 3600
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -90,6 +95,17 @@ blocker_policy: stop-on-blocker
 log_retention_days: 30
 log_max_bytes: 10485760
 metrics_max_bytes: 5242880
+# Opt-in attention signals for blockers, verification failures, stale
+# sessions, and verified completion. Disabled by default: stdout and local
+# files stay authoritative. When enabled, redacted payloads go to the
+# configured command (argv, payload JSON on stdin) and/or webhook URL;
+# failures are recorded locally and never change scheduling. Rate limiting
+# caps deliveries per attention key per window (0 delivers nothing).
+notifications_enabled: false
+notification_command: []
+notification_webhook: ""
+notification_rate_limit: 5
+notification_window_seconds: 3600
 """
 
 
@@ -199,6 +215,36 @@ def validate(raw: dict, source: str = "configuration") -> Config:
             raise ConfigError(f"invalid {name} in {source}: expected an integer >= 0")
         if value < 0:
             raise ConfigError(f"invalid {name} in {source}: expected an integer >= 0")
+    notifications_enabled = get("notifications_enabled", base.notifications_enabled)
+    if not isinstance(notifications_enabled, bool):
+        raise ConfigError(
+            f"invalid notifications_enabled in {source}: expected true or false"
+        )
+    notification_command = get("notification_command", base.notification_command)
+    if not isinstance(notification_command, list) or not all(
+        isinstance(item, str) for item in notification_command
+    ):
+        raise ConfigError(
+            f"invalid notification_command in {source}: expected a list of strings"
+        )
+    notification_webhook = get("notification_webhook", base.notification_webhook)
+    if not isinstance(notification_webhook, str):
+        raise ConfigError(
+            f"invalid notification_webhook in {source}: expected a URL string"
+        )
+    if notification_webhook and not notification_webhook.startswith(
+        ("http://", "https://")
+    ):
+        raise ConfigError(
+            f"invalid notification_webhook in {source}: "
+            "expected an http(s) URL or an empty string"
+        )
+    for name in ("notification_rate_limit", "notification_window_seconds"):
+        value = get(name, getattr(base, name))
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ConfigError(f"invalid {name} in {source}: expected an integer >= 0")
+        if value < 0:
+            raise ConfigError(f"invalid {name} in {source}: expected an integer >= 0")
     return Config(
         agent_provider=raw.get("agent_provider", base.agent_provider),
         terminal_driver=raw.get("terminal_driver", base.terminal_driver),
@@ -212,4 +258,13 @@ def validate(raw: dict, source: str = "configuration") -> Config:
         log_retention_days=get("log_retention_days", base.log_retention_days),
         log_max_bytes=get("log_max_bytes", base.log_max_bytes),
         metrics_max_bytes=get("metrics_max_bytes", base.metrics_max_bytes),
+        notifications_enabled=notifications_enabled,
+        notification_command=list(notification_command),
+        notification_webhook=notification_webhook,
+        notification_rate_limit=get(
+            "notification_rate_limit", base.notification_rate_limit
+        ),
+        notification_window_seconds=get(
+            "notification_window_seconds", base.notification_window_seconds
+        ),
     )

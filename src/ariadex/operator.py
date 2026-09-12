@@ -238,6 +238,41 @@ def run_doctor(project_dir: Path) -> tuple[list[DoctorCheck], dict]:
             checks.append(
                 DoctorCheck("logs", False, f"invalid log bounds: {logs_detail}", False)
             )
+        from . import observability as observability_mod
+
+        sinks = observability_mod.notification_sinks(cfg)
+        if not cfg.notifications_enabled:
+            checks.append(
+                DoctorCheck(
+                    "notifications",
+                    True,
+                    "attention signals disabled (opt-in); "
+                    "events still recorded locally",
+                    False,
+                )
+            )
+        elif not sinks:
+            checks.append(
+                DoctorCheck(
+                    "notifications",
+                    True,
+                    "attention signals enabled but no sink configured; "
+                    "events recorded locally only",
+                    False,
+                )
+            )
+        else:
+            names = ", ".join(s.name for s in sinks)
+            checks.append(
+                DoctorCheck(
+                    "notifications",
+                    True,
+                    f"attention signals enabled via {names}; "
+                    f"rate {cfg.notification_rate_limit} per "
+                    f"{cfg.notification_window_seconds}s per key",
+                    False,
+                )
+            )
     summary = {
         "ok": all(c.ok or not c.required for c in checks),
         "checks": [c.to_dict() for c in checks],

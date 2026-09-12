@@ -8,6 +8,7 @@ start agents, invoke shells, or add provider-specific behavior: `run` and
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ from . import control as control_mod
 from . import handoff as handoff_mod
 from . import live_evidence as live_evidence_mod
 from . import logging as logging_mod
+from . import observability as observability_mod
 from . import operator as operator_mod
 from . import providers as providers_mod
 from . import resync as resync_mod
@@ -213,6 +215,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="refuse exports above this size in bytes",
     )
     export_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
+    events_parser = sub.add_parser(
+        "events", help="show aggregate summary and recent attention events"
+    )
+    events_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="maximum recent events to show (0 shows none)",
+    )
+    events_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
+    export_events_parser = sub.add_parser(
+        "export-events",
+        help="write the versioned export snapshot (summary + events) to a file",
+    )
+    export_events_parser.add_argument(
+        "--out", required=True, help="destination file for the snapshot"
+    )
+    export_events_parser.add_argument(
+        "--max-bytes",
+        type=int,
+        default=52428800,
+        help="refuse exports above this size in bytes",
+    )
+    export_events_parser.add_argument(
         "--json", action="store_true", help="emit stable JSON instead of text"
     )
     evidence = sub.add_parser(
@@ -540,11 +570,26 @@ def cmd_recover(project_dir: Path, as_json: bool = False) -> int:
     """Reconcile after interruption. Works in every mode; sends no input."""
     import json as json_mod
 
-    if _load_config(project_dir) is None:
+    cfg = _load_config(project_dir)
+    if cfg is None:
         return EXIT_ERROR
     if _load_state(project_dir) is None:
         return EXIT_ERROR
     report = concurrency_mod.recover_project(project_dir)
+    if report.lock_state == "stale-recovered":
+        # Operator attention: a stale scheduler was reconciled. Recorded
+        # locally and notified opt-in; never affects the recovery itself.
+        with contextlib.suppress(Exception):
+            owner = report.owner or {}
+            event = observability_mod.build_event(
+                observability_mod.EVENT_STALE_SESSION,
+                session=str(owner.get("session_id", "")),
+                action=f"recover {report.phase or 'unknown phase'}",
+                outcome="stale-session",
+                detail="; ".join(report.notes)
+                or "stale scheduler reconciled by recover",
+            )
+            observability_mod.announce(project_dir, cfg, event)
     if as_json:
         print(json_mod.dumps(report.to_dict(), sort_keys=True, indent=2))
     else:
@@ -716,6 +761,91 @@ def cmd_takeover(project_dir: Path) -> int:
         "CLI session preserved",
         log_event=True,
     )
+
+
+def cmd_events(project_dir: Path, limit: int = 50, as_json: bool = False) -> int:
+    """Show the versioned aggregate summary plus recent attention events.
+
+    Read-only: never sends provider input, exports, or notifications.
+    """
+    import json as json_mod
+
+    if _load_config(project_dir) is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    if limit < 0:
+        print("error: --limit must be >= 0", file=sys.stderr)
+        return EXIT_ERROR
+    events = observability_mod.read_events(project_dir, limit=limit)
+    records = logging_mod.read_metrics(
+        project_dir / ".ariadex" / logging_mod.METRICS_FILENAME
+    )
+    summary = observability_mod.summarize_metrics(records)
+    if as_json:
+        print(
+            json_mod.dumps(
+                {"summary": summary, "events": events}, sort_keys=True, indent=2
+            )
+        )
+    else:
+        print(observability_mod.format_events_text(events, summary))
+    return EXIT_OK
+
+
+def cmd_export_events(
+    project_dir: Path,
+    out: str,
+    max_bytes: int = 52428800,
+    as_json: bool = False,
+) -> int:
+    """Write the versioned export snapshot (summary + events) to a file.
+
+    Local-only default sink. Refuses above the byte bound; a sink failure
+    is recorded locally and reported, never claimed as success.
+    """
+    import json as json_mod
+
+    cfg = _load_config(project_dir)
+    if cfg is None:
+        return EXIT_ERROR
+    st = _load_state(project_dir)
+    if st is None:
+        return EXIT_ERROR
+    if max_bytes < 0:
+        print("error: --max-bytes must be >= 0", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        snapshot = observability_mod.build_snapshot(project_dir, session=st.session_id)
+    except Exception as exc:
+        print(f"error: export refused: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    size = len(json_mod.dumps(snapshot, sort_keys=True).encode("utf-8"))
+    if max_bytes > 0 and size > max_bytes:
+        print(
+            f"error: export refused: snapshot is {size} bytes, "
+            f"above the {max_bytes}-byte bound",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    dest = Path(out)
+    results = observability_mod.export_snapshot(
+        project_dir,
+        [observability_mod.FileSink(dest)],
+        session=st.session_id,
+    )
+    if as_json:
+        print(
+            json_mod.dumps(
+                {"results": [r.to_dict() for r in results]}, sort_keys=True, indent=2
+            )
+        )
+    else:
+        for result in results:
+            mark = "ok" if result.ok else "FAILED"
+            print(f"export {result.sink}: {mark} ({result.detail})")
+        print(f"snapshot: schema v{observability_mod.EVENT_SCHEMA_VERSION} -> {dest}")
+    return EXIT_OK if all(r.ok for r in results) else EXIT_ERROR
 
 
 def cmd_evidence(
@@ -1016,6 +1146,17 @@ def main(argv: list[str] | None = None) -> int:
             as_json=getattr(args, "json", False),
         ),
         "export-logs": lambda: cmd_export_logs(
+            project_dir,
+            out=args.out,
+            max_bytes=getattr(args, "max_bytes", 52428800),
+            as_json=getattr(args, "json", False),
+        ),
+        "events": lambda: cmd_events(
+            project_dir,
+            limit=getattr(args, "limit", 50),
+            as_json=getattr(args, "json", False),
+        ),
+        "export-events": lambda: cmd_export_events(
             project_dir,
             out=args.out,
             max_bytes=getattr(args, "max_bytes", 52428800),

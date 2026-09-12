@@ -323,7 +323,40 @@ class Runner:
         guard = self._mode_guard()
         result = guard if guard is not None else self._cycle()
         self._observe(result, started)
+        self._announce(result)
         return result
+
+    def _announce(self, result: CycleResult) -> None:
+        """Record attention events and deliver opt-in notifications.
+
+        Best-effort and isolated: observability never changes the cycle
+        outcome, never sends provider input, and never fails the cycle.
+        """
+        from . import observability as observability_mod
+
+        with contextlib.suppress(Exception):
+            try:
+                handoff = handoff_mod.read_handoff(self.handoff_path)
+                session = handoff.session_id
+                spec = handoff.current_spec
+            except handoff_mod.HandoffError:
+                session, spec = "", None
+            try:
+                usage = self.adapter.get_usage()
+                usage_available = usage is not None
+            except Exception:
+                usage_available = False
+            event = observability_mod.event_for_result(
+                result,
+                session=session,
+                spec=spec,
+                usage_available=usage_available,
+            )
+            if event is None:
+                return
+            with contextlib.suppress(TypeError, ValueError):
+                event["retry_count"] = int(self._ctx.get("retries", 0))
+            observability_mod.announce(self.project_dir, self.config, event)
 
     def _mode_guard(self) -> CycleResult | None:
         """Refuse automatic input unless the durable mode is AUTO.
