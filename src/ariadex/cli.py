@@ -14,7 +14,9 @@ import sys
 from pathlib import Path
 
 from . import config as config_mod
+from . import handoff as handoff_mod
 from . import providers as providers_mod
+from . import runner as runner_mod
 from . import state as state_mod
 from . import terminal as terminal_mod
 
@@ -138,6 +140,20 @@ def cmd_status(project_dir: Path) -> int:
     print(f"unresolved: {st.unresolved_count}")
     print(f"updated: {st.updated_at}")
     print(f"provider: {cfg.agent_provider} (terminal: {cfg.terminal_driver})")
+    try:
+        handoff = handoff_mod.read_handoff(project_dir / cfg.handoff_file)
+    except handoff_mod.HandoffError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    blocked = sum(1 for item in handoff.unresolved if item.status == "BLOCKED")
+    opened = sum(1 for item in handoff.unresolved if item.status == "OPEN")
+    print(f"handoff status: {handoff.status}")
+    print(f"handoff spec: {handoff.current_spec or '(none)'}")
+    print(f"open issues: {opened} (blocked: {blocked})")
+    for item in handoff.unresolved:
+        if item.status == "BLOCKED":
+            print(f"blocker {item.id}: {item.description}")
+    print(f"next action: {handoff.next_action or '(none)'}")
     return EXIT_OK
 
 
@@ -207,28 +223,12 @@ def cmd_auto(project_dir: Path) -> int:
 
 
 def cmd_run(project_dir: Path) -> int:
-    # Prerequisite gate only: resolve the adapter, require the tmux driver,
-    # and refuse to schedule. The scheduler lands in
-    # state-driven-runner-and-handoff. MUST NOT claim progress.
+    # State-driven execution: inspect, determine, execute through the
+    # adapter, persist, then reset or stop. Verification stays a boundary
+    # until verification-logging-and-observability ships, so unverified
+    # outcomes are persisted without advancing and stop the run.
     cfg = _load_config(project_dir)
     if cfg is None:
-        return EXIT_ERROR
-    try:
-        adapter = providers_mod.get_adapter(
-            cfg.agent_provider,
-            terminal_mod.TmuxDriver(),
-            "ariadex-probe",
-            project_dir,
-        )
-    except providers_mod.UnsupportedOperation as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return EXIT_ERROR
-    if cfg.terminal_driver not in config_mod.SUPPORTED_TERMINAL_DRIVERS:
-        print(
-            f"error: unsupported terminal driver `{cfg.terminal_driver}`; "
-            f"MVP supports: {', '.join(config_mod.SUPPORTED_TERMINAL_DRIVERS)}",
-            file=sys.stderr,
-        )
         return EXIT_ERROR
     st = _load_state(project_dir)
     if st is None:
@@ -237,6 +237,23 @@ def cmd_run(project_dir: Path) -> int:
         print("error: project is PAUSED; use `ariadex resume` or `ariadex auto` first",
               file=sys.stderr)
         return EXIT_ERROR
+    if cfg.terminal_driver not in config_mod.SUPPORTED_TERMINAL_DRIVERS:
+        print(
+            f"error: unsupported terminal driver `{cfg.terminal_driver}`; "
+            f"MVP supports: {', '.join(config_mod.SUPPORTED_TERMINAL_DRIVERS)}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    try:
+        adapter = providers_mod.get_adapter(
+            cfg.agent_provider,
+            terminal_mod.TmuxDriver(),
+            terminal_mod.session_name_for(st.session_id),
+            project_dir,
+        )
+    except providers_mod.UnsupportedOperation as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
     if shutil.which("tmux") is None:
         print(
             "error: run stops before sending work: tmux executable `tmux` "
@@ -244,13 +261,14 @@ def cmd_run(project_dir: Path) -> int:
             file=sys.stderr,
         )
         return EXIT_ERROR
-    print(
-        f"prerequisites validated (provider `{adapter.provider_name}`, "
-        "tmux available); the scheduler arrives with "
-        "`state-driven-runner-and-handoff`; no work was started",
-        file=sys.stderr,
-    )
-    return EXIT_ERROR
+    runner = runner_mod.Runner(project_dir, cfg, adapter)
+    cycles = runner.run()
+    for cycle in cycles:
+        print(f"{cycle.kind}: {cycle.action} -> {cycle.outcome} ({cycle.detail})")
+    last = cycles[-1] if cycles else None
+    if last is not None and last.stopped and last.stop_reason not in ("idle",):
+        return EXIT_ERROR
+    return EXIT_OK
 
 
 def cmd_attach(project_dir: Path) -> int:

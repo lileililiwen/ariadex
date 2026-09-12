@@ -97,6 +97,29 @@ class ValidationTest(unittest.TestCase):
         with self.assertRaises(config.ConfigError):
             self.load_text("verification_commands: [ok, 42]\n")
 
+    def test_context_strategy_enum_enforced(self):
+        cfg = self.load_text("context_strategy: per-task\n")
+        self.assertEqual(cfg.context_strategy, "per-task")
+        with self.assertRaises(config.ConfigError):
+            self.load_text("context_strategy: vibes\n")
+
+    def test_blocker_policy_enum_enforced(self):
+        cfg = self.load_text("blocker_policy: record-and-continue\n")
+        self.assertEqual(cfg.blocker_policy, "record-and-continue")
+        with self.assertRaises(config.ConfigError):
+            self.load_text("blocker_policy: panic\n")
+
+    def test_legacy_values_coerced_with_warning(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cfg = self.load_text(
+                "context_strategy: fresh-session\n"
+                "blocker_policy: record-and-stop\n"
+            )
+        self.assertEqual(cfg.context_strategy, "per-spec")
+        self.assertEqual(cfg.blocker_policy, "stop-on-blocker")
+        self.assertIn("legacy", buf.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

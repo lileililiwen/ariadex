@@ -16,6 +16,12 @@ from .providers import supported_providers
 CONFIG_REL_PATH = Path(".ariadex") / "config.yaml"
 
 RESET_MODES = ("soft", "hard", "auto")
+CONTEXT_STRATEGIES = ("per-spec", "per-task", "token-threshold", "manual", "never")
+BLOCKER_POLICIES = ("stop-on-blocker", "record-and-continue")
+
+# Legacy values from earlier defaults, coerced with a warning.
+LEGACY_CONTEXT_STRATEGIES = {"fresh-session": "per-spec"}
+LEGACY_BLOCKER_POLICIES = {"record-and-stop": "stop-on-blocker"}
 
 # Providers with an implemented adapter. Other values load successfully so
 # that `ariadex run` can report them as unsupported instead of claiming
@@ -28,13 +34,13 @@ SUPPORTED_TERMINAL_DRIVERS = ("tmux",)
 class Config:
     agent_provider: str = "opencode"
     terminal_driver: str = "tmux"
-    context_strategy: str = "fresh-session"
+    context_strategy: str = "per-spec"
     reset_mode: str = "auto"
     spec_dir: str = "openspec/changes"
     handoff_file: str = ".ariadex/handoff.md"
     verification_commands: list = dataclasses.field(default_factory=list)
     retry_limit: int = 2
-    blocker_policy: str = "record-and-stop"
+    blocker_policy: str = "stop-on-blocker"
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -58,7 +64,8 @@ agent_provider: opencode
 terminal_driver: tmux
 # How a fresh session recovers context. Durable state lives in the
 # repository, specs, and handoff file; conversation history is temporary.
-context_strategy: fresh-session
+# per-spec is the MVP default; manual and never never reset automatically.
+context_strategy: per-spec
 # Fresh-session reset strength for a completed spec: soft, hard, or auto.
 reset_mode: auto
 # Directory containing the active OpenSpec changes.
@@ -70,8 +77,9 @@ handoff_file: .ariadex/handoff.md
 verification_commands: []
 # Maximum bounded retries for a failed operation. Must be >= 0.
 retry_limit: 2
-# How blockers are recorded: record-and-stop preserves unresolved work.
-blocker_policy: record-and-stop
+# How blockers are recorded: stop-on-blocker persists the blocker and
+# stops new scheduling; record-and-continue persists it and continues.
+blocker_policy: stop-on-blocker
 """
 
 
@@ -114,6 +122,32 @@ def validate(raw: dict, source: str = "configuration") -> Config:
         return value
 
     base = defaults()
+    context_strategy = get("context_strategy", base.context_strategy)
+    if context_strategy in LEGACY_CONTEXT_STRATEGIES:
+        coerced = LEGACY_CONTEXT_STRATEGIES[context_strategy]
+        print(
+            f"warning: context_strategy `{context_strategy}` in {source} "
+            f"is legacy; using `{coerced}`"
+        )
+        context_strategy = coerced
+    if context_strategy not in CONTEXT_STRATEGIES:
+        raise ConfigError(
+            f"invalid context_strategy `{context_strategy}` in {source}: "
+            f"expected one of {', '.join(CONTEXT_STRATEGIES)}"
+        )
+    blocker_policy = get("blocker_policy", base.blocker_policy)
+    if blocker_policy in LEGACY_BLOCKER_POLICIES:
+        coerced = LEGACY_BLOCKER_POLICIES[blocker_policy]
+        print(
+            f"warning: blocker_policy `{blocker_policy}` in {source} "
+            f"is legacy; using `{coerced}`"
+        )
+        blocker_policy = coerced
+    if blocker_policy not in BLOCKER_POLICIES:
+        raise ConfigError(
+            f"invalid blocker_policy `{blocker_policy}` in {source}: "
+            f"expected one of {', '.join(BLOCKER_POLICIES)}"
+        )
     reset_mode = get("reset_mode", base.reset_mode)
     if reset_mode not in RESET_MODES:
         raise ConfigError(
@@ -152,11 +186,11 @@ def validate(raw: dict, source: str = "configuration") -> Config:
     return Config(
         agent_provider=raw.get("agent_provider", base.agent_provider),
         terminal_driver=raw.get("terminal_driver", base.terminal_driver),
-        context_strategy=raw.get("context_strategy", base.context_strategy),
+        context_strategy=context_strategy,
         reset_mode=reset_mode,
         spec_dir=raw.get("spec_dir", base.spec_dir),
         handoff_file=raw.get("handoff_file", base.handoff_file),
         verification_commands=list(verification_commands),
         retry_limit=retry_limit,
-        blocker_policy=raw.get("blocker_policy", base.blocker_policy),
+        blocker_policy=blocker_policy,
     )
