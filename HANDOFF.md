@@ -43,11 +43,17 @@
 - Tests: `tests/test_log_governance.py` (29 tests: age/size rotation oldest-first, zero-disables-bounds, metrics age/size with malformed-line retention, permissions + fallback diagnostics, extended redaction + count metadata, export scope/bounds, prune CLI preserves handoff history, config validation, doctor logs check, runner observe bounds).
 - Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (300 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
 - Live proof on this host: ruff check/format clean, mypy clean on 19 files, coverage 82% (gate met), `openspec validate --changes --strict --no-interactive` 2 passed after archiving.
-- No implementation work for the remaining post-MVP changes has started; the queue below is planning-only.
+- `spec-dependency-and-execution-governance` implemented, verified, and archived as `2026-09-12-spec-dependency-and-execution-governance` (commit `97c9221`).
+- New module `src/ariadex/spec_graph.py`: optional `depends_on`/`dependencies` list in `<spec_dir>/<change>/.openspec.yaml` (absent means no predecessors; malformed/self-dependency raises `SpecGraphError`, surfaced as a durable blocker, never a crash); `load_graph` (sorted, best-effort with per-spec errors), `completed_spec_names` (parses verified `completed spec` handoff history), `find_missing`, deterministic `find_cycles` (active-edge DFS, normalized rotation, sorted), `eligible_specs` (all-deps-completed readiness, depth-then-alpha order, never directory position), `validate_target` (missing/cyclic/incomplete reasons).
+- `runner.py`: `RepositoryView` gains `dependencies`+`graph_errors`; `inspect_repository` loads the graph; `select_next_action` validates explicit `current_spec`/`next_spec` targets (missing/ineligible returns STOP with reason, never silently substitutes), auto-selects the first eligible spec in topological order with no explicit target, reports missing/cycle/incomplete reasons instead of idling over blocked work, and treats all-active-completed as idle; `ensure_blocker_once` bounds STOP persistence (no duplicate OPEN/BLOCKED descriptions); `_apply_completion` START_SPEC uses the selected target so auto-picked specs record correctly.
+- Tests: `tests/test_spec_graph.py` (27 tests: metadata/absent/alias/malformed/self, linear/branching/missing/cyclic/self-cycle/completed, explicit valid/invalid selection, auto-select over directory order, all-complete idle, no-input + durable cycle/missing/incomplete blockers, no-duplicate blockers, unaffected-spec scheduling, deferred/blocked predecessors still block, verification gate still required); `tests/test_runner.py` updated (true idle is empty spec dir; eligible spec auto-selects without an explicit target).
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (328 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
+- Live proof on this host: ruff check/format clean, mypy clean on 20 files, coverage 82% (gate met), `openspec validate --changes --strict --no-interactive` 2 passed before archiving, 1 passed after archiving.
+- No implementation work for the remaining post-MVP change has started; the queue below is planning-only.
 
 ## Next change
 
-Next is `spec-dependency-and-execution-governance`. Select only one active change at a time with `openspec list`; remaining packages are planning-only until implementation is explicitly started.
+Next is `metrics-export-and-notifications`. Select only one active change at a time with `openspec list`; remaining packages are planning-only until implementation is explicitly started.
 
 ## Feature-to-change sequence
 
