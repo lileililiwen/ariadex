@@ -82,13 +82,19 @@ def needs_sudo() -> bool:
         return False
 
 
-def install_command(manager: str) -> list[str]:
-    """Full argv to install tmux with `manager`, sudo-prefixed if needed."""
+def install_command(manager: str, *, interactive_sudo: bool = False) -> list[str]:
+    """Full argv to install tmux with `manager`, sudo-prefixed if needed.
+
+    Non-interactive, passwordless `sudo -n` only when required, unless
+    `interactive_sudo` explicitly allows a foreground password prompt (used
+    only by interactive managed startup; the password is entered at the
+    user's terminal and never captured).
+    """
     for name, args in _MANAGERS:
         if name == manager:
             cmd = [name, *args, "tmux"]
             if needs_sudo() and shutil.which("sudo") is not None:
-                cmd = ["sudo", "-n", *cmd]
+                cmd = ["sudo", *(["-n"] if not interactive_sudo else []), *cmd]
             return cmd
     raise TmuxSetupError(f"unsupported package manager `{manager}`")
 
@@ -111,8 +117,17 @@ def require_tmux(executable: str = EXECUTABLE) -> str:
     )
 
 
-def ensure_tmux(executable: str = EXECUTABLE) -> str:
-    """Return a tmux binary path, installing it first when missing."""
+def ensure_tmux(
+    executable: str = EXECUTABLE,
+    *,
+    interactive_sudo: bool = False,
+    runner=None,
+) -> str:
+    """Return a tmux binary path, installing it first when missing.
+
+    `interactive_sudo` allows a foreground sudo password prompt for managed
+    startup; the default stays non-interactive (`sudo -n` fails fast).
+    """
     found = find_tmux(executable)
     if found is not None:
         return found
@@ -122,11 +137,17 @@ def ensure_tmux(executable: str = EXECUTABLE) -> str:
             f"tmux executable `{executable}` not found and no supported "
             f"package manager detected; {manual_hint(None)}"
         )
+    run = runner or subprocess.run
     if manager == "apt-get":
-        _run_update(manager)
-    cmd = install_command(manager)
+        _run_update(manager, interactive_sudo=interactive_sudo, runner=run)
+    cmd = install_command(manager, interactive_sudo=interactive_sudo)
     # Fixed argv from the pinned manager table; no shell, no user input.
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)  # noqa: S603
+    proc = run(
+        cmd,
+        capture_output=not interactive_sudo,
+        text=True,
+        timeout=600,
+    )
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "unknown error").strip()
         raise TmuxSetupError(
@@ -143,12 +164,14 @@ def ensure_tmux(executable: str = EXECUTABLE) -> str:
     return found
 
 
-def _run_update(manager: str) -> None:
+def _run_update(manager: str, *, interactive_sudo: bool = False, runner=None) -> None:
     cmd = ["apt-get", "update"]
     if needs_sudo() and shutil.which("sudo") is not None:
-        cmd = ["sudo", "-n", *cmd]
-    # Fixed `apt-get update` argv; non-interactive by contract.
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)  # noqa: S603
+        cmd = ["sudo", *(["-n"] if not interactive_sudo else []), *cmd]
+    # Fixed `apt-get update` argv; non-interactive by contract unless the
+    # caller explicitly allows a foreground sudo prompt.
+    run = runner or subprocess.run
+    proc = run(cmd, capture_output=not interactive_sudo, text=True, timeout=600)
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "unknown error").strip()
         raise TmuxSetupError(
