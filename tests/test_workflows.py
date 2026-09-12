@@ -20,22 +20,22 @@ SHA_PIN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$")
 # Mutable action reference -> why it is accepted for now. Keep each entry
 # justified and current; unused entries fail so approvals never go stale.
 REVIEWED_MUTABLE_REFS = {
-    "actions/checkout@v4": (
+    "actions/checkout@v5": (
         "major-version tag of the first-party checkout action; the source "
         "tree already comes from this action. Full SHA pinning deferred "
         "until automated updates are configured."
     ),
-    "actions/setup-python@v5": (
+    "actions/setup-python@v6": (
         "major-version tag of the first-party Python installer; runs no "
         "project code. Full SHA pinning deferred until automated updates "
         "are configured."
     ),
-    "actions/setup-node@v4": (
+    "actions/setup-node@v6": (
         "major-version tag of the first-party Node installer; runs no "
         "project code. Full SHA pinning deferred until automated updates "
         "are configured."
     ),
-    "actions/upload-artifact@v4": (
+    "actions/upload-artifact@v5": (
         "major-version tag of the first-party artifact uploader; only "
         "uploads already-verified build outputs."
     ),

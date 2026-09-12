@@ -25,11 +25,11 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
       - run: npm install -g @fission-ai/openspec@1.6.0
@@ -82,7 +82,7 @@ jobs:
           rm -rf .ariadex
           /tmp/pypi-venv/bin/ariadex init
           /tmp/pypi-venv/bin/ariadex status
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ariadex-${{ github.ref_name }}
           path: |
