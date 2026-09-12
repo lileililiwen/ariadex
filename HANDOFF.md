@@ -93,7 +93,7 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Select `reproducible-release-and-security-evidence` next with `openspec list`. Its work is a reproducible toolchain/preflight, `--tmux-bin`/`--local-tmux` evidence verification, and a pinned pip-audit run with recorded results. Do not start V2 capabilities until it is complete (the publication change is archived: `ariadex 0.1.0` is on PyPI).
+No active changes remain — both MVP changes are archived and `ariadex 0.1.0` is on PyPI. Next is a documentation refresh pass (README/ROADMAP/HANDOFF consistency) before any V2 capability work. Do not start V2 capabilities until the docs pass is complete.
 
 ## Audit remediation sequence
 
@@ -199,3 +199,10 @@ Point-in-time tool output archived with the changes above; counts below are supe
 - Release `ariadex-v0.1.0` (tag `dd246f6`→`c617fbb` after SHA/Node fixes): run `34681217325` — evidence gate passed (opencode live, codex unevaluated), dry run 5/5, publish via trusted publisher, clean-index install check green. Two fix iterations: SHA256SUMS.txt moved out of `dist/` (twine rejects non-distributions), actions bumped to Node 24 runtimes (checkout@v5, setup-python@v6, setup-node@v6, upload-artifact@v5). First publish attempt failed fail-closed on the 400 project-name mismatch (publisher was attached to a different project); maintainer added the correct pending publisher, re-run succeeded.
 - PyPI `ariadex 0.1.0`: wheel `fb0390276b032fd0...`, sdist `8da614559a412fcb...`. Clean-venv proof: `pip install ariadex==0.1.0`, `--version` → `0.1.0`, `init` creates state, `status` reports MANUAL session.
 - Repo settings (maintainer-approved): solo-minimal protection (force-push/deletion blocked, no required checks — GitHub rejects direct pushes while any check is required); `release` environment with `lileililiwen` as required reviewer. Rollback: yank on PyPI + delete tag/GitHub release; never force-push `main`.
+
+- `reproducible-release-and-security-evidence` implemented, verified, and archived as `2026-09-12-reproducible-release-and-security-evidence`. No active changes remain.
+- New `ariadex preflight` (1.2): reports python, ariadex-package, pip-audit, build, opencode, codex, tmux paths/versions; absent tools MISSING, never passed; always exit 0. Live output on this host matched reality (editable 0.1.0, build 1.6.1, both providers present, pip-audit/tmux MISSING).
+- tmux evidence verified for real on this tmux-less host: `--local-tmux` fetched tmux 3.4 debs without privileges and removed the isolated dir (2.2); `--tmux-bin /tmp/keep-tmux/bin/tmux` used the supplied binary with the host untouched (2.1); full no-skip gate `--local-tmux --gate` over 8 scenarios: 9 passed, 0 skipped, 0 blocked, exit 0 (2.3; codex-lifecycle excluded, reported unevaluated per release policy).
+- Security (3.1/3.2): pinned `pip-audit==2.10.1` in a network venv: `No known vulnerabilities found`. Documented limitation: pip-audit has no offline mode; unaudited trees must not claim clean audits.
+- Reproducible env + offline path (1.1/1.3) documented in README Development: online pinned path, `--no-isolation` cached build, `--tmux-bin` offline evidence, and limitations. Corrected a false `pip-audit --local` offline claim before committing (that flag only scopes to local deps, still queries OSV online).
+- Suite: 518 tests OK (skipped=1), coverage floors pass, openspec strict green.
