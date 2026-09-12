@@ -21,11 +21,15 @@
 - Tests: `tests/test_packaging.py` (7 tests: semver single source, pyproject entry-point/deps metadata, `--version` output, governance files ship, unsupported provider reports without claiming work, `run` outside a project fails non-zero with `error:` and no completion claim).
 - Live proof on this host: `python -m build` produced `dist/ariadex-0.1.0.tar.gz` + `dist/ariadex-0.1.0-py3-none-any.whl`; clean venv `pip install` of the wheel then `ariadex --help`, `ariadex --version` (`0.1.0`), `ariadex init`, and `ariadex status` all succeed with no `PYTHONPATH`. sdist contains LICENSE/CHANGELOG/SECURITY/README/MANIFEST.
 - Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (221 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
+- `ci-quality-security-gates` implemented, verified, and archived as `2026-09-12-ci-quality-security-gates` (commit `41092fd`).
+- New files: `.github/workflows/ci.yml` (unit matrix py3.11-3.13 x ubuntu+macos, strict OpenSpec, ruff/mypy/coverage quality job, pip-audit, report-mode live evidence with blocked-fails/skip-warns parsing, clean-install sdist+wheel job), `.github/workflows/release.yml` (tag `ariadex-v*`, `release` environment, tag==`__version__` check, full gates, `evidence --gate`, artifact hashes, clean-venv smoke, artifact upload; PyPI stays manual).
+- Toolchain: `[project.optional-dependencies] dev` pins (ruff 0.16.7, mypy 2.3.1, types-PyYAML, coverage 7.16.0, pip-audit 2.10.1, build 1.6.1); ruff select B/C4/E/F/I/RUF/SIM/UP/W (S/PL/BLE deferred as behavior-affecting); mypy clean on 17 files; coverage gate `fail_under = 82` (measured baseline); `ruff format` applied tree-wide (mechanical only). Behavior fixes found by gates: `sent_inputs` now matches its `list[str]` contract (no callers), `verify` decodes timeout bytes payloads, `resync` narrows `None` directly, `runner` re-exports `VerificationResult` explicitly.
+- Live proof on this host: ruff/mypy/coverage/audit/openspec/unit all pass; evidence report 6 passed, 1 skipped (tmux absent), 0 blocked; report parser exits 0 with `::warning` on the skip and 1 on a synthetic blocked report; `evidence --gate` exits 1 on the skip (fail-closed); rebuilt wheel clean-installs and runs `--help`/`--version`/`init`/`status`; tag-match check passes and mismatches fail. Only Python 3.12 exists here, so the 3.11/3.13 and macOS matrix legs are CI-only.
 - No implementation work for the remaining post-MVP changes has started; the queue below is planning-only.
 
 ## Next change
 
-Next is `ci-quality-security-gates`. Select only one active change at a time with `openspec list`; remaining packages are planning-only until implementation is explicitly started.
+Next is `human-supervision-ergonomics`. Select only one active change at a time with `openspec list`; remaining packages are planning-only until implementation is explicitly started.
 
 ## Feature-to-change sequence
 
