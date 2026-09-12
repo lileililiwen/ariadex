@@ -70,10 +70,17 @@
 - Tests: `tests/test_bounded_run.py` (11 tests: zero/negative budget no-input incomplete, zero-budget handoff preservation, exact-bound terminal with no appended result, 12-issue exhaustion shape/detail/twin-replay no-input proof, remaining-action persistence, metrics record + summary, exit mapping for idle/blocked/cycle-limit/unstopped/empty).
 - Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (377 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
 - Live proof on this host: ruff check/format clean, mypy clean on 21 files, `openspec validate --changes --strict --no-interactive` 5 passed before archiving, 4 passed after archiving.
+- `takeover-cancellation-and-scheduler-coordination` implemented, verified, and archived as `2026-09-12-takeover-cancellation-and-scheduler-coordination` (commit `814f2d7`).
+- `concurrency.py`: project-scoped cancellation signal (`.ariadex/cancel.json`; `request_cancellation`/`cancellation_requested`/`clear_cancellation`); unreadable-but-present signals honored as unknown requests; lease/tmux/handoff never touched by the signal itself.
+- `runner.py`: checkpoints before send (safe cancel, phase cleared, no input), before verification (uncertain cancel, `captured` phase preserved), before completion persistence (uncertain cancel, `completing` phase preserved), before reset (verified completion stands, reset input skipped), and before next scheduling in `run()`; all cancel results are stopped `cancelled` with durable next action and no completion claim; `_execute` no longer clears a phase preserved for recovery.
+- `cli.py`: takeover/pause write the signal and report lease coordination (pending with live owner, stale/corrupt guidance, orphaned-phase recovery note) without deleting locks or touching sessions; `auto` clears the signal after resync.
+- Tests: `tests/test_takeover.py` (11 tests: before-send no-input retryable, metrics distinctness, after-send uncertain preservation + restart interruption + bounded single-blocker recovery, during-verification no-completion + no next scheduling, completion/reset race skip, command pending-vs-idle vs stale vs live-refused recovery, auto clears).
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (388 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
+- Live proof on this host: ruff check/format clean, mypy clean on 21 files, `openspec validate --changes --strict --no-interactive` 4 passed before archiving, 3 passed after archiving.
 
 ## Next change
 
-Select `takeover-cancellation-and-scheduler-coordination` next with `openspec list`.
+Select `canonical-spec-and-doc-governance` next with `openspec list`.
 
 ## Audit remediation sequence
 
