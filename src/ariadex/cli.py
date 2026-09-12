@@ -87,7 +87,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init", help="create .ariadex/ defaults without overwriting files")
+    init_parser = sub.add_parser(
+        "init", help="first-run provider/prompt setup; refuses when initialized"
+    )
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="remove the complete .ariadex directory and reinitialize (confirmed)",
+    )
+    init_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="confirm the destructive reset without prompting (non-interactive use)",
+    )
     run_parser = sub.add_parser(
         "run", help="start execution after validating prerequisites"
     )
@@ -494,7 +507,121 @@ def _project_dir() -> Path:
     return Path.cwd()
 
 
-def cmd_init(project_dir: Path) -> int:
+def is_initialized(project_dir: Path) -> bool:
+    """Report whether full project initialization exists.
+
+    Initialization is the configuration plus runtime state files. A project
+    with only one of them is partially initialized and `init` completes it;
+    a project with both refuses plain `init` (see `init --force`).
+    """
+    return (
+        config_mod.config_path(project_dir).is_file()
+        and state_mod.state_path(project_dir).is_file()
+    )
+
+
+def _wizard_answer(prompt_text: str) -> str:
+    """Read one first-run answer. Blank/EOF selects the built-in default.
+
+    Never blocks headless callers: without an interactive terminal the
+    default applies immediately.
+    """
+    try:
+        interactive = sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    if not interactive:
+        return ""
+    try:
+        return input(prompt_text)
+    except EOFError:
+        return ""
+
+
+def _coerce_answer(raw: str, default: str) -> str:
+    """Map a wizard answer to its stored value (blank/skip keeps default)."""
+    text = raw.strip()
+    if not text or text.lower() in ("skip", "-"):
+        return default
+    return text
+
+
+def _ask_init_answers(
+    read_answer=None,
+) -> tuple[str, str, str]:
+    """Prompt for provider, first prompt, and continuation prompt.
+
+    `read_answer` maps a prompt string to the user's raw answer; the default
+    reads interactively (defaults headless). Invalid providers are rejected
+    and re-prompted without touching durable state. Returns validated
+    `(provider, first_prompt, continuation_prompt)` with non-empty values.
+    """
+    read = read_answer if read_answer is not None else _wizard_answer
+    providers = providers_mod.supported_providers()
+    default_provider = config_mod.defaults().agent_provider
+    while True:
+        raw = _coerce_answer(
+            read(
+                f"Provider [{default_provider}] "
+                f"({'/'.join(providers)}; blank keeps the default): "
+            ),
+            default_provider,
+        )
+        if raw in providers:
+            provider = raw
+            break
+        print(
+            f"error: unsupported provider `{raw}`; "
+            f"choose one of {', '.join(providers)}",
+            file=sys.stderr,
+        )
+    default_prompt = config_mod.DEFAULT_MANAGED_PROMPT
+    first_prompt = _coerce_answer(
+        read("First prompt [blank keeps the built-in default]: "),
+        default_prompt,
+    )
+    continuation_prompt = _coerce_answer(
+        read("Continuation prompt [blank keeps the built-in default]: "),
+        default_prompt,
+    )
+    return provider, first_prompt, continuation_prompt
+
+
+def _render_config_text(
+    provider: str, first_prompt: str, continuation_prompt: str
+) -> str:
+    """Render the commented default config with the wizard answers applied.
+
+    Prompts are embedded as JSON double-quoted scalars (valid YAML) so
+    arbitrary user text cannot break the file.
+    """
+    import json as json_mod
+
+    text = config_mod.default_config_text()
+    text = text.replace(
+        "\nagent_provider: opencode\n", f"\nagent_provider: {provider}\n", 1
+    )
+    text = text.replace(
+        f"\nfirst_prompt: {config_mod.DEFAULT_MANAGED_PROMPT}\n",
+        f"\nfirst_prompt: {json_mod.dumps(first_prompt)}\n",
+        1,
+    )
+    text = text.replace(
+        f"\ncontinuation_prompt: {config_mod.DEFAULT_MANAGED_PROMPT}\n",
+        f"\ncontinuation_prompt: {json_mod.dumps(continuation_prompt)}\n",
+        1,
+    )
+    return text
+
+
+def _create_missing_files(
+    project_dir: Path, provider: str, first_prompt: str, continuation_prompt: str
+) -> tuple[list, list]:
+    """Create absent .ariadex/config.yaml, handoff, and state files.
+
+    Existing files are never overwritten. Raises OSError on I/O failure and
+    reports invalid rendered configuration instead of claiming success.
+    """
     ariadex_dir = project_dir / ".ariadex"
     ariadex_dir.mkdir(parents=True, exist_ok=True)
 
@@ -503,14 +630,13 @@ def cmd_init(project_dir: Path) -> int:
     if cfg_path.exists():
         preserved.append(str(config_mod.CONFIG_REL_PATH))
     else:
-        cfg_path.write_text(config_mod.default_config_text(), encoding="utf-8")
+        cfg_path.write_text(
+            _render_config_text(provider, first_prompt, continuation_prompt),
+            encoding="utf-8",
+        )
         created.append(str(config_mod.CONFIG_REL_PATH))
 
-    try:
-        cfg = config_mod.load(project_dir)
-    except config_mod.ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return EXIT_ERROR
+    cfg = config_mod.load(project_dir)
     handoff_path = project_dir / cfg.handoff_file
     if handoff_path.exists():
         preserved.append(cfg.handoff_file)
@@ -525,6 +651,140 @@ def cmd_init(project_dir: Path) -> int:
     else:
         state_mod.write(project_dir, state_mod.initial_state())
         created.append(str(state_mod.STATE_REL_PATH))
+    return created, preserved
+
+
+def _cmd_init_force(
+    project_dir: Path, confirmed: bool = False, read_answer=None
+) -> int:
+    """Destructively reset `.ariadex` after confirmation, then reinitialize.
+
+    Scoped to the current project's `.ariadex` directory only: `HANDOFF.md`,
+    `openspec/`, source files, and git history are never touched. Answers are
+    collected before any deletion so a declined confirmation changes nothing.
+    """
+    import shutil as shutil_mod
+
+    try:
+        base = project_dir.resolve()
+    except OSError as exc:
+        print(
+            f"error: reset refused: cannot resolve project directory: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    target = base / ".ariadex"
+    if target.exists() and not target.is_dir():
+        print(
+            f"error: reset refused: `{target}` is not a directory",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    # Same wizard as first initialization; nothing is removed or created
+    # until every answer validates.
+    provider, first_prompt, continuation_prompt = _ask_init_answers(read_answer)
+    print(
+        "init --force removes the complete .ariadex directory (configuration, "
+        "state, daemon records, locks, logs, events). HANDOFF.md, openspec/, "
+        "sources, and git history are preserved."
+    )
+    if not _confirm_reset(confirmed):
+        return EXIT_ERROR
+    try:
+        if target.exists():
+            shutil_mod.rmtree(target)
+    except OSError as exc:
+        print(
+            f"error: reset failed while removing .ariadex: {exc} "
+            "(no initialization claimed)",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    try:
+        created, preserved = _create_missing_files(
+            project_dir, provider, first_prompt, continuation_prompt
+        )
+    except OSError as exc:
+        print(
+            f"error: reset failed while recreating .ariadex: {exc} "
+            "(no initialization claimed)",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    except config_mod.ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if created:
+        print(f"initialized: created {', '.join(created)}")
+    if preserved:
+        print(f"initialization already present: preserved {', '.join(preserved)}")
+    return EXIT_OK
+
+
+def _confirm_reset(confirmed: bool) -> bool:
+    """Require explicit approval for destructive `.ariadex` removal.
+
+    `--yes` approves; interactive terminals must answer yes; headless
+    callers without `--yes` are declined, never silently destructive.
+    """
+    if confirmed:
+        return True
+    try:
+        interactive = sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    if not interactive:
+        print(
+            "error: reset declined: confirmation required; "
+            "rerun with `ariadex init --force --yes`",
+            file=sys.stderr,
+        )
+        return False
+    try:
+        answer = input("Remove .ariadex and reinitialize? [y/N] ").strip().lower()
+    except EOFError:
+        print(
+            "error: reset declined: confirmation required; "
+            "rerun with `ariadex init --force --yes`",
+            file=sys.stderr,
+        )
+        return False
+    if answer not in ("y", "yes"):
+        print("aborted: reset declined; project state unchanged", file=sys.stderr)
+        return False
+    return True
+
+
+def cmd_init(
+    project_dir: Path,
+    force: bool = False,
+    confirmed: bool = False,
+    read_answer=None,
+) -> int:
+    if force:
+        return _cmd_init_force(
+            project_dir, confirmed=confirmed, read_answer=read_answer
+        )
+    if is_initialized(project_dir):
+        print(
+            "error: project is already initialized; "
+            "use `ariadex init --force` to reset it (no files changed)",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    # Atomic from the user's perspective: the directory and files are only
+    # created after every answer validates; existing project files are kept.
+    provider, first_prompt, continuation_prompt = _ask_init_answers(read_answer)
+    try:
+        created, preserved = _create_missing_files(
+            project_dir, provider, first_prompt, continuation_prompt
+        )
+    except OSError as exc:
+        print(f"error: initialization failed: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except config_mod.ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
 
     if created:
         print(f"initialized: created {', '.join(created)}")
@@ -1131,6 +1391,13 @@ def cmd_start(project_dir: Path, as_json: bool = False) -> int:
     import subprocess
     import time
 
+    if not is_initialized(project_dir):
+        print(
+            "error: project is not initialized; run `ariadex init` first "
+            "(no daemon, tmux, or provider work started)",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
     if _load_config(project_dir) is None:
         return EXIT_ERROR
     if _load_state(project_dir) is None:
@@ -1365,7 +1632,7 @@ def cmd_widget(
     confirmed: bool = False,
 ) -> int:
     """Run the common init, daemon, and floating-widget workflow."""
-    if cmd_init(project_dir) != EXIT_OK:
+    if not is_initialized(project_dir) and cmd_init(project_dir) != EXIT_OK:
         return EXIT_ERROR
     if not companion_mod.tkinter_available():
         manager = tmux_setup_mod.detect_manager()
@@ -2057,7 +2324,11 @@ def main(argv: list[str] | None = None) -> int:
     project_dir = _project_dir()
     auto_install = not args.no_auto_install
     handlers = {
-        "init": lambda: cmd_init(project_dir),
+        "init": lambda: cmd_init(
+            project_dir,
+            force=getattr(args, "force", False),
+            confirmed=getattr(args, "yes", False),
+        ),
         "run": lambda: cmd_run(
             project_dir,
             auto_install=auto_install,

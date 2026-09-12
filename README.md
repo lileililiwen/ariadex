@@ -359,9 +359,12 @@ commands.
 
 The normal lifecycle is:
 
-1. `ariadex init` creates missing `.ariadex/` configuration, the configured
-   handoff file (default `HANDOFF.md`), and
-   state files without overwriting existing files.
+1. `ariadex init` asks for the provider and first/continuation prompts
+   (blank answers keep the built-in defaults), then creates missing
+   `.ariadex/` configuration, the configured handoff file (default
+   `HANDOFF.md`), and state files without overwriting existing files.
+   Plain `init` refuses when the project is already initialized;
+   `init --force` confirms, then removes only `.ariadex/` and reinitializes.
 2. `ariadex start` starts one resident daemon for the project. The daemon does
    not open a visible terminal; it owns the background scheduling loop.
 3. In `AUTO`, the daemon selects the next durable action, starts or connects
@@ -439,7 +442,7 @@ unresolved or blocked work. Nothing is ever silently discarded.
 
 | Command            | Effect                                                        |
 | ------------------ | ------------------------------------------------------------- |
-| `init`             | Create `.ariadex/` defaults without overwriting existing files |
+| `init [--force] [--yes]` | First-run provider/prompt setup; refuses when initialized |
 | `start [--json]`   | Start the resident daemon (idempotent; refuses live leases)    |
 | `stop [--json]`    | Bounded graceful shutdown; durable state kept for `recover`    |
 | `widget [--project PATH] [--yes]` | Initialize, prepare, start, and open the middle-right widget |

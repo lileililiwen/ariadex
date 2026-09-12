@@ -29,6 +29,11 @@ LEGACY_BLOCKER_POLICIES = {"record-and-stop": "stop-on-blocker"}
 SUPPORTED_PROVIDERS = supported_providers()
 SUPPORTED_TERMINAL_DRIVERS = ("tmux",)
 
+#: Built-in default for the managed first-run prompts. The first prompt and
+#: the continuation prompt share one default: a fresh managed conversation
+#: starts by implementing the next durable spec, exactly like a continuation.
+DEFAULT_MANAGED_PROMPT = "Please read the HANDOFF.md, and implement the next spec."
+
 
 @dataclasses.dataclass
 class Config:
@@ -49,6 +54,8 @@ class Config:
     notification_webhook: str = ""
     notification_rate_limit: int = 5
     notification_window_seconds: int = 3600
+    first_prompt: str = DEFAULT_MANAGED_PROMPT
+    continuation_prompt: str = DEFAULT_MANAGED_PROMPT
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -106,6 +113,11 @@ notification_command: []
 notification_webhook: ""
 notification_rate_limit: 5
 notification_window_seconds: 3600
+# Managed startup prompts, asked by `ariadex init` (blank answers keep these
+# defaults). The first prompt is sent once the first provider conversation is
+# ready; the continuation prompt follows each verified conversation boundary.
+first_prompt: Please read the HANDOFF.md, and implement the next spec.
+continuation_prompt: Please read the HANDOFF.md, and implement the next spec.
 """
 
 
@@ -245,6 +257,12 @@ def validate(raw: dict, source: str = "configuration") -> Config:
             raise ConfigError(f"invalid {name} in {source}: expected an integer >= 0")
         if value < 0:
             raise ConfigError(f"invalid {name} in {source}: expected an integer >= 0")
+    for name in ("first_prompt", "continuation_prompt"):
+        value = get(name, getattr(base, name))
+        if not isinstance(value, str) or not value.strip():
+            raise ConfigError(
+                f"invalid {name} in {source}: a non-empty prompt is required"
+            )
     return Config(
         agent_provider=raw.get("agent_provider", base.agent_provider),
         terminal_driver=raw.get("terminal_driver", base.terminal_driver),
@@ -267,4 +285,6 @@ def validate(raw: dict, source: str = "configuration") -> Config:
         notification_window_seconds=get(
             "notification_window_seconds", base.notification_window_seconds
         ),
+        first_prompt=get("first_prompt", base.first_prompt),
+        continuation_prompt=get("continuation_prompt", base.continuation_prompt),
     )

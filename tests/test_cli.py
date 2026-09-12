@@ -61,7 +61,9 @@ class InitTest(unittest.TestCase):
     def test_init_preserves_existing_state_session(self):
         run_cli(self.root, "init")
         before = state.read(self.root).session_id
-        run_cli(self.root, "init")
+        code, _, err = run_cli(self.root, "init")
+        self.assertNotEqual(code, 0)
+        self.assertIn("init --force", err)
         self.assertEqual(state.read(self.root).session_id, before)
 
 
