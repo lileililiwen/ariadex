@@ -1,9 +1,9 @@
 """Tests for takeover, resume guards, auto resync, and mode-gated runs."""
 
 import io
-import shutil
 import tempfile
 import unittest
+import unittest.mock
 from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -11,6 +11,7 @@ from ariadex import cli, handoff, providers, state
 from ariadex.handoff import add_item, write_handoff
 from ariadex.runner import Runner
 from ariadex.terminal import FakeTerminalDriver
+from ariadex.tmux_setup import TmuxSetupError
 
 
 def run_cli(root: Path, *argv: str) -> tuple[int, str, str]:
@@ -125,7 +126,6 @@ class AutoTest(unittest.TestCase):
         self.assertIn("resync refused", err)
         self.assertEqual(state.read(self.root).mode, "MANUAL")
 
-    @unittest.skipIf(shutil.which("tmux"), "tmux present: auto would schedule live")
     def test_auto_resyncs_then_reports_missing_tmux(self):
         (self.root / "openspec" / "changes" / "demo").mkdir(parents=True)
         doc = handoff.empty_handoff()
@@ -134,7 +134,16 @@ class AutoTest(unittest.TestCase):
         add_item(doc, "issue", "real work", priority="high", item_id="u-1")
         write_handoff(self.root / ".ariadex" / "handoff.md", doc)
         run_cli(self.root, "takeover")
-        code, out, _ = run_cli(self.root, "--no-auto-install", "auto")
+        # Deterministic missing-tmux simulation: the real `require_tmux`
+        # raises on tmux-less hosts, but on tmux hosts `auto` would schedule
+        # live provider input. Forcing the failure exercises the same
+        # refusal path on every host with no live scheduling risk.
+        with unittest.mock.patch.object(
+            cli.tmux_setup_mod,
+            "require_tmux",
+            side_effect=TmuxSetupError("tmux executable `tmux` not found"),
+        ):
+            code, out, _ = run_cli(self.root, "--no-auto-install", "auto")
         self.assertNotEqual(code, 0)  # no tmux: loop cannot schedule
         self.assertEqual(state.read(self.root).mode, "AUTO")
         self.assertIn("resync", out)

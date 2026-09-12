@@ -398,8 +398,21 @@ class WidgetSmokeTest(unittest.TestCase):
         class FakeClient(companion.CompanionClient):
             def __init__(self):
                 self.project_dir = Path(".")
+                self.calls = []
 
             def refresh(self):
+                return live_state()
+
+            def pause(self):
+                self.calls.append("pause")
+                return live_state(mode="PAUSE")
+
+            def resume(self):
+                self.calls.append("resume")
+                return live_state()
+
+            def stop(self):
+                self.calls.append("stop")
                 return live_state()
 
         return companion.CompanionWindow(root, FakeClient(), FakeAdapter(), "Ctrl+Esc")
@@ -415,6 +428,21 @@ class WidgetSmokeTest(unittest.TestCase):
             self.skipTest(f"no display server: {exc}")
         try:
             window = self._make_window(root)
+
+            def find(name):
+                """Resolve a widget by its stable Tk name anywhere below root."""
+                found = []
+
+                def walk(widget):
+                    if widget.winfo_name() == name:
+                        found.append(widget)
+                    for child in widget.winfo_children():
+                        walk(child)
+
+                walk(root)
+                self.assertTrue(found, f"widget {name!r} not found")
+                return found[0]
+
             for widget_name in (
                 "play-button",
                 "pause-button",
@@ -423,13 +451,12 @@ class WidgetSmokeTest(unittest.TestCase):
                 "close-button",
                 "status-text",
             ):
-                found = root.nametowidget(f".!frame.!{widget_name}")
-                self.assertTrue(bool(found), widget_name)
+                self.assertTrue(bool(find(widget_name)), widget_name)
             # Collapsed by default; expand reveals extra controls.
             self.assertFalse(window.expanded)
             window._toggle_expanded()
             self.assertTrue(window.expanded)
-            root.nametowidget(".!frame.!frame2.!reconcile-button")
+            find("reconcile-button")
             window._toggle_expanded()
             self.assertFalse(window.expanded)
             # Actions render from daemon truth without raising.
