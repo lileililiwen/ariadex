@@ -3,11 +3,13 @@
 ## Current state
 
 - Implemented, verified, and archived: all five MVP changes, `tmux-auto-install`, all eight post-MVP changes, and all six audit fixes (`active-spec-discovery-and-archive-isolation` as `78f6375`, `bounded-run-completion-and-cycle-limit` as `6c83615`, `takeover-cancellation-and-scheduler-coordination` as `814f2d7`, `canonical-spec-and-doc-governance` as `c1373cd`, `real-provider-live-validation` as `a8080f7`, `repository-identity-security-and-release-readiness` as `40494ef`). All 25 canonical purposes under `openspec/specs` are complete.
-- Active follow-up queue: three planning changes were active (`release-publication-and-remote-verification` -> `reproducible-release-and-security-evidence` -> `quality-gate-hardening`); `quality-gate-hardening` is now implemented, verified, and archived as `2026-09-12-quality-gate-hardening` (commit `94ec660`). No implementation work has started in the remaining two packages.
+- Active follow-up queue: `release-publication-and-remote-verification` is in progress (part 1 implemented as `1ce242b`: canonical-remote gate in `release.py`, trusted-publish release workflow, remote/identity tests; change definitions tracked as `dc12136` so CI validates them); `reproducible-release-and-security-evidence` is still planning-only.
+- Repository verification (tasks 1.1–1.3, done): `origin` is `https://github.com/lileililiwen/ariadex.git` and the dry run resolves it to canonical (5/5 checks, exit 0); repo is public on `main` with issues enabled; CI run `34677997120` on branch `ci/release-publication` is fully green (all 6 unit legs, openspec strict, quality, pip-audit, live report, clean install).
 - Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 505 tests, 1 skip (live tmux lifecycle, `tmux` binary unavailable; stdlib only; runtime requires PyYAML). Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (16 tests, no publishing).
 - Quality gates: ruff check/format clean (S security family enforced with justified suppressions), mypy clean on `src/ariadex`, coverage 87% (gate 82 met) plus per-module floors via `scripts/check_coverage.py` (wired into CI quality job), `tests/test_workflows.py` pins or reviews every action reference; the remaining two planning changes validate strictly.
 - Canonical identity: repository `https://github.com/lileililiwen/ariadex`, security contact via GitHub issues (`.../ariadex/issues`); `pyproject.toml`, `SECURITY.md`, README, CHANGELOG, and the release workflow identify Ariadex-owned resources. Release dry run: `python -m ariadex.release --tag ariadex-v<version>` (fail-closed, publishes nothing).
 - Environment blockers: tmux absent on this host (live tmux round-trip skipped unless `--local-tmux` fetches it); `pip-audit` not installed here; no git remote is configured locally and the canonical repository's existence is unverified from here; PyPI upload stays manual until ownership and environment protection are confirmed.
+- BLOCKED (`release-publication-and-remote-verification` tasks 2.1–2.3, maintainer-gated, no publication claimed): (a) branch `main` has no protection — enable it with required CI checks before any release tag; (b) no `release` environment exists — create it with required reviewers (the workflow already references it and stays fail-closed until then); (c) PyPI trusted publisher not configured — add a pending publisher scoped to this repo + release workflow, then approve a tag `ariadex-v<version>` and verify the clean-index install check. Rollback: `pip index` yank the version on PyPI and delete the tag release on GitHub; never force-push `main`.
 
 ## Historical evidence
 
@@ -116,6 +118,14 @@ active-spec-discovery-and-archive-isolation
 ```
 
 All six packages are implemented, tested, verified, archived, and recorded in this file. Preserve the product boundary: no IDE, provider LLM API, or replacement Coding CLI.
+
+## Active follow-up sequence
+
+| Order | OpenSpec change | Finding covered | Depends on |
+| --- | --- | --- | --- |
+| 1 | `release-publication-and-remote-verification` | Canonical remote, actual CI execution, protected release, and PyPI publication remain unverified | existing packaging, CI, live evidence |
+| 2 | `reproducible-release-and-security-evidence` | Local tmux path, build bootstrap, and pip-audit evidence are not currently reproducible | 1 |
+| 3 | `quality-gate-hardening` | Critical-path coverage, skipped docs checks, and workflow supply-chain review remain weak | 1, 2 |
 
 ## Change selection rule
 
