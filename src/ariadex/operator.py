@@ -16,6 +16,7 @@ from pathlib import Path
 
 from . import config as config_mod
 from . import handoff as handoff_mod
+from . import logging as logging_mod
 from . import providers as providers_mod
 from . import state as state_mod
 from .runner import inspect_repository, select_next_action
@@ -185,6 +186,57 @@ def run_doctor(project_dir: Path) -> tuple[list[DoctorCheck], dict]:
         else:
             checks.append(
                 DoctorCheck("interruption", True, "no unreconciled cycle", True)
+            )
+        logs_detail = (
+            f"retention {cfg.log_retention_days}d, "
+            f"run-log cap {cfg.log_max_bytes}B, "
+            f"metrics cap {cfg.metrics_max_bytes}B"
+        )
+        logs_ok = (
+            cfg.log_retention_days >= 0
+            and cfg.log_max_bytes >= 0
+            and cfg.metrics_max_bytes >= 0
+        )
+        if logs_ok:
+            runs_dir = project_dir / ".ariadex" / logging_mod.RUNS_DIRNAME
+            metrics_path = project_dir / ".ariadex" / logging_mod.METRICS_FILENAME
+            problems: list[str] = []
+            import os as _os
+
+            for path in (runs_dir, metrics_path):
+                if path.exists():
+                    try:
+                        mode = _os.stat(path).st_mode & 0o777
+                        if path.is_dir() and mode & 0o077:
+                            problems.append(f"`{path.name}` is group/other-accessible")
+                        elif path.is_file() and mode & 0o077:
+                            problems.append(f"`{path.name}` is group/other-readable")
+                    except OSError:
+                        problems.append(f"`{path.name}` permissions unreadable")
+            if problems and _os.name != "nt":
+                checks.append(
+                    DoctorCheck(
+                        "logs",
+                        False,
+                        f"{logs_detail}; {'; '.join(problems)}",
+                        False,
+                    )
+                )
+            elif _os.name == "nt":
+                checks.append(
+                    DoctorCheck(
+                        "logs",
+                        True,
+                        f"{logs_detail}; POSIX permissions not enforced "
+                        "on this platform",
+                        False,
+                    )
+                )
+            else:
+                checks.append(DoctorCheck("logs", True, logs_detail, False))
+        else:
+            checks.append(
+                DoctorCheck("logs", False, f"invalid log bounds: {logs_detail}", False)
             )
     summary = {
         "ok": all(c.ok or not c.required for c in checks),
@@ -537,3 +589,64 @@ def persist_handoff_and_count(project_dir: Path, handoff: handoff_mod.Handoff) -
     stored.current_spec = handoff.current_spec
     stored.unresolved_count = handoff_mod.count_unresolved(handoff)
     state_mod.write(project_dir, stored)
+
+
+def prune_telemetry(project_dir: Path) -> logging_mod.RetentionReport:
+    """Apply the configured retention/size bounds to telemetry only.
+
+    Never touches handoff history, state, config, or lock files. Returns
+    the retention report so callers can state what was removed or retained.
+    """
+    cfg = config_mod.load(project_dir)
+    runs_dir = project_dir / ".ariadex" / logging_mod.RUNS_DIRNAME
+    metrics_path = project_dir / ".ariadex" / logging_mod.METRICS_FILENAME
+    return logging_mod.apply_retention(
+        runs_dir,
+        metrics_path,
+        retention_days=cfg.log_retention_days,
+        log_max_bytes=cfg.log_max_bytes,
+        metrics_max_bytes=cfg.metrics_max_bytes,
+    )
+
+
+def export_telemetry(
+    project_dir: Path, dest: Path, max_bytes: int = 52428800
+) -> logging_mod.ExportReport:
+    """Export telemetry (runs/ + metrics.jsonl) into `dest`, bounded.
+
+    Scope is telemetry only; handoff history stays in place and is never
+    claimed undone by an export or a later deletion.
+    """
+    runs_dir = project_dir / ".ariadex" / logging_mod.RUNS_DIRNAME
+    metrics_path = project_dir / ".ariadex" / logging_mod.METRICS_FILENAME
+    return logging_mod.export_logs(runs_dir, metrics_path, dest, max_bytes)
+
+
+def format_retention_text(report: logging_mod.RetentionReport) -> str:
+    lines = [
+        f"prune: removed {len(report.removed_logs)} log(s) "
+        f"({report.removed_bytes} bytes)",
+        f"retained: {report.retained_logs} log(s) ({report.retained_bytes} bytes)",
+        f"metrics: {report.metrics_removed_lines} line(s) trimmed, "
+        f"{report.metrics_retained_lines} retained"
+        + (" (rewritten)" if report.metrics_trimmed else ""),
+        "handoff history preserved",
+    ]
+    for path in report.removed_logs[:10]:
+        lines.append(f"  - removed {path}")
+    if len(report.removed_logs) > 10:
+        lines.append(f"  - ... and {len(report.removed_logs) - 10} more")
+    for note in report.notes:
+        lines.append(f"note: {note}")
+    return "\n".join(lines)
+
+
+def format_export_text(report: logging_mod.ExportReport) -> str:
+    lines = [
+        f"export: {report.files} file(s), {report.total_bytes} bytes "
+        f"-> {report.destination}",
+        "scope: telemetry only (runs/ + metrics.jsonl); handoff untouched",
+    ]
+    for note in report.notes:
+        lines.append(f"note: {note}")
+    return "\n".join(lines)

@@ -186,6 +186,35 @@ def build_parser() -> argparse.ArgumentParser:
     recover_parser.add_argument(
         "--json", action="store_true", help="emit stable JSON instead of text"
     )
+    prune_parser = sub.add_parser(
+        "prune-logs",
+        help="enforce retention/size bounds on run logs and metrics",
+    )
+    prune_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="confirm deletion without prompting (non-interactive use)",
+    )
+    prune_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
+    export_parser = sub.add_parser(
+        "export-logs",
+        help="copy telemetry (runs/ + metrics.jsonl) into a directory",
+    )
+    export_parser.add_argument(
+        "--out", required=True, help="destination directory for the export"
+    )
+    export_parser.add_argument(
+        "--max-bytes",
+        type=int,
+        default=52428800,
+        help="refuse exports above this size in bytes",
+    )
+    export_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
     evidence = sub.add_parser(
         "evidence",
         help="run opt-in live runtime evidence (passed/skipped/blocked)",
@@ -476,7 +505,9 @@ def cmd_reprioritize(
     )
 
 
-def _confirm_scheduling(confirmed: bool) -> bool:
+def _confirm_scheduling(
+    confirmed: bool, prompt: str = "Proceed with scheduling? [y/N] "
+) -> bool:
     """Require explicit approval in interactive use unless --yes is given.
 
     Non-interactive callers (tests, CI, pipes) proceed without prompting;
@@ -492,7 +523,7 @@ def _confirm_scheduling(confirmed: bool) -> bool:
     if not interactive:
         return True
     try:
-        answer = input("Proceed with scheduling? [y/N] ").strip().lower()
+        answer = input(prompt).strip().lower()
     except EOFError:
         print("aborted: confirmation required; rerun with --yes", file=sys.stderr)
         return False
@@ -520,6 +551,60 @@ def cmd_recover(project_dir: Path, as_json: bool = False) -> int:
         print(concurrency_mod.format_recovery_text(report))
     if report.lock_state == "active-refused":
         return EXIT_ERROR
+    return EXIT_OK
+
+
+def cmd_prune_logs(
+    project_dir: Path, confirmed: bool = False, as_json: bool = False
+) -> int:
+    """Enforce retention/size bounds. Telemetry only; handoff untouched."""
+    import json as json_mod
+
+    if _load_config(project_dir) is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    if not _confirm_scheduling(confirmed, "Delete expired telemetry? [y/N] "):
+        return EXIT_ERROR
+    try:
+        report = operator_mod.prune_telemetry(project_dir)
+    except (config_mod.ConfigError, OSError) as exc:
+        print(f"error: prune refused: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if as_json:
+        print(json_mod.dumps(report.to_dict(), sort_keys=True, indent=2))
+    else:
+        print(operator_mod.format_retention_text(report))
+    return EXIT_OK
+
+
+def cmd_export_logs(
+    project_dir: Path,
+    out: str,
+    max_bytes: int = 52428800,
+    as_json: bool = False,
+) -> int:
+    """Bounded telemetry export. Copies runs/ + metrics.jsonl; never moves."""
+    import json as json_mod
+
+    if _load_config(project_dir) is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    if max_bytes < 0:
+        print("error: --max-bytes must be >= 0", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        report = operator_mod.export_telemetry(
+            project_dir, Path(out), max_bytes=max_bytes
+        )
+    except OSError as exc:
+        print(f"error: export refused: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if as_json:
+        print(json_mod.dumps(report.to_dict(), sort_keys=True, indent=2))
+    else:
+        print(operator_mod.format_export_text(report))
     return EXIT_OK
 
 
@@ -924,6 +1009,17 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "recover": lambda: cmd_recover(
             project_dir, as_json=getattr(args, "json", False)
+        ),
+        "prune-logs": lambda: cmd_prune_logs(
+            project_dir,
+            confirmed=getattr(args, "yes", False),
+            as_json=getattr(args, "json", False),
+        ),
+        "export-logs": lambda: cmd_export_logs(
+            project_dir,
+            out=args.out,
+            max_bytes=getattr(args, "max_bytes", 52428800),
+            as_json=getattr(args, "json", False),
         ),
         "evidence": lambda: cmd_evidence(
             project_dir,

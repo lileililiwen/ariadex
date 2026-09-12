@@ -13,6 +13,7 @@ then persist as unresolved or blocked.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 from pathlib import Path
 
@@ -260,6 +261,7 @@ class Runner:
         logging_mod.append_metrics(
             self.metrics_path,
             {
+                "schema_version": logging_mod.METRICS_SCHEMA_VERSION,
                 "session": record.session_id,
                 "spec": record.spec,
                 "action": result.action,
@@ -270,9 +272,20 @@ class Runner:
                 "validation_result": ctx["validation"],
                 "reset": ctx["reset"],
                 "retry_count": ctx["retries"],
+                "redactions": record.redaction_count,
                 "usage": usage,
             },
         )
+        # Enforce telemetry bounds after every cycle. Best-effort: a
+        # pruning failure must never fail the cycle itself.
+        with contextlib.suppress(Exception):
+            logging_mod.apply_retention(
+                self.runs_dir,
+                self.metrics_path,
+                retention_days=self.config.log_retention_days,
+                log_max_bytes=self.config.log_max_bytes,
+                metrics_max_bytes=self.config.metrics_max_bytes,
+            )
 
     def _cycle(self) -> CycleResult:
         try:

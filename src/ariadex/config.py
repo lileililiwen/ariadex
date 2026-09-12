@@ -41,6 +41,9 @@ class Config:
     verification_commands: list = dataclasses.field(default_factory=list)
     retry_limit: int = 2
     blocker_policy: str = "stop-on-blocker"
+    log_retention_days: int = 30
+    log_max_bytes: int = 10485760
+    metrics_max_bytes: int = 5242880
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -80,6 +83,13 @@ retry_limit: 2
 # How blockers are recorded: stop-on-blocker persists the blocker and
 # stops new scheduling; record-and-continue persists it and continues.
 blocker_policy: stop-on-blocker
+# Local telemetry bounds: run logs under .ariadex/runs/ and metrics.jsonl.
+# log_retention_days removes telemetry older than N days (0 keeps everything).
+# log_max_bytes caps total run-log bytes; metrics_max_bytes caps the metrics
+# file (0 disables that cap). Pruning never touches handoff history.
+log_retention_days: 30
+log_max_bytes: 10485760
+metrics_max_bytes: 5242880
 """
 
 
@@ -183,6 +193,12 @@ def validate(raw: dict, source: str = "configuration") -> Config:
             raise ConfigError(
                 f"invalid {name} in {source}: a non-empty path or name is required"
             )
+    for name in ("log_retention_days", "log_max_bytes", "metrics_max_bytes"):
+        value = get(name, getattr(base, name))
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ConfigError(f"invalid {name} in {source}: expected an integer >= 0")
+        if value < 0:
+            raise ConfigError(f"invalid {name} in {source}: expected an integer >= 0")
     return Config(
         agent_provider=raw.get("agent_provider", base.agent_provider),
         terminal_driver=raw.get("terminal_driver", base.terminal_driver),
@@ -193,4 +209,7 @@ def validate(raw: dict, source: str = "configuration") -> Config:
         verification_commands=list(verification_commands),
         retry_limit=retry_limit,
         blocker_policy=blocker_policy,
+        log_retention_days=get("log_retention_days", base.log_retention_days),
+        log_max_bytes=get("log_max_bytes", base.log_max_bytes),
+        metrics_max_bytes=get("metrics_max_bytes", base.metrics_max_bytes),
     )
