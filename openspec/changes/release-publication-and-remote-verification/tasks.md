@@ -2,7 +2,7 @@
 
 - [x] 1.1 Add and verify the canonical `origin` remote.
 - [x] 1.2 Verify default branch, required status checks, pull-request protection, and release-environment reviewers.
-- [ ] 1.3 Run CI on the remote and record the workflow URLs and outcomes.
+- [x] 1.3 Run CI on the remote and record the workflow URLs and outcomes.
 
 ## 2. Release verification
 
