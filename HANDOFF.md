@@ -2,8 +2,8 @@
 
 ## Current state
 
-- Implemented, verified, and archived: all five MVP changes, `tmux-auto-install`, all eight post-MVP changes, all six audit fixes (`active-spec-discovery-and-archive-isolation` as `78f6375`, `bounded-run-completion-and-cycle-limit` as `6c83615`, `takeover-cancellation-and-scheduler-coordination` as `814f2d7`, `canonical-spec-and-doc-governance` as `c1373cd`, `real-provider-live-validation` as `a8080f7`, `repository-identity-security-and-release-readiness` as `40494ef`), and all three follow-up changes (`release-publication-and-remote-verification`, `reproducible-release-and-security-evidence`, `quality-gate-hardening`). All 28 canonical purposes under `openspec/specs` are complete. `ariadex 0.1.0` is published on PyPI. No active changes remain.
-- Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 518 tests, 1 skip (live tmux lifecycle, `tmux` binary unavailable; stdlib only; runtime requires PyYAML). Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (no publishing).
+- Implemented, verified, and archived: all five MVP changes, `tmux-auto-install`, all eight post-MVP changes, all six audit fixes (`active-spec-discovery-and-archive-isolation` as `78f6375`, `bounded-run-completion-and-cycle-limit` as `6c83615`, `takeover-cancellation-and-scheduler-coordination` as `814f2d7`, `canonical-spec-and-doc-governance` as `c1373cd`, `real-provider-live-validation` as `a8080f7`, `repository-identity-security-and-release-readiness` as `40494ef`), all three follow-up changes (`release-publication-and-remote-verification`, `reproducible-release-and-security-evidence`, `quality-gate-hardening`), and the first daemon UX change (`daemon-first-runtime-and-simple-cli`, see Verification evidence below). All 29 canonical purposes under `openspec/specs` are complete. `ariadex 0.1.0` is published on PyPI. Two daemon UX changes remain active and planning-only.
+- Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 555 tests, 1 skip (live tmux lifecycle, `tmux` binary unavailable; stdlib only; runtime requires PyYAML). Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (no publishing).
 - Quality gates: ruff check/format clean (S security family enforced with justified suppressions), mypy clean on `src/ariadex`, coverage 87% (gate 82 met) plus per-module floors via `scripts/check_coverage.py` (wired into CI quality job), `tests/test_workflows.py` pins or reviews every action reference; the remaining two planning changes validate strictly.
 - Canonical identity: repository `https://github.com/lileililiwen/ariadex`, security contact via GitHub issues (`.../ariadex/issues`); `pyproject.toml`, `SECURITY.md`, README, CHANGELOG, and the release workflow identify Ariadex-owned resources. Release dry run: `python -m ariadex.release --tag ariadex-v<version>` (fail-closed, publishes nothing).
 - Environment: tmux absent on this host (use `--local-tmux` or `--tmux-bin` for live evidence); `pip-audit`/`build` installed only in CI or a dev venv. Canonical remote `origin` is `https://github.com/lileililiwen/ariadex.git`; releases publish from tags via the reviewer-gated `release` environment.
@@ -91,7 +91,12 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active changes remain — both MVP changes are archived and `ariadex 0.1.0` is on PyPI. Next is a documentation refresh pass (README/ROADMAP/HANDOFF consistency) before any V2 capability work. Do not start V2 capabilities until the docs pass is complete.
+Implement only the earliest active change after approval:
+
+1. `human-yield-hotkey-and-floating-control` (depends on the archived daemon runtime change)
+2. `local-install-and-user-deployment` (depends on 1 and the archived daemon runtime change)
+
+The daemon runtime change is implemented, verified, and archived (see Verification evidence below). The remaining two are planning-only in this handoff. No widget, hotkey, or user-service implementation is claimed yet.
 
 ## Audit remediation sequence
 
@@ -204,3 +209,12 @@ Point-in-time tool output archived with the changes above; counts below are supe
 - Security (3.1/3.2): pinned `pip-audit==2.10.1` in a network venv: `No known vulnerabilities found`. Documented limitation: pip-audit has no offline mode; unaudited trees must not claim clean audits.
 - Reproducible env + offline path (1.1/1.3) documented in README Development: online pinned path, `--no-isolation` cached build, `--tmux-bin` offline evidence, and limitations. Corrected a false `pip-audit --local` offline claim before committing (that flag only scopes to local deps, still queries OSV online).
 - Suite: 518 tests OK (skipped=1), coverage floors pass, openspec strict green.
+
+## Verification evidence
+
+- `daemon-first-runtime-and-simple-cli` implemented, verified, and archived as `2026-09-12-daemon-first-runtime-and-simple-cli`.
+- New module `src/ariadex/daemon.py`: `DaemonRecord` lifecycle (`.ariadex/daemon.json`), project-scoped Unix socket (`.ariadex/daemon.sock`, owner-only, safety-checked), `ControlTransport` interface with `UnixSocketTransport`, newline-delimited JSON typed requests (`status`, `pause`, `resume`, `stop`, `wake`; unknown/malformed/oversize rejected without state change), `handle_request` over durable state (pause transitions + cancellation, resume resyncs to MANUAL, stop marks stopping; status/wake read-only; sends no provider input), `run_daemon` loop holding the ownership lease and delegating to the existing `Runner` (AUTO polls, other modes observe), bounded shutdown (socket removed, record `stopped`, lease released, work/evidence kept for `recover`).
+- `cli.py`: new `start` (idempotent duplicate report, live-lease refusal, stale recovery via `recover_project`, absolute-PYTHONPATH spawn, bounded readiness) and `stop` (idempotent, fail-closed) with `--json`; `status`/`pause`/`resume` daemon-mediated when a healthy daemon answers, otherwise local with identical semantics; `pause`/`resume` gain `--json`; new `admin` namespace forwarding all advanced commands to the same handlers (top-level aliases unchanged, nested `admin admin` refused).
+- Tests: `tests/test_daemon.py` (37 tests: request schemas/bounds, read-only status/wake, unknown-request no-op, pause cancellation + no-input proof, resume resync, socket safety incl. permissions, live socket round-trips, record liveness, duplicate-start no-second-scheduler, live-lease refusal, full start/stop cycle with real background daemon, bounded `run_daemon` lease release, admin mirroring/rejection).
+- Live proof on this host: real `start` → duplicate `start` (same pid, no second scheduler) → IPC `pause` → `status --json` → `stop` → local fallback `status`, all exit 0 with no provider input.
+- Full suite `PYTHONPATH=src python3 -m unittest discover -s tests` reports 555 tests OK (1 skip: live tmux lifecycle); ruff check/format clean, mypy clean on `src/ariadex`, coverage 86% (gate 82 met) with new `daemon.py` floor 78 wired into `scripts/check_coverage.py`, `openspec validate --changes --strict --no-interactive` 2 passed after archiving (remaining planning changes).
