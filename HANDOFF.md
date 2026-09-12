@@ -98,6 +98,18 @@ change before implementation.
 
 ## Latest verification evidence
 
+- `2026-09-13-managed-runtime-upsert-and-minimal-cli` was implemented and
+  archived in commit `2394e50`. `widget_runtime.py` durably records widget
+  ownership and verifies PID/start-time/token identity; live `start` reuses a
+  healthy widget or repairs only an unhealthy one. The CLI help surface now
+  presents `init`, `start`, and `admin`, while legacy lifecycle entrypoints
+  remain hidden compatibility aliases. Full verification:
+  `PYTHONPATH=src python3 -m unittest discover -s tests` — 894 tests passed,
+  0 failed; `openspec validate --changes --strict --no-interactive` — no active
+  changes; `openspec validate --specs --strict --no-interactive` — 47 passed;
+  Ruff and `git diff --check` passed. Real-provider lifecycle evidence was not
+  rerun for this change; existing provider evidence remains historical.
+
 - `robot-widget-runtime` was archived as `2026-09-12-robot-widget-runtime`
   (`dd0a8d4`). Approval/confirmation screens remain a non-terminal `WAITING`
   state; `--attach` observes an already-started conversation without sending
