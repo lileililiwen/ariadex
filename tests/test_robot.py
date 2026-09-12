@@ -83,6 +83,14 @@ class ClassifyTest(unittest.TestCase):
             "working",
         )
 
+    def test_stale_approval_in_scrollback_does_not_block_current_ready(self) -> None:
+        old = "Approval required: allow command? [y/n]"
+        current = "Welcome back\nAsk anything · tab agents\n> "
+        self.assertEqual(
+            robot_mod.classify_capture("opencode", old + "\n" * 30 + current),
+            "finished",
+        )
+
     def test_single_done_word_is_never_finished(self) -> None:
         self.assertEqual(
             robot_mod.classify_capture("opencode", "all done, bye"), "unknown"

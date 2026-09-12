@@ -149,17 +149,18 @@ ariadex watch --session agent --provider opencode \
   --initial-prompt "Please implement the active spec."
 ```
 
-Use `--widget` for the independent desktop robot window:
+`ariadex watch` opens the independent desktop robot window by default. Use
+`--no-widget` for terminal-only diagnostics:
 
 ```bash
-ariadex watch --widget --session agent --provider opencode \
+ariadex watch --session agent --provider opencode \
   --initial-prompt "Read HANDOFF.md and finish the remaining work."
 ```
 
 If you already typed the first request inside the provider, use attach mode:
 
 ```bash
-ariadex watch --widget --attach --session agent --provider opencode
+ariadex watch --attach --session agent --provider opencode
 ```
 
 Attach mode never sends an initial prompt. It only watches the current

@@ -103,6 +103,7 @@ CLASS_FINISHED = "finished"
 CLASS_APPROVAL = "approval"
 CLASS_ERROR = "error"
 CLASS_UNKNOWN = "unknown"
+CLASSIFICATION_TAIL_LINES = 16
 
 
 class RobotError(Exception):
@@ -116,7 +117,10 @@ def classify_capture(provider: str, text: str) -> str:
     marker, and busy markers win over a stale ready prompt. Unknown
     surfaces (including unknown providers) never classify as finished.
     """
-    lowered = (text or "").lower()
+    # Pane capture includes scrollback. Only the current tail can describe
+    # the provider's present surface; old approvals/errors must not block a
+    # later ready prompt forever.
+    lowered = "\n".join((text or "").splitlines()[-CLASSIFICATION_TAIL_LINES:]).lower()
     if any(marker in lowered for marker in APPROVAL_MARKERS):
         return CLASS_APPROVAL
     if any(marker in lowered for marker in ERROR_MARKERS):

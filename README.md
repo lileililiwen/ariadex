@@ -270,12 +270,12 @@ ariadex watch --session agent --provider opencode \
   --initial-prompt "Please implement the active spec."
 ```
 
-Add `--widget` to show the independent always-on-top robot window at the
-middle-right while switching between terminals, tmux, the editor, and the
-provider:
+`ariadex watch` opens the independent always-on-top robot window at the
+middle-right by default while switching between terminals, tmux, the editor,
+and the provider. Use `--no-widget` only for terminal-only diagnostics:
 
 ```bash
-ariadex watch --widget --session agent --provider opencode \
+ariadex watch --session agent --provider opencode \
   --initial-prompt "Read HANDOFF.md and finish the remaining work."
 ```
 
@@ -290,8 +290,8 @@ ariadex watch --widget --attach \
 Full flags: `--session`, `--provider`, `--initial-prompt`,
 `--continuation-prompt`, `--finished-change` (tasks.md gate),
 `--debounce` (default 3), `--poll-interval` (default 5.0s),
-`--max-polls` (0 = unbounded), `--list-sessions`, `--create`, `--attach`, and
-`--widget`
+`--max-polls` (0 = unbounded), `--list-sessions`, `--create`, `--attach`,
+`--widget`, and `--no-widget`
 (explicit fallback only).
 
 The robot waits for the provider's stable input-ready signal (debounced,

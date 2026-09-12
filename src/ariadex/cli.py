@@ -281,7 +281,14 @@ def build_parser() -> argparse.ArgumentParser:
     watch_parser.add_argument(
         "--widget",
         action="store_true",
-        help="show the independent floating robot widget",
+        default=True,
+        help="show the independent floating robot widget (default)",
+    )
+    watch_parser.add_argument(
+        "--no-widget",
+        dest="widget",
+        action="store_false",
+        help="run in the terminal without opening the robot widget",
     )
     sub.add_parser(
         "takeover",
