@@ -39,6 +39,11 @@ REVIEWED_MUTABLE_REFS = {
         "major-version tag of the first-party artifact uploader; only "
         "uploads already-verified build outputs."
     ),
+    "astral-sh/setup-uv@v6": (
+        "major-version tag of the official uv installer; it only provisions "
+        "the pinned project environment from uv.lock. Full SHA pinning is "
+        "deferred until automated updates are configured."
+    ),
     "pypa/gh-action-pypi-publish@release/v1": (
         "release-branch tag of the official PyPI publisher; the step runs "
         "only after every gate in the tag-triggered, environment-protected "
@@ -115,6 +120,20 @@ class WorkflowStructureTest(unittest.TestCase):
         )
         for gate in ("ruff check", "ruff format", "mypy", "coverage"):
             self.assertIn(gate, quality_runs, f"quality gate `{gate}` missing")
+
+    def test_quality_environment_is_uv_locked_dev_environment(self):
+        quality = self.workflows["ci.yml"]["jobs"]["quality"]
+        commands = "\n".join(str(step.get("run", "")) for step in quality["steps"])
+        self.assertIn("uv sync --frozen --extra dev", commands)
+
+    def test_security_audit_uses_declared_dev_dependency(self):
+        security = self.workflows["ci.yml"]["jobs"]["security"]
+        commands = "\n".join(str(step.get("run", "")) for step in security["steps"])
+        self.assertIn("uv sync --frozen --extra dev", commands)
+        self.assertIn("uv run pip-audit --desc=on .", commands)
+
+    def test_uv_lock_is_committed(self):
+        self.assertTrue((REPO_ROOT / "uv.lock").is_file())
 
     def test_release_is_tag_gated_and_protected(self):
         release = self.workflows["release.yml"]

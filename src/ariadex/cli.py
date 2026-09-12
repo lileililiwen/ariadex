@@ -19,6 +19,7 @@ from . import config as config_mod
 from . import control as control_mod
 from . import daemon as daemon_mod
 from . import deploy as deploy_mod
+from . import dev_setup as dev_setup_mod
 from . import handoff as handoff_mod
 from . import live_evidence as live_evidence_mod
 from . import logging as logging_mod
@@ -391,6 +392,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="explicit tmux binary to report (same value evidence would use)",
     )
+    dev_parser = sub.add_parser("dev", help="prepare the development environment")
+    dev_sub = dev_parser.add_subparsers(dest="dev_command", required=True)
+    setup_parser = dev_sub.add_parser(
+        "setup", help="install/detect uv and sync the locked dev toolchain"
+    )
+    setup_parser.add_argument("--yes", "-y", action="store_true")
+    setup_parser.add_argument("--no-dependency-install", action="store_true")
+    setup_parser.add_argument("--json", action="store_true")
     return parser
 
 
@@ -554,6 +563,36 @@ def cmd_doctor(project_dir: Path, as_json: bool = False) -> int:
     else:
         print(operator_mod.format_doctor_text(checks))
     return EXIT_OK if summary["ok"] else EXIT_ERROR
+
+
+def cmd_dev_setup(
+    project_dir: Path,
+    *,
+    confirmed: bool = False,
+    allow_install: bool = True,
+    as_json: bool = False,
+) -> int:
+    """Prepare the locked development toolchain, separate from runtime install."""
+    import json as json_mod
+
+    if allow_install and dev_setup_mod.find_uv() is None and not confirmed:
+        confirmed = _confirm_dependency(
+            False,
+            "Install uv user-scoped and prepare the development environment? [y/N] ",
+        )
+    result = dev_setup_mod.setup(
+        project_dir,
+        confirmed=confirmed,
+        allow_install=allow_install,
+    )
+    if as_json:
+        print(json_mod.dumps(result.to_dict(), sort_keys=True, indent=2))
+    else:
+        print(f"development environment: {result.state}")
+        print(result.detail)
+        if result.uv:
+            print(f"uv: {result.uv}")
+    return EXIT_OK if result.state == "ready" else EXIT_ERROR
 
 
 def cmd_preview(project_dir: Path, as_json: bool = False) -> int:
@@ -1842,6 +1881,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "preflight": lambda: preflight_mod.main(
             ["--tmux-bin", args.tmux_bin] if getattr(args, "tmux_bin", None) else []
+        ),
+        "dev": lambda: (
+            cmd_dev_setup(
+                project_dir,
+                confirmed=getattr(args, "yes", False),
+                allow_install=not getattr(args, "no_dependency_install", False),
+                as_json=getattr(args, "json", False),
+            )
+            if getattr(args, "dev_command", None) == "setup"
+            else EXIT_ERROR
         ),
     }
     return handlers[args.command]()

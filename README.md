@@ -313,7 +313,8 @@ instead of silently substituting another spec.
 ## Development
 
 ```bash
-pip install -e ".[dev]"                              # pinned QA toolchain
+ariadex dev setup                                    # install uv and sync the locked QA toolchain
+uv sync --extra dev                                  # equivalent after uv is available
 ariadex preflight                                    # paths/versions: python, package, pip-audit, build, providers, tmux
 python -m unittest discover -s tests                 # 702 tests, stdlib only
 openspec validate --changes --strict --no-interactive
@@ -321,11 +322,12 @@ ruff check src tests
 ruff format --check src tests
 mypy src/ariadex
 coverage run -m unittest discover -s tests && coverage report  # gate: 82%
-pip-audit --desc=on .
+uv run pip-audit --desc=on .
 python -m build                                      # sdist + wheel in dist/
 ```
 
-Every CI command above runs locally with the pinned `dev` extra. The
+Every CI command above runs locally with the committed `uv.lock` and pinned
+`dev` extra. The
 coverage threshold is the measured baseline: raise it, never lower it.
 Bandit/pylint-style rules are intentionally out of the ruff set (they
 demand behavior-affecting changes; deferred to a hardening pass).
@@ -340,7 +342,7 @@ requirements, `pip-audit` queries the vulnerability database,
 instead of downloading:
 
 ```bash
-pip install -e ".[dev]"                  # once, while online (warms pip cache)
+ariadex dev setup                         # once, while online (warms uv cache)
 python -m build --no-isolation           # offline build; needs `build` + backends already installed
 ariadex evidence --tmux-bin PATH         # offline tmux evidence with a supplied binary
 ```

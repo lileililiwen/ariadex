@@ -32,28 +32,29 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+      - uses: astral-sh/setup-uv@v6
       - run: npm install -g @fission-ai/openspec@1.6.0
-      - run: pip install -e ".[dev]" "build==1.6.1"
+      - run: uv sync --frozen --extra dev
       - name: tag matches package version
         run: |
-          test "${GITHUB_REF_NAME}" = "ariadex-v$(python -c 'import ariadex; print(ariadex.__version__)')"
-      - run: python -m unittest discover -s tests
+          test "${GITHUB_REF_NAME}" = "ariadex-v$(uv run python -c 'import ariadex; print(ariadex.__version__)')"
+      - run: uv run python -m unittest discover -s tests
       - run: openspec validate --changes --strict --no-interactive
-      - run: ruff check src tests
-      - run: ruff format --check src tests
-      - run: mypy src/ariadex
-      - run: coverage run -m unittest discover -s tests
-      - run: coverage report
-      - run: pip-audit --desc=on .
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy src/ariadex
+      - run: uv run coverage run -m unittest discover -s tests
+      - run: uv run coverage report
+      - run: uv run pip-audit --desc=on .
       - name: ensure tmux and a provider CLI
         run: |
           command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
           command -v opencode || npm install -g opencode-ai@1
       - name: live evidence release gate (blocked and zero-provider fails)
         run: python -m ariadex evidence --release-gate --timeout 180
-      - run: python -m build
+      - run: uv run python -m build
       - name: release readiness dry run (identity, remote, tag, artifacts, unused version)
-        run: python -m ariadex.release --tag "${GITHUB_REF_NAME}" --check-pypi
+        run: uv run python -m ariadex.release --tag "${GITHUB_REF_NAME}" --check-pypi
       - name: verify artifacts and record hashes
         run: |
           ls dist/ariadex-*.tar.gz dist/ariadex-*-py3-none-any.whl
@@ -74,20 +75,20 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
       - name: verify installation from the package index
         run: |
-          VERSION="$(python -c 'import ariadex; print(ariadex.__version__)')"
+          VERSION="$(uv run python -c 'import ariadex; print(ariadex.__version__)')"
           python -m venv /tmp/pypi-venv
           /tmp/pypi-venv/bin/pip install "ariadex==${VERSION}"
           # Exact comparison: the index must serve the tagged version.
           # Any other resolved version fails the release instead of passing.
           REPORTED="$(/tmp/pypi-venv/bin/ariadex --version)"
-          python -m ariadex.release --tag "${GITHUB_REF_NAME}" --verify-published "${REPORTED}"
+          uv run python -m ariadex.release --tag "${GITHUB_REF_NAME}" --verify-published "${REPORTED}"
           mkdir -p /tmp/ariadex-pypi-smoke && cd /tmp/ariadex-pypi-smoke
           rm -rf .ariadex
           /tmp/pypi-venv/bin/ariadex init
           /tmp/pypi-venv/bin/ariadex status
       - name: release summary evidence
         run: |
-          VERSION="$(python -c 'import ariadex; print(ariadex.__version__)')"
+          VERSION="$(uv run python -c 'import ariadex; print(ariadex.__version__)')"
           {
             echo "## Release ${GITHUB_REF_NAME}"
             echo ""

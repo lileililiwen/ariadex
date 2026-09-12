@@ -50,13 +50,14 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]"
-      - run: ruff check src tests
-      - run: ruff format --check src tests
-      - run: mypy src/ariadex
-      - run: coverage run -m unittest discover -s tests
-      - run: coverage report
-      - run: python3 scripts/check_coverage.py
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy src/ariadex
+      - run: uv run coverage run -m unittest discover -s tests
+      - run: uv run coverage report
+      - run: uv run python3 scripts/check_coverage.py
 
   security:
     name: security (pip-audit)
@@ -66,8 +67,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install "pip-audit==2.10.1"
-      - run: pip-audit --desc=on .
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --extra dev
+      - run: uv run pip-audit --desc=on .
 
   live:
     name: live evidence (report mode)

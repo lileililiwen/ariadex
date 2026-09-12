@@ -86,6 +86,14 @@ committed (see `HANDOFF.md` for per-change evidence):
 
 The terminal workflow remains supported alongside the daemon UX.
 
+## Complete: development environment bootstrap
+
+`dev-environment-bootstrap` makes development setup one explicit command,
+automatically provisions `uv` through a safe user-scoped path, syncs the
+committed lockfile, verifies `pip-audit`, and uses the same frozen environment
+in CI. Runtime installation remains separate from development-tool
+installation.
+
 ## Complete: companion prerequisites and release alignment
 
 Two follow-up changes are implemented, tested, archived, and

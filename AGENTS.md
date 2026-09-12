@@ -31,6 +31,11 @@ Incomplete or blocked work must not be claimed complete. Record the exact failed
 
 Use the project’s actual build and test commands once established. Every change must pass relevant tests and:
 
+For a fresh development checkout, run `ariadex dev setup` first. It
+user-scoped installs `uv` only with confirmation, then performs the frozen
+development sync and verifies `pip-audit`; ordinary runtime installation does
+not install development tools.
+
 ```bash
 openspec validate --changes --strict --no-interactive
 ```
