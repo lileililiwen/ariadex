@@ -299,7 +299,17 @@ class StartGuardTest(unittest.TestCase):
 
     def test_start_passes_guard_once_initialized(self):
         self.assertEqual(cli.cmd_init(self.root, read_answer=scripted("", "", "")), 0)
+        report = cli.prerequisites_mod.CoordinatorReport(
+            results=[
+                cli.prerequisites_mod.PrerequisiteResult("runtime", "present", "ok"),
+                cli.prerequisites_mod.PrerequisiteResult("provider", "present", "ok"),
+                cli.prerequisites_mod.PrerequisiteResult("tmux", "present", "ok"),
+                cli.prerequisites_mod.PrerequisiteResult("widget", "present", "ok"),
+            ],
+            ready=True,
+        )
         with (
+            mock.patch.object(cli.prerequisites_mod, "coordinate", return_value=report),
             mock.patch("ariadex.cli.daemon_mod.read_record", return_value=None),
             mock.patch(
                 "ariadex.cli.concurrency_mod.diagnose",

@@ -240,7 +240,7 @@ desktop session, Tkinter presence, and effective hotkey.
 A typical session:
 
 ```bash
-./ariadex start         # start once; duplicate starts report the owner
+./ariadex start         # managed workflow; duplicate starts report the owner
 ./ariadex pause         # no new scheduling; in-flight work is cancelled safely
 ./ariadex resume        # resync, back to manual control
 ./ariadex stop          # bounded graceful shutdown; state left for `recover`
@@ -254,7 +254,9 @@ A typical session:
 
 ## Robot supervisor
 
-`ariadex watch` supervises an already-open coding-agent conversation in a
+`ariadex start` is the normal path: it owns the session, prompts, widget,
+and supervision. `ariadex watch` remains for recovery and expert use — it
+supervises an already-open coding-agent conversation in a
 user-selected existing tmux session (OpenCode, Codex, or CodeBuddy) and
 continues durable OpenSpec work across conversations. It sends no input
 while the agent works, never calls a provider LLM API, and never creates
@@ -365,8 +367,17 @@ The normal lifecycle is:
    `HANDOFF.md`), and state files without overwriting existing files.
    Plain `init` refuses when the project is already initialized;
    `init --force` confirms, then removes only `.ariadex/` and reinitializes.
-2. `ariadex start` starts one resident daemon for the project. The daemon does
-   not open a visible terminal; it owns the background scheduling loop.
+2. `ariadex start` runs the managed provider workflow: it prepares
+   prerequisites (tmux is installed automatically when a supported package
+   manager exists), starts one resident daemon, launches the configured
+   provider in a private project-scoped tmux session through its declared
+   adapter command, opens the independent widget when the desktop supports
+   it, attaches your terminal to the provider session, sends the configured
+   first prompt once the provider is ready, and supervises verified
+   continuation until the queue is empty. `--agent`, `--first-prompt`, and
+   `--continuation-prompt` override the configuration for one run; session
+   names and watcher options are never user inputs. A duplicate `start`
+   reports the live owner and creates nothing.
 3. In `AUTO`, the daemon selects the next durable action, starts or connects
    to the configured provider through tmux, sends the provider prompt,
    captures the result, runs every configured verifier, and persists the
@@ -374,8 +385,11 @@ The normal lifecycle is:
 4. A verified cycle can advance the current spec, resolve an unresolved item,
    or start the next eligible spec. A failed or uncertain cycle is recorded
    with its reason and is never silently discarded.
-5. The daemon stops when the queue is idle/complete, a blocker needs human
-   attention, the cycle limit is reached, or the operator changes the mode.
+5. The managed workflow stops the provider session, widget, and daemon when
+   the queue is empty; when the provider exits normally it reconciles the
+   stop without claiming completion. The daemon also stops when a blocker
+   needs human attention, the cycle limit is reached, or the operator
+   changes the mode.
 
 `AUTO` means Ariadex may schedule and send provider input through its
 configured agent adapter and tmux session. Provider text alone never proves
@@ -413,7 +427,8 @@ Spec -> AI Session -> Handoff -> Fresh Session -> Next Spec
 Conversation is temporary state. The repository, specs, and handoff are
 durable state:
 
-- `.ariadex/config.yaml` — agent provider, terminal driver, context
+- `.ariadex/config.yaml` — agent provider, first/continuation prompts,
+  terminal driver, context
   strategy, reset mode, spec directory, handoff path, verification
   commands, retry limit, blocker policy.
 - `HANDOFF.md` by default — current spec, completed work, unresolved issues
@@ -443,7 +458,7 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | Command            | Effect                                                        |
 | ------------------ | ------------------------------------------------------------- |
 | `init [--force] [--yes]` | First-run provider/prompt setup; refuses when initialized |
-| `start [--json]`   | Start the resident daemon (idempotent; refuses live leases)    |
+| `start [--agent A] [--first-prompt T] [--continuation-prompt T] [--json]` | Managed workflow: prerequisites, daemon, provider session, widget, attach, supervision |
 | `stop [--json]`    | Bounded graceful shutdown; durable state kept for `recover`    |
 | `widget [--project PATH] [--yes]` | Initialize, prepare, start, and open the middle-right widget |
 | `install [--yes] [--no-dependency-install] [--json]` | User-scoped launchers + service integration (no root) |

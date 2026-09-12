@@ -26,6 +26,7 @@ from . import logging as logging_mod
 from . import observability as observability_mod
 from . import operator as operator_mod
 from . import preflight as preflight_mod
+from . import prerequisites as prerequisites_mod
 from . import providers as providers_mod
 from . import resync as resync_mod
 from . import robot as robot_mod
@@ -141,7 +142,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit stable JSON instead of human-readable text",
     )
     start_parser = sub.add_parser(
-        "start", help="start the resident project daemon (idempotent)"
+        "start",
+        help="start the managed provider workflow (daemon, session, widget)",
+    )
+    start_parser.add_argument(
+        "--agent",
+        default=None,
+        help="provider for this run (default: configured agent_provider)",
+    )
+    start_parser.add_argument(
+        "--first-prompt",
+        default=None,
+        help="first prompt for this run (default: configured first_prompt)",
+    )
+    start_parser.add_argument(
+        "--continuation-prompt",
+        default=None,
+        help="continuation prompt for this run "
+        "(default: configured continuation_prompt)",
     )
     start_parser.add_argument(
         "--json",
@@ -1380,18 +1398,360 @@ def cmd_resume(project_dir: Path, as_json: bool = False) -> int:
     )
 
 
-def cmd_start(project_dir: Path, as_json: bool = False) -> int:
-    """Start the resident daemon. Idempotent; never steals a live lease.
-
-    Sends no provider input. Reports the existing daemon when one owns the
-    project, refuses when another live scheduler holds the lease, and
-    recovers stale ownership before spawning.
-    """
-    import contextlib as _contextlib
+def _report_live_owner(project_dir: Path, record, as_json: bool) -> None:
+    """Report the owning daemon without creating a second scheduler."""
     import json as json_mod
-    import subprocess
-    import time
 
+    healthy: bool = _daemon_ipc_or_none(project_dir, "status") is not None
+    detail = (
+        f"daemon already running (pid {record.pid}, "
+        f"endpoint {record.endpoint}, "
+        f"{'reachable' if healthy else 'endpoint not answering'})"
+    )
+    if not healthy:
+        detail += "; run `ariadex admin recover` if scheduling stalls"
+    if as_json:
+        print(
+            json_mod.dumps(
+                {
+                    "started": False,
+                    "duplicate": True,
+                    "pid": record.pid,
+                    "endpoint": record.endpoint,
+                    "reachable": healthy,
+                },
+                sort_keys=True,
+                indent=2,
+            )
+        )
+    else:
+        print(detail)
+
+
+def _live_owner(project_dir: Path, as_json: bool) -> bool:
+    """True when a live daemon owns the project (reported, untouched)."""
+    record = daemon_mod.read_record(project_dir)
+    if daemon_mod.daemon_alive(record) and record is not None:
+        # Duplicate start: confirm the endpoint answers, but never create
+        # a second scheduler or provider session either way.
+        assert record is not None
+        _report_live_owner(project_dir, record, as_json)
+        return True
+    return False
+
+
+def _child_env() -> dict:
+    """Environment for detached Ariadex children (resolves `ariadex`)."""
+    child_env = dict(os.environ)
+    src_root = str(Path(__file__).resolve().parent.parent)
+    existing_path = child_env.get("PYTHONPATH", "")
+    child_env["PYTHONPATH"] = src_root + (
+        os.pathsep + existing_path if existing_path else ""
+    )
+    return child_env
+
+
+def _spawn_widget_process(project_dir: Path):
+    """Start the independent widget in a detached child process."""
+    import subprocess
+
+    return subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-m",
+            "ariadex.cli",
+            "widget",
+            "--project",
+            str(project_dir),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        cwd=str(project_dir),
+        env=_child_env(),
+    )
+
+
+def _stop_widget_process(proc, name: str = "widget") -> None:
+    """Terminate a spawned widget; bounded wait, then kill, never silent."""
+    import time as time_mod
+
+    if proc is None:
+        return
+    try:
+        if proc.poll() is not None:
+            return
+        proc.terminate()
+    except Exception as exc:
+        print(f"warning: {name} shutdown failed: {exc}", file=sys.stderr)
+        return
+    deadline = time_mod.monotonic() + 10
+    while proc.poll() is None and time_mod.monotonic() < deadline:
+        time_mod.sleep(0.2)
+    if proc.poll() is None:
+        try:
+            proc.kill()
+        except Exception as exc:
+            print(f"warning: {name} shutdown failed: {exc}", file=sys.stderr)
+
+
+def _has_terminal() -> bool:
+    """True when both stdin and stdout are interactive terminals."""
+    try:
+        return bool(sys.stdin.isatty() and sys.stdout.isatty())
+    except Exception:
+        return False
+
+
+def _attach_session(argv: list[str]) -> int:
+    """Attach the user's terminal to the provider session (foreground)."""
+    import subprocess
+
+    try:
+        proc = subprocess.run(argv)  # noqa: S603
+    except OSError as exc:
+        print(f"error: provider attach failed: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    return proc.returncode
+
+
+def _resolve_managed_config(
+    cfg, *, agent=None, first_prompt=None, continuation_prompt=None
+):
+    """Resolve provider/prompts from config with one-run overrides applied.
+
+    Returns `(provider, first, continuation)` or prints an error and
+    returns None. Overrides must be non-empty; unknown providers are
+    rejected with the supported list.
+    """
+    provider = agent if agent is not None else cfg.agent_provider
+    if provider not in providers_mod.supported_providers():
+        print(
+            f"error: unsupported agent `{provider}`; "
+            f"supports: {', '.join(providers_mod.supported_providers())}",
+            file=sys.stderr,
+        )
+        return None
+    first = first_prompt if first_prompt is not None else cfg.first_prompt
+    continuation = (
+        continuation_prompt
+        if continuation_prompt is not None
+        else cfg.continuation_prompt
+    )
+    if not first.strip():
+        print("error: --first-prompt requires a non-empty value", file=sys.stderr)
+        return None
+    if not continuation.strip():
+        print(
+            "error: --continuation-prompt requires a non-empty value",
+            file=sys.stderr,
+        )
+        return None
+    return provider, first, continuation
+
+
+def _build_managed_watcher(project_dir, cfg, driver, adapter, session, resolved):
+    """Build the supervision watcher for the managed session.
+
+    `resolved` is the `(provider, first, continuation)` triple. Raises
+    RobotError for invalid watcher configuration.
+    """
+    provider, first, continuation = resolved
+    robot_config = robot_mod.validate_config(
+        robot_mod.RobotConfig(
+            session=session,
+            provider=provider,
+            initial_prompt=first,
+            continuation_prompt=continuation,
+            spec_dir=cfg.spec_dir,
+            handoff_file=cfg.handoff_file,
+        )
+    )
+    return robot_mod.RobotWatcher(project_dir, robot_config, driver, adapter)
+
+
+def _shutdown_managed_session(
+    project_dir: Path,
+    adapter,
+    session: str,
+    widget_proc,
+    reason: str,
+) -> None:
+    """Best-effort managed teardown: session, widget, then daemon.
+
+    Cleanup failures are reported, never hidden; durable work is preserved.
+    """
+    if adapter is not None:
+        try:
+            adapter.terminate()
+        except Exception as exc:
+            print(
+                f"warning: provider session `{session}` teardown failed: {exc}",
+                file=sys.stderr,
+            )
+    _stop_widget_process(widget_proc)
+    try:
+        response = daemon_mod.send_request(project_dir, "stop")
+    except daemon_mod.DaemonError as exc:
+        print(f"warning: daemon shutdown failed: {exc}", file=sys.stderr)
+        return
+    if not isinstance(response, dict) or not response.get("ok"):
+        print(
+            f"warning: daemon shutdown reported {response}; work preserved ({reason})",
+            file=sys.stderr,
+        )
+
+
+def run_managed_start(
+    project_dir: Path,
+    cfg,
+    st,
+    *,
+    provider: str,
+    first_prompt: str,
+    continuation_prompt: str,
+    interactive: bool,
+    as_json: bool = False,
+    has_terminal: bool | None = None,
+    coordinate_fn=None,
+    start_daemon_fn=None,
+    adapter_factory=None,
+    spawn_widget_fn=None,
+    attach_fn=None,
+    watcher_factory=None,
+) -> int:
+    """Compose the managed provider workflow in the documented order.
+
+    Prerequisites, one project daemon, one private adapter-owned tmux
+    session, the independent widget, terminal attach, supervision, and
+    reconciled shutdown. The tmux session name is derived internally from
+    durable state and is never a user input. Every injectable defaults to
+    the real handler; tests supply fakes to prove ordering and cleanup.
+    """
+    import threading
+
+    coordinate = coordinate_fn or prerequisites_mod.coordinate
+    report = coordinate(
+        provider, allow_install=True, confirmed=False, interactive=interactive
+    )
+    if not report.ready:
+        print(prerequisites_mod.format_report(report), file=sys.stderr)
+        return EXIT_ERROR
+    widget_ready = any(
+        result.name == "widget" and result.ready for result in report.results
+    )
+    start_daemon = start_daemon_fn or _start_daemon_only
+    if start_daemon(project_dir, as_json) != EXIT_OK:
+        return EXIT_ERROR
+    session = terminal_mod.session_name_for(st.session_id)
+    make_adapter = adapter_factory or providers_mod.get_adapter
+    try:
+        adapter = make_adapter(
+            provider, terminal_mod.TmuxDriver(), session, project_dir
+        )
+    except Exception as exc:
+        print(f"error: provider setup failed: {exc}", file=sys.stderr)
+        _shutdown_managed_session(project_dir, None, session, None, "setup")
+        return EXIT_ERROR
+    try:
+        adapter.start()
+    except Exception as exc:
+        print(f"error: provider session failed: {exc}", file=sys.stderr)
+        _shutdown_managed_session(project_dir, adapter, session, None, "launch")
+        return EXIT_ERROR
+    print(f"provider: {provider} session ready")
+    spawn_widget = spawn_widget_fn or _spawn_widget_process
+    widget_proc = None
+    if widget_ready:
+        try:
+            widget_proc = spawn_widget(project_dir)
+        except Exception as exc:
+            print(f"error: widget startup failed: {exc}", file=sys.stderr)
+            _shutdown_managed_session(project_dir, adapter, session, None, "widget")
+            return EXIT_ERROR
+        print("widget: independent widget started")
+    else:
+        print("widget: skipped (unavailable); terminal controls apply")
+    make_watcher = watcher_factory or _build_managed_watcher
+    try:
+        watcher = make_watcher(
+            project_dir,
+            cfg,
+            adapter.driver,
+            adapter,
+            session,
+            (provider, first_prompt, continuation_prompt),
+        )
+    except robot_mod.RobotError as exc:
+        print(f"error: supervision setup failed: {exc}", file=sys.stderr)
+        _shutdown_managed_session(
+            project_dir, adapter, session, widget_proc, "supervision"
+        )
+        return EXIT_ERROR
+    outcome: dict = {}
+    supervisor = threading.Thread(
+        target=lambda: outcome.__setitem__("report", watcher.run()),
+        name="ariadex-managed-watch",
+        daemon=True,
+    )
+    supervisor.start()
+    attach = attach_fn or _attach_session
+    terminal = has_terminal if has_terminal is not None else _has_terminal()
+    interrupted = False
+    try:
+        attach_rc = attach(adapter.driver.attach_command(session))
+    except KeyboardInterrupt:
+        attach_rc = None
+        interrupted = True
+        print("interrupted: stopping supervision; session left intact")
+    except Exception as exc:
+        attach_rc = None
+        print(f"error: provider attach failed: {exc}", file=sys.stderr)
+    finally:
+        with contextlib.suppress(Exception):
+            watcher.request_quit()
+        supervisor.join(timeout=30)
+    finished = outcome.get("report")
+    if finished is not None and finished.outcome == "done":
+        print("complete: no active specs remain; stopping managed workflow")
+        _shutdown_managed_session(
+            project_dir, adapter, session, widget_proc, "complete"
+        )
+        return EXIT_OK
+    try:
+        alive = adapter.driver.session_alive(session)
+    except Exception:
+        alive = False
+    if not alive:
+        print("provider session ended; managed workflow stopped")
+        _shutdown_managed_session(project_dir, adapter, session, widget_proc, "exit")
+        return EXIT_OK
+    if attach_rc != 0 and not terminal:
+        print("no terminal available; provider, widget, and daemon keep running")
+        return EXIT_OK
+    if interrupted:
+        print("interrupted: provider, widget, and daemon keep running")
+        return EXIT_OK
+    print("detached: provider, widget, and daemon keep running")
+    return EXIT_OK
+
+
+def cmd_start(
+    project_dir: Path,
+    as_json: bool = False,
+    agent: str | None = None,
+    first_prompt: str | None = None,
+    continuation_prompt: str | None = None,
+) -> int:
+    """Start the managed provider workflow. Idempotent; never steals a lease.
+
+    Composes initialization guard, config plus one-run overrides, the
+    prerequisite coordinator, one project daemon, one private adapter-owned
+    tmux session, the independent widget, terminal attach, supervision with
+    automatic first/continuation prompts, and reconciled shutdown. Reports
+    the existing daemon when one owns the project and creates nothing new.
+    """
     if not is_initialized(project_dir):
         print(
             "error: project is not initialized; run `ariadex init` first "
@@ -1399,40 +1759,51 @@ def cmd_start(project_dir: Path, as_json: bool = False) -> int:
             file=sys.stderr,
         )
         return EXIT_ERROR
-    if _load_config(project_dir) is None:
+    cfg = _load_config(project_dir)
+    if cfg is None:
         return EXIT_ERROR
-    if _load_state(project_dir) is None:
+    st = _load_state(project_dir)
+    if st is None:
         return EXIT_ERROR
-    record = daemon_mod.read_record(project_dir)
-    if daemon_mod.daemon_alive(record) and record is not None:
-        # Duplicate start: confirm the endpoint answers, but never create
-        # a second scheduler or provider session either way.
-        assert record is not None
-        healthy: bool = _daemon_ipc_or_none(project_dir, "status") is not None
-        detail = (
-            f"daemon already running (pid {record.pid}, "
-            f"endpoint {record.endpoint}, "
-            f"{'reachable' if healthy else 'endpoint not answering'})"
-        )
-        if not healthy:
-            detail += "; run `ariadex admin recover` if scheduling stalls"
-        if as_json:
-            print(
-                json_mod.dumps(
-                    {
-                        "started": False,
-                        "duplicate": True,
-                        "pid": record.pid,
-                        "endpoint": record.endpoint,
-                        "reachable": healthy,
-                    },
-                    sort_keys=True,
-                    indent=2,
-                )
-            )
-        else:
-            print(detail)
+    resolved = _resolve_managed_config(
+        cfg,
+        agent=agent,
+        first_prompt=first_prompt,
+        continuation_prompt=continuation_prompt,
+    )
+    if resolved is None:
+        return EXIT_ERROR
+    provider, first, continuation = resolved
+    if _live_owner(project_dir, as_json):
         return EXIT_OK
+    try:
+        interactive = sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    return run_managed_start(
+        project_dir,
+        cfg,
+        st,
+        provider=provider,
+        first_prompt=first,
+        continuation_prompt=continuation,
+        interactive=interactive,
+        as_json=as_json,
+    )
+
+
+def _start_daemon_only(project_dir: Path, as_json: bool = False) -> int:
+    """Start the resident daemon, recovering stale ownership first.
+
+    Sends no provider input. Assumes the caller already refused live
+    owners; recovers stale ownership before spawning.
+    """
+    import contextlib as _contextlib
+    import json as json_mod
+    import subprocess
+    import time
+
+    record = daemon_mod.read_record(project_dir)
     diagnosis = concurrency_mod.diagnose(project_dir)
     if diagnosis.get("state") == "active":
         owner = diagnosis.get("owner") or {}
@@ -2348,7 +2719,13 @@ def main(argv: list[str] | None = None) -> int:
         "status": lambda: cmd_status(project_dir, as_json=getattr(args, "json", False)),
         "pause": lambda: cmd_pause(project_dir, as_json=getattr(args, "json", False)),
         "resume": lambda: cmd_resume(project_dir, as_json=getattr(args, "json", False)),
-        "start": lambda: cmd_start(project_dir, as_json=getattr(args, "json", False)),
+        "start": lambda: cmd_start(
+            project_dir,
+            as_json=getattr(args, "json", False),
+            agent=getattr(args, "agent", None),
+            first_prompt=getattr(args, "first_prompt", None),
+            continuation_prompt=getattr(args, "continuation_prompt", None),
+        ),
         "stop": lambda: cmd_stop(project_dir, as_json=getattr(args, "json", False)),
         "companion": lambda: cmd_companion(
             project_dir,

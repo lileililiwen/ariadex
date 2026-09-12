@@ -9,8 +9,10 @@ import threading
 import unittest
 from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
-from ariadex import cli, concurrency, config, daemon, state
+from ariadex import cli, concurrency, config, daemon, prerequisites, state
+from ariadex.terminal import FakeTerminalDriver
 
 
 def handoff_path(root: Path) -> Path:
@@ -31,6 +33,60 @@ def run_cli(root: Path, *argv: str) -> tuple[int, str, str]:
 def init_project(root: Path) -> None:
     code, _, _ = run_cli(root, "init")
     assert code == 0
+
+
+def ready_report():
+    """Coordinator success for tests that exercise later start phases."""
+    return prerequisites.CoordinatorReport(
+        results=[
+            prerequisites.PrerequisiteResult("runtime", "present", "runtime ready"),
+            prerequisites.PrerequisiteResult("provider", "present", "provider ok"),
+            prerequisites.PrerequisiteResult("tmux", "present", "tmux ready"),
+            prerequisites.PrerequisiteResult("widget", "present", "widget ready"),
+        ],
+        ready=True,
+    )
+
+
+class FakeManagedAdapter:
+    """Adapter double over an in-memory driver (no tmux needed)."""
+
+    def __init__(self, driver, session):
+        self.driver = driver
+        self.session_name = session
+
+    def start(self):
+        return self.driver.create_or_connect(self.session_name, ".", ["provider"])
+
+    def terminate(self):
+        self.driver.terminate(self.session_name)
+
+
+class FakeManagedWatcher:
+    def __init__(self, outcome="done"):
+        self.outcome = outcome
+
+    def run(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(outcome=self.outcome, detail="fake")
+
+    def request_quit(self):
+        return "quit requested"
+
+
+class FakeWidgetProc:
+    def __init__(self):
+        self._alive = True
+
+    def poll(self):
+        return None if self._alive else 0
+
+    def terminate(self):
+        self._alive = False
+
+    def kill(self):
+        self._alive = False
 
 
 def start_ipc_server(root: Path) -> tuple[threading.Event, threading.Thread]:
@@ -265,7 +321,12 @@ class LifecycleCommandTest(unittest.TestCase):
         self.assertIn("no running daemon", out)
 
     def test_start_refuses_live_lease_without_input(self):
-        with concurrency.owned_lock(self.root, state.read(self.root).session_id):
+        with (
+            concurrency.owned_lock(self.root, state.read(self.root).session_id),
+            mock.patch.object(
+                cli.prerequisites_mod, "coordinate", return_value=ready_report()
+            ),
+        ):
             code, _, err = run_cli(self.root, "start")
         self.assertNotEqual(code, 0)
         self.assertIn("refused", err)
@@ -324,31 +385,40 @@ class LifecycleCommandTest(unittest.TestCase):
         self.assertEqual(json.loads(out)["mode"], "MANUAL")
 
     def test_full_start_stop_cycle(self):
-        code, out, _ = run_cli(self.root, "start")
+        driver = FakeTerminalDriver()
+        session = f"ariadex-{state.read(self.root).session_id}"
+        with (
+            mock.patch.object(
+                cli.prerequisites_mod, "coordinate", return_value=ready_report()
+            ),
+            mock.patch.object(
+                cli.providers_mod,
+                "get_adapter",
+                return_value=FakeManagedAdapter(driver, session),
+            ),
+            mock.patch.object(
+                cli, "_spawn_widget_process", return_value=FakeWidgetProc()
+            ),
+            mock.patch.object(cli, "_attach_session", return_value=0),
+            mock.patch.object(
+                cli.robot_mod, "RobotWatcher", return_value=FakeManagedWatcher()
+            ),
+        ):
+            code, out, _ = run_cli(self.root, "start")
         self.assertEqual(code, 0, out)
-        self.assertIn("daemon started", out)
+        self.assertIn("complete", out)
+        # Queue-empty completion tears everything down deterministically.
+        self.assertFalse(driver.session_alive(session))
         record = daemon.read_record(self.root)
         assert record is not None
-        self.assertTrue(daemon.daemon_alive(record))
+        self.assertFalse(daemon.daemon_alive(record))
         code, out, _ = run_cli(self.root, "status", "--json")
         self.assertEqual(code, 0)
-        self.assertTrue(json.loads(out)["daemon"]["alive"])
+        payload = json.loads(out)
+        self.assertNotIn("daemon", payload)
+        self.assertEqual(payload["mode"], "MANUAL")
         code, _, _ = run_cli(self.root, "stop")
         self.assertEqual(code, 0)
-        import time
-
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            current = daemon.read_record(self.root)
-            if current is not None and not daemon.daemon_alive(current):
-                break
-            time.sleep(0.2)
-        current = daemon.read_record(self.root)
-        assert current is not None
-        self.assertFalse(daemon.daemon_alive(current))
-        # Ordinary shutdown keeps handoff history and sends no surprise input.
-        handoff_text = (handoff_path(self.root)).read_text()
-        self.assertIn("Ariadex handoff", handoff_text)
 
 
 class RunDaemonTest(unittest.TestCase):

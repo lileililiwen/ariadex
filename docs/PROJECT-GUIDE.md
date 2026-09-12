@@ -59,19 +59,31 @@ the host cannot grant sudo access.
 
 ## The daemon lifecycle
 
-`ariadex start` starts a detached, resident daemon for one project. It does not
-open a visible terminal, send a prompt, or start a new provider conversation by
-itself.
+`ariadex start` runs the managed provider workflow for one project: it
+prepares prerequisites, starts one resident daemon, launches the configured
+provider in a private project-scoped tmux session through its declared
+adapter command, opens the independent widget when the desktop supports it,
+attaches your terminal to the provider session, sends the configured first
+prompt once the provider is ready, and supervises verified continuation
+until the queue is empty. `--agent`, `--first-prompt`, and
+`--continuation-prompt` override the configuration for one run; session
+names and watcher options are never user inputs. A duplicate `start`
+reports the live owner and creates nothing.
 
-The daemon startup sequence is:
+The managed startup sequence is:
 
-1. Read and validate `.ariadex/config.yaml` and `.ariadex/state.json`.
-2. Acquire the project-scoped Ariadex lease. A live owner prevents a second
-   scheduler from starting; a stale record can be reconciled.
-3. Start a background process and create `.ariadex/daemon.json`.
-4. Open the owner-only Unix control socket `.ariadex/daemon.sock`.
-5. Poll the scheduler (normally once per second) until a stop request or a
-   startup/runtime failure.
+1. Refuse when initialization is missing; resolve config and one-run
+   overrides.
+2. Run the prerequisite coordinator (runtime, provider CLI, tmux with
+   automatic preparation, desktop/Tkinter widget readiness). Failures
+   report the affected prerequisite plus manual recovery and start nothing.
+3. Report the live owner instead of starting a second workflow; recover
+   stale ownership before spawning.
+4. Start a background process and create `.ariadex/daemon.json`.
+5. Open the owner-only Unix control socket `.ariadex/daemon.sock`.
+6. Create the private provider session, open the widget, attach the
+   terminal, and supervise until queue-empty completion, provider exit,
+   or terminal detach.
 
 Each AUTO scheduler poll creates the configured provider adapter and runs one
 bounded runner cycle. That cycle may connect to or start the configured tmux
@@ -85,14 +97,15 @@ allowed to reach its safe cancellation boundary before the daemon exits.
 Useful lifecycle commands:
 
 ```bash
-ariadex start       # start the background scheduler
+ariadex start       # managed workflow: prerequisites, daemon, session, widget
 ariadex status      # inspect daemon, mode, session, and next action
 ariadex stop        # request graceful shutdown
-ariadex attach      # open the configured tmux provider session
+ariadex attach      # reattach to the active provider session after a detach
 ```
 
-Starting an already-running project is idempotent. It reports the existing
-daemon instead of creating a second scheduler.
+Detaching from the provider terminal leaves the workflow running; `stop`
+ends it. Starting an already-running project is idempotent. It reports the
+existing daemon instead of creating a second scheduler, session, or widget.
 
 ## Modes and control
 
