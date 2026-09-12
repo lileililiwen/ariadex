@@ -35,7 +35,16 @@ class ProbeTest(unittest.TestCase):
         self.assertEqual(status.version, "1.2.3")
 
     def test_missing_dist_tool_names_consequence(self):
-        with mock.patch("shutil.which", return_value=None):
+        from importlib.metadata import PackageNotFoundError
+
+        with (
+            mock.patch("shutil.which", return_value=None),
+            mock.patch.object(
+                preflight.importlib_metadata,
+                "version",
+                side_effect=PackageNotFoundError,
+            ),
+        ):
             status = probe_dist_tool("pip-audit", "pip-audit", "cannot be claimed")
         self.assertFalse(status.present)
         self.assertIn("cannot be claimed", status.detail)
