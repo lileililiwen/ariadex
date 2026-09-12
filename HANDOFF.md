@@ -2,18 +2,19 @@
 
 ## Current state
 
-- `project-foundation-and-cli` is implemented, verified, and archived as `2026-09-12-project-foundation-and-cli` (commit `608bc22`).
-- Runtime layout: `ariadex` executable, `src/ariadex/` (`config.py`, `state.py`, `cli.py`, `__main__.py`), `tests/` (`test_config.py`, `test_state.py`, `test_cli.py`).
-- Established contracts: `.ariadex/config.yaml` (9 settings, validated; unknown keys warn), `.ariadex/state.json` (mode/session/current-spec/unresolved-count/updated-at, atomic write), 8 CLI commands (`init`, `run`, `attach`, `status`, `pause`, `resume`, `takeover`, `auto`).
-- Known limits: `run` validates prerequisites and exits non-zero without starting work; `attach` reports the missing tmux driver; full `takeover`/`auto` lifecycle arrives with later changes.
-- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (34 tests, stdlib only; runtime requires PyYAML).
-- Active queue is the remaining four MVP changes in [ROADMAP.md](ROADMAP.md).
+- `agent-adapters-and-tmux-driver` is implemented, verified, and archived as `2026-09-12-agent-adapters-and-tmux-driver` (commit `8bd10a8`).
+- New modules: `src/ariadex/adapters.py` (`AgentAdapter`, `Capabilities`, typed `AdapterError` hierarchy, `select_reset`), `src/ariadex/terminal.py` (`TerminalDriver`, `TmuxDriver`, `FakeTerminalDriver`), `src/ariadex/providers.py` (`OpenCodeAdapter`, `CodexAdapter`, registry-backed `get_adapter`).
+- Capability declarations: OpenCode `soft_reset:true` (`/new`), Codex `soft_reset:false` (hard reset via terminate+restart); both `token_usage:false` so metrics must use `usage: unavailable`.
+- CLI now: `run` resolves the adapter, requires tmux, and still exits non-zero without starting work (scheduler is change 3); `attach` execs into `ariadex-<session-id>` when tmux and the session exist.
+- Environment blocker: `tmux` binary is not installed here, so `tests/test_tmux_integration.py` skips (`tmux binary not available`) and provider capability flags are declared pending live-session verification once tmux exists. `opencode` and `codex` binaries are present; `--help` confirmed TUI-first CLIs.
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (71 tests, 1 skip; stdlib only; runtime requires PyYAML).
+- Active queue is the remaining three MVP changes in [ROADMAP.md](ROADMAP.md).
 
 ## Next change
 
-`agent-adapters-and-tmux-driver`
+`state-driven-runner-and-handoff`
 
-It defines the `AgentAdapter` and `TerminalDriver` contracts and implements the OpenCode/Codex adapters over tmux on top of the foundation configuration and state.
+It implements the state-driven orchestration loop, versioned handoff schema, unresolved queue, and reset policy on top of the foundation and adapter contracts.
 
 ## Feature-to-change sequence
 
@@ -57,6 +58,6 @@ Incomplete or blocked work must not be claimed complete. Record the exact failed
 
 ## Verification evidence
 
-- `PYTHONPATH=src python3 -m unittest discover -s tests`: 34 tests ran, OK.
-- `openspec validate --changes --strict --no-interactive`: 4 passed, 0 failed (after archiving the completed change).
-- Manual CLI exercise in a scratch project: `init` creates defaults, second `init` preserves files, `pause` is idempotent without touching the session, `status` reports persisted state, invalid `reset_mode: turbo` exits 1, `run` with `agent_provider: wat` exits 1 naming the provider, `run`/`attach` exit 1 without claiming progress.
+- `PYTHONPATH=src python3 -m unittest discover -s tests`: 71 tests ran, OK (1 skipped: live tmux lifecycle, `tmux` binary unavailable).
+- `openspec validate --changes --strict --no-interactive`: 4 passed, 0 failed (before archiving the completed change; archive re-validated specs and generated `openspec/specs/agent-adapter/spec.md` and `openspec/specs/tmux-terminal/spec.md`).
+- Foundation evidence from change 1 remains valid: `init`/`status`/`pause` idempotency, invalid `reset_mode` rejection, unsupported-provider `run` rejection.
