@@ -306,11 +306,16 @@ def run_doctor(project_dir: Path) -> tuple[list[DoctorCheck], dict]:
             )
         )
     else:
+        from . import tmux_setup as tmux_setup_mod
+
         reasons = []
         if not desktop.supported:
             reasons.append(desktop.detail)
         if not companion_mod.tkinter_available():
-            reasons.append("Tkinter is not installed")
+            from . import deploy as _deploy_mod
+
+            hint = _deploy_mod.tkinter_manual_hint(tmux_setup_mod.detect_manager())
+            reasons.append(f"Tkinter is not installed (run `{hint}`)")
         checks.append(
             DoctorCheck(
                 "companion",

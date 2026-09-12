@@ -165,6 +165,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="skip the confirmation prompt",
     )
     install_parser.add_argument(
+        "--no-dependency-install",
+        action="store_true",
+        help="never install OS prerequisites; report the manual command instead",
+    )
+    install_parser.add_argument(
         "--json",
         action="store_true",
         help="emit stable JSON instead of human-readable text",
@@ -1226,13 +1231,53 @@ def cmd_companion(
         return EXIT_ERROR
 
 
+def _confirm_dependency(confirmed: bool, prompt: str) -> bool:
+    """Explicit approval for OS package mutation.
+
+    Unlike `_confirm_scheduling`, non-interactive callers without `--yes`
+    are treated as declined: mutating the host must never happen silently.
+    """
+    if confirmed:
+        return True
+    try:
+        interactive = sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    if not interactive:
+        print(
+            "dependency install skipped: confirmation required; rerun with "
+            "`--yes` or confirm interactively",
+            file=sys.stderr,
+        )
+        return False
+    try:
+        answer = input(prompt).strip().lower()
+    except EOFError:
+        print("aborted: confirmation required; rerun with --yes", file=sys.stderr)
+        return False
+    if answer not in ("y", "yes"):
+        print(
+            "dependency install skipped: rerun with --yes to install, or pass "
+            "`--no-dependency-install` to keep it manual",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
 def cmd_install(
-    project_dir: Path, confirmed: bool = False, as_json: bool = False
+    project_dir: Path,
+    confirmed: bool = False,
+    as_json: bool = False,
+    allow_dependency_install: bool = True,
 ) -> int:
     """Install user-scoped daemon/companion integration. No root required.
 
     Prints the plan before mutating anything; project state and config are
     never touched. Service registration failure rolls back partial work.
+    OS prerequisites (e.g. `python3-tk`) require a second explicit
+    confirmation unless `--yes` is given; `--no-dependency-install` keeps
+    them manual. Uninstall never removes OS packages.
     """
     import json as json_mod
 
@@ -1244,8 +1289,25 @@ def cmd_install(
         print(f"plan: {line}")
     if not _confirm_scheduling(confirmed, "Install user integration? [y/N] "):
         return EXIT_ERROR
+    dependency_confirmed = confirmed
+    if allow_dependency_install and not companion_mod.tkinter_available():
+        from . import tmux_setup as tmux_setup_mod
+
+        manager = tmux_setup_mod.detect_manager()
+        hint = deploy_mod.tkinter_manual_hint(manager)
+        print(f"dependency: Tkinter missing; OS prerequisite is `{hint}`")
+        if not _confirm_dependency(
+            confirmed, f"Install OS prerequisite `{hint}`? [y/N] "
+        ):
+            allow_dependency_install = False
+        else:
+            dependency_confirmed = True
     try:
-        report = deploy_mod.install_project(project_dir)
+        report = deploy_mod.install_project(
+            project_dir,
+            allow_dependency_install=allow_dependency_install,
+            dependency_confirmed=dependency_confirmed,
+        )
     except deploy_mod.DeployError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -1690,6 +1752,7 @@ def main(argv: list[str] | None = None) -> int:
             project_dir,
             confirmed=getattr(args, "yes", False),
             as_json=getattr(args, "json", False),
+            allow_dependency_install=not getattr(args, "no_dependency_install", False),
         ),
         "uninstall": lambda: cmd_uninstall(
             project_dir,

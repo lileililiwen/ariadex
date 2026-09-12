@@ -131,6 +131,212 @@ def entry_label(entry: list[str]) -> str:
     return shlex.join(entry)
 
 
+#: Companion prerequisite states for one OS dependency result.
+DEPENDENCY_STATES = ("installed", "manual", "blocked")
+
+#: Package manager -> OS package providing Tkinter for the active Python.
+#: Only managers with a well-known package name are mapped; all others
+#: report a manual prerequisite instead of guessing.
+_TKINTER_PACKAGES: dict[str, str] = {
+    "apt-get": "python3-tk",
+    "dnf": "python3-tkinter",
+    "yum": "python3-tkinter",
+    "zypper": "python3-tk",
+}
+
+_TKINTER_MANUAL_HINTS: dict[str, str] = {
+    "apt-get": "sudo apt-get install -y python3-tk",
+    "dnf": "sudo dnf install -y python3-tkinter",
+    "yum": "sudo yum install -y python3-tkinter",
+    "zypper": "sudo zypper install python3-tk",
+}
+
+
+def tkinter_package_for_manager(manager: str | None) -> str | None:
+    """OS package name providing Tkinter, or None when unsupported."""
+    if manager is None:
+        return None
+    return _TKINTER_PACKAGES.get(manager)
+
+
+def tkinter_manual_hint(manager: str | None) -> str:
+    """Exact manual command (or generic guidance) for the Tkinter package."""
+    if manager is not None and manager in _TKINTER_MANUAL_HINTS:
+        return _TKINTER_MANUAL_HINTS[manager]
+    package = tkinter_package_for_manager(manager)
+    if package is not None:
+        return f"install `{package}` with your system package manager"
+    return (
+        "install the OS Tkinter package for your Python "
+        "(e.g. `python3-tk` on Ubuntu/Debian)"
+    )
+
+
+def tkinter_install_command(manager: str, package: str | None = None) -> list[str]:
+    """Full argv to install the Tkinter package with `manager`.
+
+    Mirrors the tmux prerequisite policy: non-interactive, passwordless
+    `sudo -n` only when required, never a hidden password prompt. Raises
+    DeployError for unsupported managers.
+    """
+    from . import tmux_setup as tmux_setup_mod
+
+    package = package or tkinter_package_for_manager(manager)
+    if package is None:
+        raise DeployError(
+            f"unsupported package manager `{manager}` for companion "
+            f"dependencies; {tkinter_manual_hint(manager)}"
+        )
+    table = dict(tmux_setup_mod._MANAGERS)
+    if manager not in table:
+        raise DeployError(
+            f"unsupported package manager `{manager}` for companion "
+            f"dependencies; {tkinter_manual_hint(manager)}"
+        )
+    cmd = [manager, *table[manager], package]
+    if tmux_setup_mod.needs_sudo() and shutil.which("sudo") is not None:
+        cmd = ["sudo", "-n", *cmd]
+    return cmd
+
+
+def verify_tkinter_with_interpreter(python: str | None = None, runner=None) -> bool:
+    """Import Tkinter with the interpreter that will launch the companion."""
+    runner = runner or subprocess.run
+    cmd = [(python or sys.executable), "-c", "import tkinter"]
+    try:
+        proc = runner(cmd, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def companion_prerequisites() -> dict:
+    """Current Tkinter/desktop/hotkey readiness; missing stays distinct."""
+    from . import companion as companion_mod
+
+    desktop = companion_mod.detect_desktop()
+    tkinter_ok = companion_mod.tkinter_available()
+    try:
+        hotkey = companion_mod.configured_hotkey()
+        companion_mod.parse_hotkey(hotkey)
+        hotkey_ok: bool | str = True
+    except companion_mod.CompanionError as exc:
+        hotkey = companion_mod.DEFAULT_HOTKEY
+        hotkey_ok = str(exc)
+    return {
+        "tkinter_available": tkinter_ok,
+        "desktop": desktop,
+        "hotkey": hotkey,
+        "hotkey_ok": hotkey_ok,
+    }
+
+
+def ensure_companion_dependencies(
+    *,
+    allow_install: bool = True,
+    confirmed: bool = False,
+    runner=None,
+    tkinter_probe=None,
+) -> ArtifactResult:
+    """Detect and optionally install the missing Tkinter OS prerequisite.
+
+    No host mutation happens unless `allow_install` and `confirmed` are both
+    true and Tkinter is actually missing. Every outcome is an explicit
+    `installed`/`manual`/`blocked` artifact; uninstall never removes OS
+    packages installed here.
+    """
+    from . import companion as companion_mod
+    from . import tmux_setup as tmux_setup_mod
+
+    runner = runner or subprocess.run
+    probe = tkinter_probe or companion_mod.tkinter_available
+    if probe():
+        return ArtifactResult("companion-dependencies", "installed", "Tkinter present")
+    manager = tmux_setup_mod.detect_manager()
+    package = tkinter_package_for_manager(manager)
+    hint = tkinter_manual_hint(manager)
+    if manager is None or package is None:
+        return ArtifactResult(
+            "companion-dependencies",
+            "manual",
+            "Tkinter is not installed and no supported package manager was "
+            f"found; {hint}; launch the companion from a terminal after "
+            "installing it",
+        )
+    if not allow_install:
+        return ArtifactResult(
+            "companion-dependencies",
+            "manual",
+            f"Tkinter is not installed (`{package}` missing); "
+            "`--no-dependency-install` keeps host unmutated; run "
+            f"`{hint}` manually, then rerun `ariadex install`",
+        )
+    if not confirmed:
+        return ArtifactResult(
+            "companion-dependencies",
+            "manual",
+            f"Tkinter is not installed (`{package}` missing); rerun with "
+            f"`--yes` or confirm to run `{hint}`, or pass "
+            "`--no-dependency-install` to keep this manual",
+        )
+    if manager == "apt-get":
+        update = ["apt-get", "update"]
+        if tmux_setup_mod.needs_sudo() and shutil.which("sudo") is not None:
+            update = ["sudo", "-n", *update]
+        try:
+            proc = runner(update, capture_output=True, text=True, timeout=600)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return ArtifactResult(
+                "companion-dependencies",
+                "blocked",
+                f"automatic dependency install failed "
+                f"(`{' '.join(update)}`): {exc}; run `{hint}` manually",
+            )
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "unknown error").strip()
+            return ArtifactResult(
+                "companion-dependencies",
+                "blocked",
+                f"automatic dependency install failed "
+                f"(`{' '.join(update)}`): {detail}; run `{hint}` manually",
+            )
+    try:
+        cmd = tkinter_install_command(manager, package)
+    except DeployError as exc:
+        return ArtifactResult("companion-dependencies", "manual", str(exc))
+    try:
+        # Fixed argv from the pinned manager table; no shell, no user input.
+        proc = runner(cmd, capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return ArtifactResult(
+            "companion-dependencies",
+            "blocked",
+            f"automatic dependency install failed "
+            f"(`{' '.join(cmd)}`): {exc}; run `{hint}` manually",
+        )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "unknown error").strip()
+        return ArtifactResult(
+            "companion-dependencies",
+            "blocked",
+            f"automatic dependency install failed "
+            f"(`{' '.join(cmd)}`): {detail}; run `{hint}` manually",
+        )
+    if not probe() and not verify_tkinter_with_interpreter(runner=runner):
+        return ArtifactResult(
+            "companion-dependencies",
+            "blocked",
+            f"`{' '.join(cmd)}` exited 0 but Tkinter still cannot be "
+            f"imported; run `{hint}` manually and verify with "
+            f"`{sys.executable} -c 'import tkinter'`",
+        )
+    return ArtifactResult(
+        "companion-dependencies",
+        "installed",
+        f"installed `{package}` via `{' '.join(cmd)}`; Tkinter verified",
+    )
+
+
 @dataclasses.dataclass
 class ArtifactResult:
     name: str
@@ -175,7 +381,10 @@ def capability_report(project_dir: Path) -> CapabilityReport:
     desktop = companion_mod.detect_desktop()
     desktop_note = f"{desktop.session}: {desktop.detail}"
     if desktop.supported and not companion_mod.tkinter_available():
-        desktop_note += "; Tkinter is not installed"
+        from . import tmux_setup as tmux_setup_mod
+
+        hint = tkinter_manual_hint(tmux_setup_mod.detect_manager())
+        desktop_note += f"; Tkinter is not installed (run `{hint}`)"
     try:
         hotkey = companion_mod.configured_hotkey()
         companion_mod.parse_hotkey(hotkey)
@@ -337,10 +546,13 @@ class SystemdUserAdapter:
                 f"companion with `{entry_label(entry)} companion`",
             )
         if not companion_mod.tkinter_available():
+            from . import tmux_setup as tmux_setup_mod
+
+            hint = tkinter_manual_hint(tmux_setup_mod.detect_manager())
             return ArtifactResult(
                 "autostart",
                 "manual",
-                "Tkinter is not installed; install it, then rerun "
+                f"Tkinter is not installed; run `{hint}`, then rerun "
                 "`ariadex install`, or launch the companion from a terminal",
             )
         entry_path = config_home() / "autostart" / COMPANION_DESKTOP_NAME
@@ -470,23 +682,49 @@ def format_deploy_text(report: DeployReport) -> str:
 
 def install_plan(project_dir: Path) -> list[str]:
     """Human-readable plan printed before any file is mutated."""
+    from . import tmux_setup as tmux_setup_mod
+
     entry = entry_label(resolve_entry())
     adapter = adapter_for_platform()
+    manager = tmux_setup_mod.detect_manager()
+    package = tkinter_package_for_manager(manager)
+    if package is not None:
+        dependency = (
+            f"companion OS prerequisite: `{package}` via "
+            f"`{tkinter_manual_hint(manager)}` (confirmation required; "
+            "`--no-dependency-install` keeps it manual)"
+        )
+    else:
+        dependency = (
+            f"companion OS prerequisite: manual ({tkinter_manual_hint(manager)})"
+        )
     return [
         f"entry point: {entry}",
         f"launchers: {bin_home() / DAEMON_LAUNCHER_NAME}, "
         f"{bin_home() / COMPANION_LAUNCHER_NAME}",
         f"daemon unit: {adapter.name} ({adapter.describe()})",
         "companion autostart: X11 desktop entry where supported",
+        dependency,
         f"ownership manifest: {manifest_path()}",
         f"project: {project_dir} (state and config are never touched)",
     ]
 
 
 def install_project(
-    project_dir: Path, adapter: ServiceAdapter | None = None
+    project_dir: Path,
+    adapter: ServiceAdapter | None = None,
+    *,
+    allow_dependency_install: bool = True,
+    dependency_confirmed: bool = False,
+    dependency_runner=None,
 ) -> DeployReport:
-    """Idempotent user install. Rolls back partial registrations on failure."""
+    """Idempotent user install. Rolls back partial registrations on failure.
+
+    Companion OS prerequisites (e.g. `python3-tk`) are prepared before any
+    Ariadex-owned file is claimed: the dependency outcome is recorded as a
+    `companion-dependencies` artifact and never enters the ownership
+    manifest, so `uninstall` never removes OS packages.
+    """
     from . import config as config_mod
     from . import state as state_mod
 
@@ -517,6 +755,13 @@ def install_project(
         )
     artifacts: list[ArtifactResult] = []
     owned: list[str] = []
+    artifacts.append(
+        ensure_companion_dependencies(
+            allow_install=allow_dependency_install,
+            confirmed=dependency_confirmed,
+            runner=dependency_runner,
+        )
+    )
     daemon_launcher = bin_home() / DAEMON_LAUNCHER_NAME
     companion_launcher = bin_home() / COMPANION_LAUNCHER_NAME
     _write_owned(daemon_launcher, daemon_launcher_text(entry, project_dir), 0o755)
@@ -553,7 +798,11 @@ def install_project(
 def uninstall_project(
     adapter: ServiceAdapter | None = None, purge_config: bool = False
 ) -> DeployReport:
-    """Remove only Ariadex-owned paths. Repeat runs are a successful no-op."""
+    """Remove only Ariadex-owned paths. Repeat runs are a successful no-op.
+
+    OS prerequisite packages (e.g. `python3-tk`) are never removed: they are
+    not recorded in the ownership manifest and stay installed.
+    """
     from . import companion as companion_mod
 
     manifest = load_manifest()

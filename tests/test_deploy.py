@@ -293,6 +293,19 @@ class CliDeployTest(IsolatedHomeTest):
         )
         runner.start()
         test.addCleanup(runner.stop)
+        # Hermetic companion prerequisites: the CLI dependency step stays
+        # covered by test_companion_dependencies; here Tkinter is present.
+        desktop = mock.patch(
+            "ariadex.companion.detect_desktop",
+            return_value=__import__(
+                "ariadex.companion", fromlist=["DesktopInfo"]
+            ).DesktopInfo("x11", True, "ok"),
+        )
+        desktop.start()
+        test.addCleanup(desktop.stop)
+        tk = mock.patch("ariadex.companion.tkinter_available", return_value=True)
+        tk.start()
+        test.addCleanup(tk.stop)
 
     def test_install_cli_reports_plan_and_capabilities(self):
         self._patch_platform(self)

@@ -89,6 +89,16 @@ ariadex install --yes    # launchers, systemd user unit, desktop autostart
 ariadex uninstall --yes  # removes only Ariadex-owned files; state kept
 ```
 
+On Ubuntu/Debian with an X11 session, `install` also prepares the
+companion prerequisite (`python3-tk`) through the host package manager
+after a second explicit confirmation (passwordless `sudo -n` only, never
+a password prompt). Verification re-imports Tkinter with the launch
+interpreter before the autostart entry is claimed; failures stay
+`manual`/`blocked` with the exact retry command. Pass
+`--no-dependency-install` to keep OS packages untouched, or
+`--yes` for non-interactive use (CI/release jobs install
+`python3-tk` explicitly up front).
+
 See [CHANGELOG.md](CHANGELOG.md) for release notes and
 [SECURITY.md](SECURITY.md) for the security contact.
 
@@ -156,9 +166,12 @@ A typical session:
 without root and without touching project state or config. It prints a
 plan first, then records everything it creates in an ownership manifest
 (`~/.local/share/ariadex/manifest.json`), so `ariadex uninstall` removes
-exactly what Ariadex owns. Repeat runs are safe: reinstalling reports
-`already`, and uninstalling twice makes the second run a successful no-op.
-`--purge` additionally removes the per-user companion configuration.
+exactly what Ariadex owns. OS prerequisite packages (e.g. `python3-tk`)
+are reported as a `companion-dependencies` artifact but never enter the
+manifest, so uninstall never removes them. Repeat runs are safe:
+reinstalling reports `already`, and uninstalling twice makes the second
+run a successful no-op. `--purge` additionally removes the per-user
+companion configuration.
 
 What install creates on Linux with systemd user services and X11:
 
@@ -223,7 +236,7 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | `start [--json]`   | Start the resident daemon (idempotent; refuses live leases)    |
 | `stop [--json]`    | Bounded graceful shutdown; durable state kept for `recover`    |
 | `companion [--hotkey] [--editor]` | Opt-in floating yield control (Linux X11 + Tkinter) |
-| `install [--yes] [--json]` | User-scoped launchers + service integration (no root) |
+| `install [--yes] [--no-dependency-install] [--json]` | User-scoped launchers + service integration (no root) |
 | `uninstall [--purge] [--yes] [--json]` | Remove owned integration; state kept |
 | `status [--json]`  | Daemon-mediated when healthy, otherwise local durable state    |
 | `pause [--json]`   | Daemon-mediated when healthy; no new scheduling, safe cancel   |
