@@ -1,6 +1,7 @@
 """Tests for CLI lifecycle semantics and exit behavior."""
 
 import io
+import shutil
 import tempfile
 import unittest
 from contextlib import chdir, redirect_stderr, redirect_stdout
@@ -136,8 +137,12 @@ class RunAttachTest(unittest.TestCase):
         code, out, err = run_cli(self.root, "run")
         self.assertNotEqual(code, 0)
         combined = out + err
-        self.assertNotIn("complete", combined.lower().replace("not implemented", ""))
-        self.assertIn("no work was started", combined)
+        self.assertNotIn("complete", combined.lower())
+        if shutil.which("tmux") is None:
+            self.assertIn("tmux", combined)
+            self.assertIn("before sending work", combined)
+        else:
+            self.assertIn("no work was started", combined)
 
     def test_run_refuses_paused_project(self):
         run_cli(self.root, "pause")
@@ -148,7 +153,7 @@ class RunAttachTest(unittest.TestCase):
     def test_attach_reports_missing_driver(self):
         code, _, err = run_cli(self.root, "attach")
         self.assertNotEqual(code, 0)
-        self.assertIn("tmux driver", err)
+        self.assertIn("tmux", err)
 
 
 if __name__ == "__main__":

@@ -11,14 +11,16 @@ from pathlib import Path
 
 import yaml
 
+from .providers import supported_providers
+
 CONFIG_REL_PATH = Path(".ariadex") / "config.yaml"
 
 RESET_MODES = ("soft", "hard", "auto")
 
-# Providers with a planned MVP adapter. Other values load successfully so
+# Providers with an implemented adapter. Other values load successfully so
 # that `ariadex run` can report them as unsupported instead of claiming
-# progress. (agent-adapters-and-tmux-driver implements the adapters.)
-SUPPORTED_PROVIDERS = ("opencode", "codex")
+# progress. Single source of truth lives in providers.ADAPTERS.
+SUPPORTED_PROVIDERS = supported_providers()
 SUPPORTED_TERMINAL_DRIVERS = ("tmux",)
 
 

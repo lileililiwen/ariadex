@@ -8,11 +8,15 @@ start agents, invoke shells, or add provider-specific behavior: `run` and
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import sys
 from pathlib import Path
 
 from . import config as config_mod
+from . import providers as providers_mod
 from . import state as state_mod
+from . import terminal as terminal_mod
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -203,18 +207,21 @@ def cmd_auto(project_dir: Path) -> int:
 
 
 def cmd_run(project_dir: Path) -> int:
-    # Must not claim progress when execution has not started. Adapters and
-    # the terminal driver land in agent-adapters-and-tmux-driver; the
-    # scheduler lands in state-driven-runner-and-handoff.
+    # Prerequisite gate only: resolve the adapter, require the tmux driver,
+    # and refuse to schedule. The scheduler lands in
+    # state-driven-runner-and-handoff. MUST NOT claim progress.
     cfg = _load_config(project_dir)
     if cfg is None:
         return EXIT_ERROR
-    if cfg.agent_provider not in config_mod.SUPPORTED_PROVIDERS:
-        print(
-            f"error: unsupported agent provider `{cfg.agent_provider}`; "
-            f"MVP supports: {', '.join(config_mod.SUPPORTED_PROVIDERS)}",
-            file=sys.stderr,
+    try:
+        adapter = providers_mod.get_adapter(
+            cfg.agent_provider,
+            terminal_mod.TmuxDriver(),
+            "ariadex-probe",
+            project_dir,
         )
+    except providers_mod.UnsupportedOperation as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
     if cfg.terminal_driver not in config_mod.SUPPORTED_TERMINAL_DRIVERS:
         print(
@@ -230,10 +237,17 @@ def cmd_run(project_dir: Path) -> int:
         print("error: project is PAUSED; use `ariadex resume` or `ariadex auto` first",
               file=sys.stderr)
         return EXIT_ERROR
+    if shutil.which("tmux") is None:
+        print(
+            "error: run stops before sending work: tmux executable `tmux` "
+            "not found; install tmux to run Coding CLI sessions",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
     print(
-        "error: execution prerequisites are not implemented in "
-        "`project-foundation-and-cli`: agent adapter and terminal driver "
-        "arrive with `agent-adapters-and-tmux-driver`; no work was started",
+        f"prerequisites validated (provider `{adapter.provider_name}`, "
+        "tmux available); the scheduler arrives with "
+        "`state-driven-runner-and-handoff`; no work was started",
         file=sys.stderr,
     )
     return EXIT_ERROR
@@ -246,11 +260,24 @@ def cmd_attach(project_dir: Path) -> int:
     st = _load_state(project_dir)
     if st is None:
         return EXIT_ERROR
-    print(
-        f"error: attach is unavailable: tmux driver arrives with "
-        f"`agent-adapters-and-tmux-driver` (session: {st.session_id})",
-        file=sys.stderr,
-    )
+    driver = terminal_mod.TmuxDriver()
+    name = terminal_mod.session_name_for(st.session_id)
+    try:
+        alive = driver.session_alive(name)
+    except terminal_mod.TmuxNotAvailable as exc:
+        print(f"error: attach is unavailable: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except terminal_mod.TerminalError as exc:
+        print(f"error: attach is unavailable: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if not alive:
+        print(
+            f"error: attach is unavailable: tmux session `{name}` does not "
+            "exist; the Coding CLI is not running there",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    os.execvp(driver.attach_command(name)[0], driver.attach_command(name))
     return EXIT_ERROR
 
 
