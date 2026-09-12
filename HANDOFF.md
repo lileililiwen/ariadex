@@ -30,11 +30,17 @@
 - Tests: `tests/test_operator.py` (31 tests: doctor fields/JSON/missing-verification, preview fields/no-input/missing-blocker/JSON, auto/run `--preview` no-input, queue all-statuses/filter/JSON/history, lifecycle resolve/defer/reopen/reprioritize validation/history/count/durability, mode coverage AUTO/MANUAL/PAUSE, confirmation interactive/non-interactive).
 - Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (252 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
 - Live proof on this host: ruff check/format clean, mypy clean on 18 files, coverage 82% (gate met), `openspec validate --changes --strict --no-interactive` 4 passed after archiving; `doctor`/`preview`/`queue`/`history`/`status --json` verified in a scratch project; `preview` reports tmux+verification blockers with `scheduling: blocked` and creates no metrics/runs.
+- `single-runner-concurrency-and-recovery` implemented, verified, and archived as `2026-09-12-single-runner-concurrency-and-recovery` (commit `e1e306c`).
+- New module `src/ariadex/concurrency.py`: per-project `.ariadex/runner.lock` (atomic O_EXCL create, PID/host/session/started/heartbeat), `acquire` raises Active/Stale without deleting, `release`/`heartbeat` only for the owning PID, `diagnose` free/active/stale/corrupt, cycle phases (`before-send`/`sent`/`captured`/`verifying`/`completing` in `.ariadex/cycle.json`), `recover_project` validates stale ownership, records one BLOCKED uncertain-delivery item per interruption, consumes lock+phase (bounded), reports tmux liveness untouched, refuses live owners; `owned_lock` context manager; SIGTERM releases the lease.
+- `runner.py` persists phases across send/capture/verify/complete, clears on every handled outcome (crash leaves evidence), and stops with `interrupted` without input on unreconciled uncertain phases; `cli.py` guards `run`/`auto` with lease acquisition after preview/confirmation and releases on exit/error/interrupt/TERM, adds `recover [--json]`; `operator.py` doctor gains `lock`+`interruption` checks and preview gains lock/interruption prerequisites and blockers.
+- Tests: `tests/test_concurrency.py` (19 tests: metadata/heartbeat/release-ownership, active/stale refusal without deletion, run/auto guard with no input and lease release on failure, before-send safe retry, each uncertain phase records a blocker, bounded no-duplicate recovery, live-owner refusal, runner interruption stop, phase cleared on success, recover/doctor in every mode, history preserved).
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (271 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
+- Live proof on this host: ruff check/format clean, mypy clean on 19 files, coverage 82% (gate met), `openspec validate --changes --strict --no-interactive` 3 passed after archiving.
 - No implementation work for the remaining post-MVP changes has started; the queue below is planning-only.
 
 ## Next change
 
-Next is `single-runner-concurrency-and-recovery`. Select only one active change at a time with `openspec list`; remaining packages are planning-only until implementation is explicitly started.
+Next is `log-data-governance`. Select only one active change at a time with `openspec list`; remaining packages are planning-only until implementation is explicitly started.
 
 ## Feature-to-change sequence
 
