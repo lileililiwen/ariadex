@@ -27,6 +27,7 @@ from pathlib import Path
 
 LOCK_REL_PATH = Path(".ariadex") / "runner.lock"
 CYCLE_REL_PATH = Path(".ariadex") / "cycle.json"
+CANCEL_REL_PATH = Path(".ariadex") / "cancel.json"
 LOCK_VERSION = 1
 
 #: Heartbeat older than this with a dead owner PID counts as stale.
@@ -293,6 +294,59 @@ def release(project_dir: Path) -> bool:
         return False
     with contextlib.suppress(OSError):
         lock_path(project_dir).unlink()
+        return True
+    return False
+
+
+def cancel_path(project_dir: Path) -> Path:
+    return project_dir / CANCEL_REL_PATH
+
+
+def request_cancellation(
+    project_dir: Path, *, requested_by: str, reason: str = ""
+) -> dict:
+    """Persist a project-scoped cancellation signal for the active runner.
+
+    Takeover and pause write this before (or without) an active cycle; the
+    runner honors it at the next safe checkpoint instead of sending new
+    provider input. Idempotent: a later request overwrites the earlier one.
+    Never touches the scheduler lease, tmux sessions, or handoff state.
+    """
+    payload = {
+        "requested_by": requested_by,
+        "reason": reason,
+        "at": now_iso(),
+    }
+    _atomic_write_json(cancel_path(project_dir), payload)
+    return payload
+
+
+def cancellation_requested(project_dir: Path) -> dict | None:
+    """Return the pending cancellation signal, or None when absent.
+
+    An unreadable-but-present signal is honored as an unknown request:
+    stopping without input is always safer than guessing it stale.
+    """
+    raw = _read_json(cancel_path(project_dir))
+    if raw is None:
+        if cancel_path(project_dir).is_file():
+            return {
+                "requested_by": "unknown",
+                "reason": "unreadable cancellation signal",
+                "at": "",
+            }
+        return None
+    return {
+        "requested_by": str(raw.get("requested_by", "unknown")),
+        "reason": str(raw.get("reason", "")),
+        "at": str(raw.get("at", "")),
+    }
+
+
+def clear_cancellation(project_dir: Path) -> bool:
+    """Consume the cancellation signal. Returns True when one existed."""
+    with contextlib.suppress(OSError):
+        cancel_path(project_dir).unlink()
         return True
     return False
 

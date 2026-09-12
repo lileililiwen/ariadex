@@ -543,6 +543,69 @@ class Runner:
             stop_reason="interrupted",
         )
 
+    def _cancel_requested(self) -> dict | None:
+        """Return the pending takeover/pause cancellation signal, if any."""
+        from . import concurrency as concurrency_mod
+
+        try:
+            return concurrency_mod.cancellation_requested(self.project_dir)
+        except Exception:
+            return None
+
+    def _cancel_safe(
+        self, handoff: handoff_mod.Handoff, action: str, cancel: dict
+    ) -> CycleResult:
+        """Stop before any provider input was sent: safe to retry later."""
+        from . import concurrency as concurrency_mod
+
+        handoff.next_action = action
+        self._ctx["output"] = (
+            f"cancelled before provider input for `{action}` "
+            f"(requested by {cancel.get('requested_by', 'unknown')}); "
+            "no input sent, safe to retry"
+        )
+        self._save(handoff)
+        concurrency_mod.clear_cycle(self.project_dir)
+        concurrency_mod.clear_cancellation(self.project_dir)
+        return CycleResult(
+            kind=ACTION_STOP,
+            action="none — cancelled",
+            outcome="cancelled",
+            detail=self._ctx["output"],
+            stopped=True,
+            stop_reason="cancelled",
+        )
+
+    def _cancel_uncertain(
+        self, handoff: handoff_mod.Handoff, action: str, cancel: dict, phase: str
+    ) -> CycleResult:
+        """Stop after provider input may have been delivered.
+
+        Preserves the persisted phase for explicit `recover` handling and
+        claims no completion: existing recovery semantics stay authoritative
+        for uncertain delivery.
+        """
+        from . import concurrency as concurrency_mod
+
+        handoff.status = "in-progress"
+        handoff.next_action = action
+        self._ctx["output"] = (
+            f"cancelled in phase `{phase}` for `{action}` "
+            f"(requested by {cancel.get('requested_by', 'unknown')}); "
+            "provider input may have been delivered, no completion claimed; "
+            "run `ariadex recover` before retrying"
+        )
+        self._save(handoff)
+        concurrency_mod.clear_cancellation(self.project_dir)
+        return CycleResult(
+            kind=ACTION_STOP,
+            action="none — cancelled",
+            outcome="cancelled",
+            detail=self._ctx["output"],
+            stopped=True,
+            stop_reason="cancelled",
+        )
+
     def _execute(
         self, handoff: handoff_mod.Handoff, kind: str, target: str
     ) -> CycleResult:
@@ -552,6 +615,9 @@ class Runner:
         concurrency_mod.write_cycle(
             self.project_dir, concurrency_mod.PHASE_BEFORE_SEND, action
         )
+        cancel = self._cancel_requested()
+        if cancel is not None:
+            return self._cancel_safe(handoff, action, cancel)
         try:
             self.adapter.start()
         except StartupError as exc:
@@ -592,6 +658,11 @@ class Runner:
             concurrency_mod.clear_cycle(self.project_dir)
             return result
 
+        cancel = self._cancel_requested()
+        if cancel is not None:
+            return self._cancel_uncertain(
+                handoff, action, cancel, concurrency_mod.PHASE_CAPTURED
+            )
         concurrency_mod.write_cycle(
             self.project_dir, concurrency_mod.PHASE_VERIFYING, action
         )
@@ -610,7 +681,8 @@ class Runner:
                 self.project_dir, concurrency_mod.PHASE_COMPLETING, action
             )
             result = self._complete(handoff, kind, target, action)
-            concurrency_mod.clear_cycle(self.project_dir)
+            if result.stop_reason != "cancelled":
+                concurrency_mod.clear_cycle(self.project_dir)
             return result
         if isinstance(self.verifier, UnavailableVerifier):
             handoff.status = "in-progress"
@@ -736,30 +808,49 @@ class Runner:
     def _complete(
         self, handoff: handoff_mod.Handoff, kind: str, target: str, action: str
     ) -> CycleResult:
+        from . import concurrency as concurrency_mod
+
+        cancel = self._cancel_requested()
+        if cancel is not None:
+            return self._cancel_uncertain(
+                handoff, action, cancel, concurrency_mod.PHASE_COMPLETING
+            )
         boundary = self._apply_completion(handoff, kind, target)
         strategy = select_context_strategy(self.config)
         reset = None
         if strategy in ("per-spec", "per-task"):
-            try:
-                reset = apply_reset(self.adapter, self.config.reset_mode, boundary)
-            except AdapterError as exc:
-                handoff_mod.add_item(
-                    handoff,
-                    type="blocker",
-                    description=f"reset failed after `{action}`: {exc}",
-                    priority="high",
+            cancel = self._cancel_requested()
+            if cancel is not None:
+                # Verified completion stands, but reset would send provider
+                # input: skip it and stop instead. The next loop iteration
+                # mode-guards, so no new scheduling starts.
+                self._ctx["reset"] = (
+                    f"skipped (cancelled by {cancel.get('requested_by', 'unknown')})"
                 )
-                result = self._stop_for_blocker(handoff, "reset failed")
-                self.cycles.append(result)
-                return result
-        self._ctx["reset"] = reset
+                concurrency_mod.clear_cancellation(self.project_dir)
+            else:
+                try:
+                    reset = apply_reset(self.adapter, self.config.reset_mode, boundary)
+                except AdapterError as exc:
+                    handoff_mod.add_item(
+                        handoff,
+                        type="blocker",
+                        description=f"reset failed after `{action}`: {exc}",
+                        priority="high",
+                    )
+                    result = self._stop_for_blocker(handoff, "reset failed")
+                    self.cycles.append(result)
+                    return result
+        if self._ctx.get("reset") is None:
+            self._ctx["reset"] = reset
         handoff.next_action = self._plan_next(handoff)
         self._save(handoff)
         result = CycleResult(
             kind=kind,
             action=action,
             outcome="completed",
-            detail=f"verified; reset={reset}; next: {handoff.next_action}",
+            detail=f"verified; reset={self._ctx.get('reset')}; "
+            f"next: {handoff.next_action}",
             stopped=False,
             stop_reason=None,
         )
@@ -814,6 +905,45 @@ class Runner:
         if max_cycles <= 0:
             return [self._cycle_limit_exhausted(budget=max_cycles, ran=0)]
         while len(self.cycles) < max_cycles:
+            cancel = self._cancel_requested()
+            if cancel is not None:
+                # Takeover/pause arrived between cycles: honor it before any
+                # new scheduling instead of starting another provider send.
+                started = logging_mod.now_iso()
+                self._ctx = {
+                    "input": "",
+                    "output": "",
+                    "exit_code": None,
+                    "validation": "unavailable",
+                    "reset": None,
+                    "retries": 0,
+                }
+                try:
+                    pending = self._load()
+                except handoff_mod.HandoffError as exc:
+                    from . import concurrency as concurrency_mod
+
+                    result = CycleResult(
+                        kind=ACTION_STOP,
+                        action="none — cancelled",
+                        outcome="cancelled",
+                        detail=f"cancelled between cycles; handoff unreadable: {exc}",
+                        stopped=True,
+                        stop_reason="cancelled",
+                    )
+                    self._ctx["output"] = str(exc)
+                    self._observe(result, started)
+                    self._announce(result)
+                    concurrency_mod.clear_cancellation(self.project_dir)
+                    self.cycles.append(result)
+                    break
+                result = self._cancel_safe(
+                    pending, pending.next_action or "none — unknown", cancel
+                )
+                self._observe(result, started)
+                self._announce(result)
+                self.cycles.append(result)
+                break
             result = self.run_once()
             if result.stopped:
                 break

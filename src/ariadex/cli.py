@@ -706,6 +706,44 @@ def _log_mode_event(
     )
 
 
+def _coordination_note(project_dir: Path) -> str:
+    """Describe scheduler coordination for a takeover/pause request.
+
+    Report-only: never deletes the lease, never touches tmux sessions or
+    handoff state. An active runner observes the cancellation signal at
+    its next safe checkpoint; stale or interrupted state needs `recover`.
+    """
+    diagnosis = concurrency_mod.diagnose(project_dir)
+    lock_state = diagnosis.get("state", "free")
+    if lock_state == "active":
+        owner = concurrency_mod.lock_from_dict(diagnosis.get("owner") or {})
+        who = concurrency_mod.describe_owner(owner) if owner else "an active scheduler"
+        return (
+            f"cancellation pending: {who}; the active scheduler stops "
+            "at the next safe boundary and sends no new input "
+            "(lock and CLI session untouched)"
+        )
+    if lock_state == "stale":
+        return (
+            "stale scheduler lease present; run `ariadex recover` before "
+            "resuming (lock untouched)"
+        )
+    if lock_state == "corrupt":
+        return (
+            "scheduling lock unreadable; inspect `runner.lock` manually "
+            "(refusing to delete it)"
+        )
+    cycle = concurrency_mod.read_cycle(project_dir)
+    if cycle is not None and cycle.phase in concurrency_mod.UNCERTAIN_PHASES:
+        return (
+            f"interrupted phase `{cycle.phase}` preserved; run "
+            "`ariadex recover` before resuming"
+        )
+    if cycle is not None:
+        return f"no active scheduler (phase `{cycle.phase}` safe to retry)"
+    return "no active scheduler"
+
+
 def _transition(project_dir: Path, via: str, note: str, log_event: bool = False) -> int:
     cfg = _load_config(project_dir)
     if cfg is None:
@@ -719,14 +757,23 @@ def _transition(project_dir: Path, via: str, note: str, log_event: bool = False)
     except control_mod.TransitionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    if via in ("takeover", "pause"):
+        concurrency_mod.request_cancellation(project_dir, requested_by=via, reason=note)
+        coordination = _coordination_note(project_dir)
+    else:
+        coordination = ""
     if mode == st.mode:
         print(f"mode is already {mode}; no change made")
+        if coordination:
+            print(coordination)
         return EXIT_OK
     st.mode = mode
     state_mod.write(project_dir, st)
     if log_event:
         _log_mode_event(project_dir, st, via, f"mode -> {mode}: {note}")
     print(f"mode: {mode} ({note})")
+    if coordination:
+        print(coordination)
     return EXIT_OK
 
 
@@ -914,6 +961,8 @@ def cmd_auto(
         print("mode: AUTO (scheduling resumed from resynchronized state)")
     else:
         print("mode is already AUTO; resynchronized state")
+    if concurrency_mod.clear_cancellation(project_dir):
+        print("cancellation: cleared; scheduling from resynchronized state")
     preview = operator_mod.build_preview(project_dir)
     print(operator_mod.format_preview_text(preview))
     if preview_only:
