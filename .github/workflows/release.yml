@@ -57,7 +57,9 @@ jobs:
       - name: verify artifacts and record hashes
         run: |
           ls dist/ariadex-*.tar.gz dist/ariadex-*-py3-none-any.whl
-          sha256sum dist/ariadex-*.tar.gz dist/ariadex-*-py3-none-any.whl | tee dist/SHA256SUMS.txt
+          # Hash record lives outside dist/: twine uploads every file
+          # under dist/ and rejects non-distribution files.
+          sha256sum dist/ariadex-*.tar.gz dist/ariadex-*-py3-none-any.whl | tee SHA256SUMS.txt
       - name: clean-venv install and smoke test
         run: |
           python -m venv /tmp/releasevenv
@@ -86,4 +88,4 @@ jobs:
           path: |
             dist/ariadex-*.tar.gz
             dist/ariadex-*-py3-none-any.whl
-            dist/SHA256SUMS.txt
+            SHA256SUMS.txt
