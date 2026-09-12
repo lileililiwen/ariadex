@@ -266,6 +266,12 @@ ariadex watch --session agent --provider opencode \
   --initial-prompt "Please implement the active spec."
 ```
 
+Full flags: `--session`, `--provider`, `--initial-prompt`,
+`--continuation-prompt`, `--finished-change` (tasks.md gate),
+`--debounce` (default 3), `--poll-interval` (default 5.0s),
+`--max-polls` (0 = unbounded), `--list-sessions`, and `--create`
+(explicit fallback only).
+
 The robot waits for the provider's stable input-ready signal (debounced,
 default 3 polls), sends the initial prompt once, then verifies the
 durable boundary — handoff, task markers, git state, active OpenSpec

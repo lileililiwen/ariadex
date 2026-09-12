@@ -120,17 +120,18 @@ state, starts the daemon idempotently, and opens the existing middle-right
 floating widget. An optional `--project PATH` supports launching from outside
 the supervised project.
 
-## Active: robot agent supervisor
+## Complete: robot agent supervisor
 
-`robot-agent-supervisor` adds the small Python robot that supervises a
-user-selected existing tmux provider session (OpenCode, Codex, CodeBuddy):
-conservative finished/idle detection with debounce, one initial prompt plus
-a configurable continuation prompt (default `Please read the HANDOFF.md, and
-implement the next spec.`), durable task/commit/OpenSpec boundary checks
-with a final stop report, and a minimal middle-right robot widget
-(watching state, Pause, Quit). No duplicate queue, no provider LLM API
-calls, no input while the agent works, and no implicit session creation
-or termination.
+`robot-agent-supervisor` (implemented, tested, archived as
+`2026-09-12-robot-agent-supervisor`) adds the small Python robot that
+supervises a user-selected existing tmux provider session (OpenCode,
+Codex, CodeBuddy): conservative finished/idle detection with debounce,
+one initial prompt plus a configurable continuation prompt (default
+`Please read the HANDOFF.md, and implement the next spec.`), durable
+task/commit/OpenSpec boundary checks with a final stop report, and a
+minimal middle-right robot widget (watching state, Pause, Quit). No
+duplicate queue, no provider LLM API calls, no input while the agent
+works, and no implicit session creation or termination.
 
 ## Deferred V2 capabilities
 

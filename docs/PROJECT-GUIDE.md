@@ -163,7 +163,8 @@ Behavior:
   handoff readability, task completion for `--finished-change`, a clean
   git tree, and the active OpenSpec list. Unfinished work blocks with the
   exact reason; an empty active list stops the watcher with a completion
-  report and no further prompt.
+  report and no further prompt. `--max-polls` bounds a run (0 means
+  unbounded); `--poll-interval` sets the seconds between pane polls.
 - Providers without an in-session new-conversation operation (Codex,
   CodeBuddy) block with a manual instruction instead of terminating the
   user-owned session.
