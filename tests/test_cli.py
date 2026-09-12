@@ -1,6 +1,7 @@
 """Tests for CLI lifecycle semantics and exit behavior."""
 
 import io
+import re
 import tempfile
 import unittest
 from contextlib import chdir, redirect_stderr, redirect_stdout
@@ -78,18 +79,23 @@ class WidgetCommandTest(unittest.TestCase):
         self.tkinter.start()
         self.addCleanup(self.tkinter.stop)
 
-    def test_widget_is_listed_in_help(self):
+    def test_widget_is_hidden_from_top_level_help(self):
         code, out, _ = run_cli(self.root, "--help")
+        self.assertEqual(code, 0)
+        self.assertIsNone(re.search(r"^\s+widget(\s|$)", out, re.MULTILINE))
+
+    def test_widget_stays_available_via_admin(self):
+        code, out, _ = run_cli(self.root, "admin")
         self.assertEqual(code, 0)
         self.assertIn("widget", out)
 
     def test_widget_defaults_to_current_directory(self):
         with (
             mock.patch("ariadex.cli.cmd_init", return_value=0) as init,
-            mock.patch("ariadex.cli.cmd_start", return_value=0) as start,
+            mock.patch("ariadex.cli._start_daemon_only", return_value=0) as start,
             mock.patch("ariadex.cli.cmd_companion", return_value=0) as companion,
         ):
-            code, _, _ = run_cli(self.root, "widget")
+            code, _, _ = run_cli(self.root, "admin", "widget")
         self.assertEqual(code, 0)
         init.assert_called_once_with(self.root)
         start.assert_called_once_with(self.root)
@@ -99,10 +105,12 @@ class WidgetCommandTest(unittest.TestCase):
         project = self.root / "project"
         with (
             mock.patch("ariadex.cli.cmd_init", return_value=0) as init,
-            mock.patch("ariadex.cli.cmd_start", return_value=0) as start,
+            mock.patch("ariadex.cli._start_daemon_only", return_value=0) as start,
             mock.patch("ariadex.cli.cmd_companion", return_value=0) as companion,
         ):
-            code, _, _ = run_cli(self.root, "widget", "--project", str(project))
+            code, _, _ = run_cli(
+                self.root, "admin", "widget", "--project", str(project)
+            )
         self.assertEqual(code, 0)
         init.assert_called_once_with(project)
         start.assert_called_once_with(project)
@@ -111,10 +119,10 @@ class WidgetCommandTest(unittest.TestCase):
     def test_widget_stops_when_daemon_start_fails(self):
         with (
             mock.patch("ariadex.cli.cmd_init", return_value=0) as init,
-            mock.patch("ariadex.cli.cmd_start", return_value=1) as start,
+            mock.patch("ariadex.cli._start_daemon_only", return_value=1) as start,
             mock.patch("ariadex.cli.cmd_companion", return_value=0) as companion,
         ):
-            code, _, _ = run_cli(self.root, "widget")
+            code, _, _ = run_cli(self.root, "admin", "widget")
         self.assertEqual(code, 1)
         init.assert_called_once_with(self.root)
         start.assert_called_once_with(self.root)
@@ -127,9 +135,9 @@ class WidgetCommandTest(unittest.TestCase):
                 "ariadex.cli.companion_mod.tkinter_available", return_value=False
             ),
             mock.patch("ariadex.cli.tmux_setup_mod.detect_manager", return_value=None),
-            mock.patch("ariadex.cli.cmd_start", return_value=0) as start,
+            mock.patch("ariadex.cli._start_daemon_only", return_value=0) as start,
         ):
-            code, _, err = run_cli(self.root, "widget")
+            code, _, err = run_cli(self.root, "admin", "widget")
         self.assertEqual(code, 1)
         init.assert_called_once_with(self.root)
         start.assert_not_called()

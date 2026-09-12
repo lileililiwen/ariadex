@@ -17,43 +17,43 @@ Ariadex is not:
 - a replacement for OpenCode, Codex, or another Coding CLI;
 - an observer that can discover and control arbitrary agent windows.
 
-The last item is important: the scheduler product drives the configured provider
-session when AUTO is enabled. The separate robot supervisor workflow
-(`ariadex watch`, see below) observes a user-selected existing session and
-continues durable work without duplicating handoff status.
+The last item is important: the normal managed workflow (`ariadex start`,
+see below) owns the configured provider session, prompts, widget, and
+supervision. The separate robot supervisor workflow (`ariadex watch`, see
+below) remains for recovery and expert use: it observes a user-selected
+existing session and continues durable work without duplicating handoff
+status.
 
 ## First use
 
-Run the command from the project that Ariadex should supervise:
+Run the commands from the project that Ariadex should supervise:
 
 ```bash
-ariadex widget
+ariadex init
+ariadex start
 ```
 
-This is equivalent to the following lifecycle:
+`ariadex init` asks for the provider and first/continuation prompts (blank
+answers keep the built-in defaults) and creates missing `.ariadex/`
+configuration, handoff, and state files without overwriting existing work.
+Plain `init` refuses when the project is already initialized; `init --force`
+confirms, then removes only `.ariadex/` and reinitializes.
 
-```text
-current directory
-  -> init missing .ariadex files
-  -> check/install Tkinter
-  -> start one project daemon
-  -> open the middle-right widget
-```
+`ariadex start` runs the managed workflow described under The daemon
+lifecycle below. `--agent`, `--first-prompt`, and `--continuation-prompt`
+override the configuration for one run.
 
-The current directory is the project. `--project PATH` is only needed when the
-command is launched elsewhere:
-
-```bash
-ariadex widget --project /path/to/project
-```
+The current directory is the project. Maintainers can launch the widget flow
+directly with `ariadex admin widget --project /path/to/project`; it
+initializes, starts, and opens the middle-right widget.
 
 `ariadex init` never overwrites existing configuration, handoff, or state.
 The widget command therefore preserves existing work when it is run again.
 
 On Linux X11, Tkinter is required for the window. In an interactive terminal,
-`ariadex widget` asks before running the host package-manager command and lets
+`ariadex admin widget` asks before running the host package-manager command and lets
 normal `sudo` prompt for a password. The package-manager output is visible.
-`ariadex widget --yes` confirms the prerequisite non-interactively and requires
+`ariadex admin widget --yes` confirms the prerequisite non-interactively and requires
 passwordless sudo. Use the manual `python3-tk` install shown by the error when
 the host cannot grant sudo access.
 
@@ -151,7 +151,9 @@ boundary.
 
 ## Robot supervisor
 
-`ariadex watch` is the provider-neutral observer: it attaches to a
+`ariadex start` is the normal path and owns the session, prompts, widget,
+and supervision described above. `ariadex watch` remains for recovery and
+expert use: it is the provider-neutral observer that attaches to a
 user-selected existing tmux session (never one it created, unless `--create`
 is passed explicitly) and supervises the already-open OpenCode, Codex, or
 CodeBuddy conversation there.
@@ -218,7 +220,7 @@ Behavior:
 
 | Path | Purpose |
 | --- | --- |
-| `.ariadex/config.yaml` | provider, tmux, active-spec, verification, retry, and telemetry configuration |
+| `.ariadex/config.yaml` | provider, first/continuation prompts, tmux, active-spec, verification, retry, and telemetry configuration |
 | `HANDOFF.md` | durable context: current spec, completed work, unresolved work, blockers, and next action; configurable via `handoff_file` |
 | `.ariadex/state.json` | mode, session ID, current spec, unresolved count, and update time |
 | `.ariadex/daemon.json` | daemon PID, socket endpoint, lease/runtime status |
@@ -277,7 +279,7 @@ Common interpretations:
   auto` after reviewing the resync result.
 - `mode is PAUSE`: run `ariadex resume` for a manual, resynchronized state, or
   `ariadex auto` to explicitly re-enable scheduling.
-- missing Tkinter: install `python3-tk`, then rerun `ariadex widget`.
+- missing Tkinter: install `python3-tk`, then rerun `ariadex start` (or `ariadex admin widget` for a direct widget launch).
 - missing tmux: install tmux or allow Ariadex's supported automatic tmux setup;
   `--no-auto-install` makes the command stop before provider work.
 - daemon record with no live process: rerun `ariadex start`; stale daemon
@@ -291,6 +293,8 @@ The main runtime boundaries are:
 
 - `cli.py`: command parsing and user-facing lifecycle operations;
 - `daemon.py`: detached process, lease, Unix socket, and scheduler polling;
+- `prerequisites.py`: unified managed-start readiness (runtime, provider,
+  tmux with automatic preparation, desktop/Tkinter widget);
 - `runner.py`: one bounded, verified orchestration cycle;
 - `providers.py`: provider-specific OpenCode/Codex/CodeBuddy adapter behavior;
 - `terminal.py`: tmux transport, session operations, and session discovery;

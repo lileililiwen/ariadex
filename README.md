@@ -189,15 +189,27 @@ controls, durable files, cycle flow, and troubleshooting, see
 
 ```bash
 git clone https://github.com/lileililiwen/ariadex.git && cd ariadex
-./ariadex widget        # initialize, start, and open the widget
+./ariadex init         # provider and first/continuation prompts (blanks keep defaults)
+./ariadex start        # managed workflow: prerequisites, daemon, session, widget
 ```
 
-Run `ariadex widget` from the project you want Ariadex to supervise. It uses
-the current directory by default, preserves existing `.ariadex/` files, checks
+Run these from the project you want Ariadex to supervise (the current
+directory is the project). `start` prepares prerequisites, launches the
+configured provider in a private tmux session, opens the independent widget
+when the desktop supports it, attaches your terminal, sends the first prompt
+once the provider is ready, and supervises verified continuation until the
+queue is empty. `--agent`, `--first-prompt`, and `--continuation-prompt`
+override the configuration for one run. A duplicate `start` reports the
+live owner and creates nothing.
+
+`ariadex start` opens the independent widget automatically when the desktop
+supports it. Direct widget launches are a maintainer path:
+`ariadex admin widget` uses the
+current directory by default, preserves existing `.ariadex/` files, checks
 Tkinter before starting the daemon, starts the daemon idempotently, and opens
 the always-on-top widget near the middle-right edge. If Tkinter is missing,
 the command asks before installing the required OS package; use
-`ariadex widget --yes` for a non-interactive explicit confirmation (this
+`ariadex admin widget --yes` for a non-interactive explicit confirmation (this
 requires passwordless sudo). In an interactive terminal, normal sudo may ask
 for your password. To launch it from elsewhere, pass `--project PATH`.
 
@@ -214,7 +226,7 @@ working at the top level and are also grouped under `admin`
 
 ## Floating companion (opt-in)
 
-On Linux X11 with Tkinter installed, `ariadex widget` opens a small
+On Linux X11 with Tkinter installed, `ariadex start` opens a small
 always-on-top mini-player near the middle-right edge: a text status
 indicator, the current work label, and compact Play/Yield/Stop controls.
 Expanding the widget reveals full status text, a hotkey field, and
@@ -400,7 +412,7 @@ Returning to `AUTO` reconciles durable state before scheduling resumes.
 
 ### Widget behavior
 
-`ariadex widget` initializes the project, prepares Tkinter when necessary,
+`ariadex admin widget` initializes the project, prepares Tkinter when necessary,
 starts the daemon, and opens an always-on-top status window at the
 middle-right of the screen. It does not provide a chat interface or replace
 the provider terminal.
@@ -460,7 +472,6 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | `init [--force] [--yes]` | First-run provider/prompt setup; refuses when initialized |
 | `start [--agent A] [--first-prompt T] [--continuation-prompt T] [--json]` | Managed workflow: prerequisites, daemon, provider session, widget, attach, supervision |
 | `stop [--json]`    | Bounded graceful shutdown; durable state kept for `recover`    |
-| `widget [--project PATH] [--yes]` | Initialize, prepare, start, and open the middle-right widget |
 | `install [--yes] [--no-dependency-install] [--json]` | User-scoped launchers + service integration (no root) |
 | `uninstall [--purge] [--yes] [--json]` | Remove owned integration; state kept |
 | `status [--json]`  | Daemon-mediated when healthy, otherwise local durable state    |

@@ -174,31 +174,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit stable JSON instead of human-readable text",
     )
-    widget_parser = sub.add_parser(
-        "widget",
-        aliases=["companion"],
-        help="initialize, start, and open the middle-right daemon widget",
+    companion_parser = sub.add_parser(
+        "companion", help="open the floating companion window"
     )
-    widget_parser.add_argument(
+    companion_parser.add_argument(
         "--hotkey",
         default=None,
         help="global hotkey for this session (default: per-user config or Ctrl+Esc)",
     )
-    widget_parser.add_argument(
+    companion_parser.add_argument(
         "--editor",
         default=None,
         help="editor command for the widget Editor button (default: $EDITOR)",
-    )
-    widget_parser.add_argument(
-        "--project",
-        type=Path,
-        default=None,
-        help="project directory (default: current directory)",
-    )
-    widget_parser.add_argument(
-        "--yes",
-        action="store_true",
-        help="confirm installation of a missing Tkinter OS prerequisite",
     )
     install_parser = sub.add_parser(
         "install",
@@ -1460,6 +1447,7 @@ def _spawn_widget_process(project_dir: Path):
             sys.executable,
             "-m",
             "ariadex.cli",
+            "admin",
             "widget",
             "--project",
             str(project_dir),
@@ -1949,6 +1937,7 @@ def cmd_stop(project_dir: Path, as_json: bool = False) -> int:
 
 ADMIN_COMMANDS = (
     "companion",
+    "widget",
     "install",
     "uninstall",
     "doctor",
@@ -2003,7 +1992,11 @@ def cmd_widget(
     editor: str | None = None,
     confirmed: bool = False,
 ) -> int:
-    """Run the common init, daemon, and floating-widget workflow."""
+    """Run the init, daemon, and floating-widget workflow (advanced).
+
+    Starts only the resident daemon, never the managed supervision flow;
+    reachable via `admin widget`.
+    """
     if not is_initialized(project_dir) and cmd_init(project_dir) != EXIT_OK:
         return EXIT_ERROR
     if not companion_mod.tkinter_available():
@@ -2021,7 +2014,7 @@ def cmd_widget(
         ):
             print(
                 f"error: widget unavailable until Tkinter is installed; run `{hint}` "
-                "or rerun `ariadex widget --yes`",
+                "or rerun `ariadex admin widget --yes`",
                 file=sys.stderr,
             )
             return EXIT_ERROR
@@ -2034,7 +2027,7 @@ def cmd_widget(
         if dependency.state != "installed":
             print(f"error: {dependency.detail}", file=sys.stderr)
             return EXIT_ERROR
-    if cmd_start(project_dir) != EXIT_OK:
+    if _start_daemon_only(project_dir) != EXIT_OK:
         return EXIT_ERROR
     return cmd_companion(project_dir, hotkey=hotkey, editor=editor)
 
@@ -2335,11 +2328,57 @@ def cmd_admin(project_dir: Path, admin_argv: list[str], no_auto_install: bool) -
             file=sys.stderr,
         )
         return EXIT_ERROR
+    if admin_argv[0] in ("widget",):
+        return _cmd_admin_widget(project_dir, admin_argv[1:])
     forwarded: list[str] = []
     if no_auto_install:
         forwarded.append("--no-auto-install")
     forwarded.extend(admin_argv)
     return main(forwarded)
+
+
+def _cmd_admin_widget(project_dir: Path, widget_argv: list[str]) -> int:
+    """Run the init/daemon/widget flow behind the advanced namespace.
+
+    The top-level `widget` command is retired; the managed facade spawns
+    this path for its independent widget child, and maintainers reach it
+    explicitly. `--project` selects another project directory.
+    """
+    parser = argparse.ArgumentParser(prog="ariadex admin widget")
+    parser.add_argument(
+        "--hotkey",
+        default=None,
+        help="global hotkey for this session (default: per-user config or Ctrl+Esc)",
+    )
+    parser.add_argument(
+        "--editor",
+        default=None,
+        help="editor command for the widget Editor button (default: $EDITOR)",
+    )
+    parser.add_argument(
+        "--project",
+        type=Path,
+        default=None,
+        help="project directory (default: current directory)",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm installation of a missing Tkinter OS prerequisite",
+    )
+    try:
+        widget_args = parser.parse_args(widget_argv)
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else 2
+    target = project_dir
+    if widget_args.project is not None:
+        target = widget_args.project.expanduser().resolve()
+    return cmd_widget(
+        target,
+        hotkey=widget_args.hotkey,
+        editor=widget_args.editor,
+        confirmed=widget_args.yes,
+    )
 
 
 def cmd_takeover(project_dir: Path) -> int:
@@ -2691,14 +2730,6 @@ def cmd_attach(project_dir: Path, auto_install: bool = True) -> int:
     return EXIT_ERROR
 
 
-def _widget_project_dir(args: argparse.Namespace, project_dir: Path) -> Path:
-    """Resolve the widget target directory (`--project` or the cwd)."""
-    project = args.project if args.command == "widget" else None
-    if project is None:
-        return project_dir
-    return project.expanduser().resolve()
-
-
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     project_dir = _project_dir()
@@ -2731,12 +2762,6 @@ def main(argv: list[str] | None = None) -> int:
             project_dir,
             hotkey=getattr(args, "hotkey", None),
             editor=getattr(args, "editor", None),
-        ),
-        "widget": lambda: cmd_widget(
-            _widget_project_dir(args, project_dir),
-            hotkey=getattr(args, "hotkey", None),
-            editor=getattr(args, "editor", None),
-            confirmed=getattr(args, "yes", False),
         ),
         "install": lambda: cmd_install(
             project_dir,
