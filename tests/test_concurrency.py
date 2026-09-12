@@ -9,7 +9,7 @@ from contextlib import chdir, redirect_stderr, redirect_stdout
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from ariadex import cli, concurrency, handoff, state
+from ariadex import cli, concurrency, config, handoff, state
 from ariadex.concurrency import (
     ActiveLockError,
     StaleLockError,
@@ -30,6 +30,11 @@ def run_cli(root: Path, *argv: str) -> tuple[int, str, str]:
 def init_project(root: Path) -> None:
     code, _, _ = run_cli(root, "init")
     assert code == 0
+
+
+def handoff_path(root: Path) -> Path:
+    """Configured durable handoff location (default root `HANDOFF.md`)."""
+    return root / config.load(root).handoff_file
 
 
 def write_stale_lock(root: Path, session_id: str = "s-old", age_s: int = 3600) -> None:
@@ -191,7 +196,7 @@ class PhaseRecoveryTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("stale-recovered", out)
         self.assertIn("safe to retry", out)
-        doc = handoff.read_handoff(self.root / ".ariadex" / "handoff.md")
+        doc = handoff.read_handoff(handoff_path(self.root))
         self.assertFalse([i for i in doc.unresolved if i.status == "BLOCKED"])
         self.assertIsNone(concurrency.read_lock(self.root))
         self.assertIsNone(concurrency.read_cycle(self.root))
@@ -208,7 +213,7 @@ class PhaseRecoveryTest(unittest.TestCase):
                 code, out, _ = run_cli(root, "recover")
                 self.assertEqual(code, 0, out)
                 self.assertIn("uncertain", out)
-                doc = handoff.read_handoff(root / ".ariadex" / "handoff.md")
+                doc = handoff.read_handoff(handoff_path(root))
                 blocked = [i for i in doc.unresolved if i.status == "BLOCKED"]
                 self.assertEqual(len(blocked), 1)
                 self.assertIn(phase, blocked[0].description)
@@ -220,13 +225,13 @@ class PhaseRecoveryTest(unittest.TestCase):
         write_stale_lock(self.root)
         concurrency.write_cycle(self.root, concurrency.PHASE_SENT, "advance-spec demo")
         run_cli(self.root, "recover")
-        doc = handoff.read_handoff(self.root / ".ariadex" / "handoff.md")
+        doc = handoff.read_handoff(handoff_path(self.root))
         self.assertEqual(len(doc.unresolved), 1)
         # Second recovery finds nothing to do and adds no duplicate.
         code, out, _ = run_cli(self.root, "recover")
         self.assertEqual(code, 0)
         self.assertIn("nothing-to-do", out)
-        doc2 = handoff.read_handoff(self.root / ".ariadex" / "handoff.md")
+        doc2 = handoff.read_handoff(handoff_path(self.root))
         self.assertEqual(len(doc2.unresolved), 1)
 
     def test_recover_refuses_live_owner_without_deletion(self):
@@ -250,7 +255,7 @@ class PhaseRecoveryTest(unittest.TestCase):
         (self.root / cfg.spec_dir / "demo").mkdir(parents=True)
         doc = handoff.empty_handoff()
         doc.next_spec = "demo"
-        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+        write_handoff(handoff_path(self.root), doc)
         st = state.read(self.root)
         st.mode = "AUTO"
         state.write(self.root, st)
@@ -272,7 +277,7 @@ class PhaseRecoveryTest(unittest.TestCase):
         (self.root / cfg.spec_dir / "demo").mkdir(parents=True)
         doc = handoff.empty_handoff()
         doc.next_spec = "demo"
-        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+        write_handoff(handoff_path(self.root), doc)
         st = state.read(self.root)
         st.mode = "AUTO"
         state.write(self.root, st)
@@ -317,14 +322,14 @@ class RecoverModesTest(unittest.TestCase):
     def test_history_preserved_across_recovery(self):
         doc = handoff.empty_handoff()
         add_item(doc, "issue", "keep me", priority="high", item_id="u-1")
-        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+        write_handoff(handoff_path(self.root), doc)
         run_cli(self.root, "resolve", "u-1")
         write_stale_lock(self.root)
         concurrency.write_cycle(
             self.root, concurrency.PHASE_CAPTURED, "advance-spec demo"
         )
         run_cli(self.root, "recover")
-        reloaded = handoff.read_handoff(self.root / ".ariadex" / "handoff.md")
+        reloaded = handoff.read_handoff(handoff_path(self.root))
         resolved = [i for i in reloaded.unresolved if i.id == "u-1"]
         self.assertEqual(resolved[0].status, "RESOLVED")
         self.assertTrue(resolved[0].history)

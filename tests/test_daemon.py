@@ -10,7 +10,12 @@ import unittest
 from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from ariadex import cli, concurrency, daemon, state
+from ariadex import cli, concurrency, config, daemon, state
+
+
+def handoff_path(root: Path) -> Path:
+    """Configured durable handoff location (default root `HANDOFF.md`)."""
+    return root / config.load(root).handoff_file
 
 
 def run_cli(root: Path, *argv: str) -> tuple[int, str, str]:
@@ -122,7 +127,7 @@ class HandleRequestTest(unittest.TestCase):
         self.assertEqual(state.read(self.root).mode, "MANUAL")
 
     def test_stop_marks_stopping_without_deleting_work(self):
-        handoff_before = (self.root / ".ariadex" / "handoff.md").read_text()
+        handoff_before = (handoff_path(self.root)).read_text()
         reply = daemon.handle_request(self.root, "stop")
         self.assertTrue(reply["ok"])
         record = daemon.read_record(self.root)
@@ -342,7 +347,7 @@ class LifecycleCommandTest(unittest.TestCase):
         assert current is not None
         self.assertFalse(daemon.daemon_alive(current))
         # Ordinary shutdown keeps handoff history and sends no surprise input.
-        handoff_text = (self.root / ".ariadex" / "handoff.md").read_text()
+        handoff_text = (handoff_path(self.root)).read_text()
         self.assertIn("Ariadex handoff", handoff_text)
 
 

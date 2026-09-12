@@ -8,8 +8,13 @@ from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from ariadex import cli, handoff, operator, state
+from ariadex import cli, config, handoff, operator, state
 from ariadex.handoff import add_item, write_handoff
+
+
+def handoff_path(root: Path) -> Path:
+    """Configured durable handoff location (default root `HANDOFF.md`)."""
+    return root / config.load(root).handoff_file
 
 
 def run_cli(root: Path, *argv: str) -> tuple[int, str, str]:
@@ -94,7 +99,7 @@ class PreviewTest(unittest.TestCase):
         (self.root / "openspec" / "changes" / "demo").mkdir(parents=True)
         doc = handoff.empty_handoff()
         add_item(doc, "issue", "real work", priority="high", item_id="u-1")
-        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+        write_handoff(handoff_path(self.root), doc)
         code, out, _ = run_cli(self.root, "preview")
         self.assertEqual(code, 0)
         st = state.read(self.root)
@@ -175,7 +180,7 @@ class QueueHistoryTest(unittest.TestCase):
         handoff.set_item_status(doc, "u-block", "BLOCKED", note="b")
         add_item(doc, "issue", "done work", priority="low", item_id="u-done")
         handoff.set_item_status(doc, "u-done", "RESOLVED", note="r")
-        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+        write_handoff(handoff_path(self.root), doc)
 
     def test_queue_lists_all_statuses(self):
         _, out, _ = run_cli(self.root, "queue")
@@ -223,12 +228,10 @@ class LifecycleTest(unittest.TestCase):
         make_project(self.root)
         doc = handoff.empty_handoff()
         add_item(doc, "issue", "work one", priority="medium", item_id="u-1")
-        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+        write_handoff(handoff_path(self.root), doc)
 
     def read_item(self, item_id="u-1"):
-        return handoff.get_item(
-            handoff.read_handoff(self.root / ".ariadex" / "handoff.md"), item_id
-        )
+        return handoff.get_item(handoff.read_handoff(handoff_path(self.root)), item_id)
 
     def test_resolve_retains_history(self):
         code, out, _ = run_cli(self.root, "resolve", "u-1", "--note", "verified")
@@ -247,7 +250,7 @@ class LifecycleTest(unittest.TestCase):
     def test_defer_requires_target_and_reason(self):
         code, _, _ = run_cli(self.root, "defer", "u-1", "--to", "later")
         self.assertNotEqual(code, 0)  # argparse: --reason missing
-        doc = handoff.read_handoff(self.root / ".ariadex" / "handoff.md")
+        doc = handoff.read_handoff(handoff_path(self.root))
         # Direct operator validation as well.
         with self.assertRaises(handoff.HandoffError):
             operator.apply_defer(doc, "u-1", "", "")
@@ -295,9 +298,9 @@ class LifecycleTest(unittest.TestCase):
 
     def test_durable_across_restart(self):
         run_cli(self.root, "defer", "u-1", "--to", "later", "--reason", "not yet")
-        before = handoff.read_handoff(self.root / ".ariadex" / "handoff.md")
+        before = handoff.read_handoff(handoff_path(self.root))
         # Fresh process instance re-reads the same file.
-        after = handoff.read_handoff(self.root / ".ariadex" / "handoff.md")
+        after = handoff.read_handoff(handoff_path(self.root))
         self.assertEqual(after.unresolved[0].status, "DEFERRED")
         self.assertEqual(after.unresolved[0].history, before.unresolved[0].history)
         self.assertEqual(after.unresolved[0].target_spec, "later")
@@ -311,7 +314,7 @@ class ModeCoverageTest(unittest.TestCase):
         make_project(self.root)
         doc = handoff.empty_handoff()
         add_item(doc, "issue", "work", priority="high", item_id="u-1")
-        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+        write_handoff(handoff_path(self.root), doc)
 
     def set_mode(self, mode: str):
         st = state.read(self.root)

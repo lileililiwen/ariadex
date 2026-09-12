@@ -7,11 +7,16 @@ import unittest.mock
 from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from ariadex import cli, handoff, providers, state
+from ariadex import cli, config, handoff, providers, state
 from ariadex.handoff import add_item, write_handoff
 from ariadex.runner import Runner
 from ariadex.terminal import FakeTerminalDriver
 from ariadex.tmux_setup import TmuxSetupError
+
+
+def handoff_path(root: Path) -> Path:
+    """Configured durable handoff location (default root `HANDOFF.md`)."""
+    return root / config.load(root).handoff_file
 
 
 def run_cli(root: Path, *argv: str) -> tuple[int, str, str]:
@@ -62,7 +67,7 @@ class TakeoverTest(unittest.TestCase):
         run_cli(self.root, "takeover")
         doc = handoff.empty_handoff()
         add_item(doc, "issue", "work", priority="high", item_id="u-1")
-        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+        write_handoff(handoff_path(self.root), doc)
         # A fresh Runner process instance still sends nothing.
         from ariadex import config as config_mod
 
@@ -119,7 +124,7 @@ class AutoTest(unittest.TestCase):
 
     def test_auto_refuses_unreadable_handoff(self):
         run_cli(self.root, "takeover")
-        path = self.root / ".ariadex" / "handoff.md"
+        path = handoff_path(self.root)
         path.write_text("---\nversion: 1\nstatus: BOGUS\n---\n", encoding="utf-8")
         code, _, err = run_cli(self.root, "--no-auto-install", "auto")
         self.assertNotEqual(code, 0)
@@ -132,7 +137,7 @@ class AutoTest(unittest.TestCase):
         doc.next_action = "resolve u-ghost: stale"
         doc.next_spec = "demo"
         add_item(doc, "issue", "real work", priority="high", item_id="u-1")
-        write_handoff(self.root / ".ariadex" / "handoff.md", doc)
+        write_handoff(handoff_path(self.root), doc)
         run_cli(self.root, "takeover")
         # Deterministic missing-tmux simulation: the real `require_tmux`
         # raises on tmux-less hosts, but on tmux hosts `auto` would schedule
@@ -147,7 +152,7 @@ class AutoTest(unittest.TestCase):
         self.assertNotEqual(code, 0)  # no tmux: loop cannot schedule
         self.assertEqual(state.read(self.root).mode, "AUTO")
         self.assertIn("resync", out)
-        reloaded = handoff.read_handoff(self.root / ".ariadex" / "handoff.md")
+        reloaded = handoff.read_handoff(handoff_path(self.root))
         self.assertTrue(reloaded.next_action.startswith("resolve-issue u-1"))
 
 

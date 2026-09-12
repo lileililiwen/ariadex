@@ -83,7 +83,12 @@ def write_issues(root: Path, count: int = 1) -> None:
     doc = handoff.empty_handoff()
     for i in range(1, count + 1):
         add_item(doc, "issue", f"work {i}", priority="high", item_id=f"u-{i}")
-    write_handoff(root / ".ariadex" / "handoff.md", doc)
+    write_handoff(handoff_path(root), doc)
+
+
+def handoff_path(root: Path) -> Path:
+    """Configured durable handoff location (default root `HANDOFF.md`)."""
+    return root / config.load(root).handoff_file
 
 
 class CancelBeforeSendTest(unittest.TestCase):
@@ -106,7 +111,7 @@ class CancelBeforeSendTest(unittest.TestCase):
         self.assertEqual(driver.calls, [])
         # Safe checkpoint: phase cleared, work preserved verbatim.
         self.assertIsNone(concurrency.read_cycle(self.root))
-        reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
+        reloaded = read_handoff(handoff_path(self.root))
         self.assertTrue(reloaded.next_action.startswith("resolve-issue u-1"))
         self.assertEqual(handoff.get_item(reloaded, "u-1").status, "OPEN")
         self.assertIsNone(reloaded.current_spec)
@@ -155,7 +160,7 @@ class CancelAfterSendTest(unittest.TestCase):
         self.assertIsNotNone(cycle)
         assert cycle is not None
         self.assertEqual(cycle.phase, concurrency.PHASE_CAPTURED)
-        reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
+        reloaded = read_handoff(handoff_path(self.root))
         self.assertTrue(reloaded.next_action.startswith("resolve-issue u-1"))
         self.assertEqual(handoff.get_item(reloaded, "u-1").status, "OPEN")
         self.assertEqual(reloaded.completed, [])
@@ -186,7 +191,7 @@ class CancelAfterSendTest(unittest.TestCase):
         second = concurrency.recover_project(self.root)
         self.assertEqual(second.lock_state, "nothing-to-do")
         self.assertFalse(second.blocker_added)
-        reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
+        reloaded = read_handoff(handoff_path(self.root))
         uncertain = [
             item
             for item in reloaded.unresolved
@@ -216,7 +221,7 @@ class CancelDuringVerificationTest(unittest.TestCase):
         self.assertIsNotNone(cycle)
         assert cycle is not None
         self.assertEqual(cycle.phase, concurrency.PHASE_COMPLETING)
-        reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
+        reloaded = read_handoff(handoff_path(self.root))
         self.assertEqual(handoff.get_item(reloaded, "u-1").status, "OPEN")
         self.assertEqual(reloaded.completed, [])
         # The next scheduling step is not started: restart stops unreconciled.
@@ -259,7 +264,7 @@ class CancelDuringVerificationTest(unittest.TestCase):
         # Verified completion stands (evidence existed), but reset input is
         # skipped and the cancellation is consumed.
         self.assertEqual(result.outcome, "completed")
-        reloaded = read_handoff(self.root / ".ariadex" / "handoff.md")
+        reloaded = read_handoff(handoff_path(self.root))
         self.assertEqual(handoff.get_item(reloaded, "u-1").status, "RESOLVED")
         sent = [c[2] for c in driver.calls if c[0] == "send_input"]
         self.assertEqual(len(sent), 1)
