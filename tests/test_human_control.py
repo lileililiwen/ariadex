@@ -52,7 +52,7 @@ class TakeoverTest(unittest.TestCase):
 
     def test_manual_run_sends_no_input(self):
         run_cli(self.root, "takeover")
-        code, _, err = run_cli(self.root, "run")
+        code, _, err = run_cli(self.root, "--no-auto-install", "run")
         self.assertNotEqual(code, 0)
         self.assertIn("MANUAL", err)
         # Refused before scheduling: no cycles observed anything.
@@ -121,7 +121,7 @@ class AutoTest(unittest.TestCase):
         run_cli(self.root, "takeover")
         path = self.root / ".ariadex" / "handoff.md"
         path.write_text("---\nversion: 1\nstatus: BOGUS\n---\n", encoding="utf-8")
-        code, _, err = run_cli(self.root, "auto")
+        code, _, err = run_cli(self.root, "--no-auto-install", "auto")
         self.assertNotEqual(code, 0)
         self.assertIn("resync refused", err)
         self.assertEqual(state.read(self.root).mode, "MANUAL")
@@ -135,7 +135,7 @@ class AutoTest(unittest.TestCase):
         add_item(doc, "issue", "real work", priority="high", item_id="u-1")
         write_handoff(self.root / ".ariadex" / "handoff.md", doc)
         run_cli(self.root, "takeover")
-        code, out, _ = run_cli(self.root, "auto")
+        code, out, _ = run_cli(self.root, "--no-auto-install", "auto")
         self.assertNotEqual(code, 0)  # no tmux: loop cannot schedule
         self.assertEqual(state.read(self.root).mode, "AUTO")
         self.assertIn("resync", out)

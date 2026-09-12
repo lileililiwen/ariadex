@@ -1,7 +1,6 @@
 """Tests for CLI lifecycle semantics and exit behavior."""
 
 import io
-import shutil
 import tempfile
 import unittest
 from contextlib import chdir, redirect_stderr, redirect_stdout
@@ -111,12 +110,12 @@ class TransitionTest(unittest.TestCase):
         self.assertEqual(self.mode(), "MANUAL")
 
     def test_takeover_enters_manual(self):
-        run_cli(self.root, "auto")
+        run_cli(self.root, "--no-auto-install", "auto")
         self.assertEqual(run_cli(self.root, "takeover")[0], 0)
         self.assertEqual(self.mode(), "MANUAL")
 
     def test_auto_enters_auto(self):
-        run_cli(self.root, "auto")
+        run_cli(self.root, "--no-auto-install", "auto")
         self.assertEqual(self.mode(), "AUTO")
 
 
@@ -132,7 +131,7 @@ class RunAttachTest(unittest.TestCase):
         st = state.read(self.root)
         st.mode = "AUTO"
         state.write(self.root, st)
-        code, _, err = run_cli(self.root, "run")
+        code, _, err = run_cli(self.root, "--no-auto-install", "run")
         self.assertNotEqual(code, 0)
         self.assertIn("wat", err)
 
@@ -140,7 +139,7 @@ class RunAttachTest(unittest.TestCase):
         st = state.read(self.root)
         st.mode = "AUTO"
         state.write(self.root, st)
-        code, out, err = run_cli(self.root, "run")
+        code, out, err = run_cli(self.root, "--no-auto-install", "run")
         self.assertNotEqual(code, 0)
         combined = out + err
         self.assertNotIn("complete", combined.lower())
@@ -154,12 +153,12 @@ class RunAttachTest(unittest.TestCase):
 
     def test_run_refuses_paused_project(self):
         run_cli(self.root, "pause")
-        code, _, err = run_cli(self.root, "run")
+        code, _, err = run_cli(self.root, "--no-auto-install", "run")
         self.assertNotEqual(code, 0)
         self.assertIn("PAUSED", err)
 
     def test_attach_reports_missing_driver(self):
-        code, _, err = run_cli(self.root, "attach")
+        code, _, err = run_cli(self.root, "--no-auto-install", "attach")
         self.assertNotEqual(code, 0)
         self.assertIn("tmux", err)
 

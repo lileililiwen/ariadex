@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -23,6 +22,7 @@ from . import runner as runner_mod
 from . import state as state_mod
 from . import status as status_mod
 from . import terminal as terminal_mod
+from . import tmux_setup as tmux_setup_mod
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -52,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Conversation is temporary state; the repository, specs, and "
             "handoff are durable state."
         ),
+    )
+    parser.add_argument(
+        "--no-auto-install",
+        action="store_true",
+        help="do not install a missing tmux automatically; stop instead",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -243,7 +248,7 @@ def cmd_takeover(project_dir: Path) -> int:
     )
 
 
-def cmd_auto(project_dir: Path) -> int:
+def cmd_auto(project_dir: Path, auto_install: bool = True) -> int:
     # Resynchronize from handoff, git, specs, and queue; persist; enter
     # AUTO; then resume the runner. Manual edits are evidence, never
     # completion: verification still gates advancement.
@@ -276,20 +281,18 @@ def cmd_auto(project_dir: Path) -> int:
         print("mode: AUTO (scheduling resumed from resynchronized state)")
     else:
         print("mode is already AUTO; resynchronized state")
-    return _run_loop(project_dir, cfg, state_mod.read(project_dir))
+    return _run_loop(
+        project_dir, cfg, state_mod.read(project_dir), auto_install=auto_install
+    )
 
 
 def _run_loop(
-    project_dir: Path, cfg: config_mod.Config, st: state_mod.State
+    project_dir: Path,
+    cfg: config_mod.Config,
+    st: state_mod.State,
+    auto_install: bool = True,
 ) -> int:
     """Execute the state-driven runner loop. Caller owns mode ownership."""
-    if cfg.terminal_driver not in config_mod.SUPPORTED_TERMINAL_DRIVERS:
-        print(
-            f"error: unsupported terminal driver `{cfg.terminal_driver}`; "
-            f"MVP supports: {', '.join(config_mod.SUPPORTED_TERMINAL_DRIVERS)}",
-            file=sys.stderr,
-        )
-        return EXIT_ERROR
     try:
         adapter = providers_mod.get_adapter(
             cfg.agent_provider,
@@ -300,13 +303,23 @@ def _run_loop(
     except providers_mod.UnsupportedOperation as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
-    if shutil.which("tmux") is None:
+    if cfg.terminal_driver not in config_mod.SUPPORTED_TERMINAL_DRIVERS:
         print(
-            "error: run stops before sending work: tmux executable `tmux` "
-            "not found; install tmux to run Coding CLI sessions",
+            f"error: unsupported terminal driver `{cfg.terminal_driver}`; "
+            f"MVP supports: {', '.join(config_mod.SUPPORTED_TERMINAL_DRIVERS)}",
             file=sys.stderr,
         )
         return EXIT_ERROR
+    try:
+        tmux_path = (
+            tmux_setup_mod.ensure_tmux()
+            if auto_install
+            else tmux_setup_mod.require_tmux()
+        )
+    except tmux_setup_mod.TmuxSetupError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    adapter.driver = terminal_mod.TmuxDriver(executable=tmux_path)
     runner = runner_mod.Runner(project_dir, cfg, adapter)
     cycles = runner.run()
     for cycle in cycles:
@@ -317,7 +330,7 @@ def _run_loop(
     return EXIT_OK
 
 
-def cmd_run(project_dir: Path) -> int:
+def cmd_run(project_dir: Path, auto_install: bool = True) -> int:
     # State-driven execution, gated on AUTO: MANUAL disables automatic
     # input and PAUSE allows no new scheduling operations.
     cfg = _load_config(project_dir)
@@ -340,17 +353,26 @@ def cmd_run(project_dir: Path) -> int:
                 file=sys.stderr,
             )
         return EXIT_ERROR
-    return _run_loop(project_dir, cfg, st)
+    return _run_loop(project_dir, cfg, st, auto_install=auto_install)
 
 
-def cmd_attach(project_dir: Path) -> int:
+def cmd_attach(project_dir: Path, auto_install: bool = True) -> int:
     cfg = _load_config(project_dir)
     if cfg is None:
         return EXIT_ERROR
     st = _load_state(project_dir)
     if st is None:
         return EXIT_ERROR
-    driver = terminal_mod.TmuxDriver()
+    try:
+        tmux_path = (
+            tmux_setup_mod.ensure_tmux()
+            if auto_install
+            else tmux_setup_mod.require_tmux()
+        )
+    except tmux_setup_mod.TmuxSetupError as exc:
+        print(f"error: attach is unavailable: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    driver = terminal_mod.TmuxDriver(executable=tmux_path)
     name = terminal_mod.session_name_for(st.session_id)
     try:
         alive = driver.session_alive(name)
@@ -374,17 +396,18 @@ def cmd_attach(project_dir: Path) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     project_dir = _project_dir()
+    auto_install = not args.no_auto_install
     handlers = {
-        "init": cmd_init,
-        "run": cmd_run,
-        "attach": cmd_attach,
-        "status": cmd_status,
-        "pause": cmd_pause,
-        "resume": cmd_resume,
-        "takeover": cmd_takeover,
-        "auto": cmd_auto,
+        "init": lambda: cmd_init(project_dir),
+        "run": lambda: cmd_run(project_dir, auto_install=auto_install),
+        "attach": lambda: cmd_attach(project_dir, auto_install=auto_install),
+        "status": lambda: cmd_status(project_dir),
+        "pause": lambda: cmd_pause(project_dir),
+        "resume": lambda: cmd_resume(project_dir),
+        "takeover": lambda: cmd_takeover(project_dir),
+        "auto": lambda: cmd_auto(project_dir, auto_install=auto_install),
     }
-    return handlers[args.command](project_dir)
+    return handlers[args.command]()
 
 
 if __name__ == "__main__":
