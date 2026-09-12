@@ -2,11 +2,12 @@
 
 ## Current state
 
-- Implemented, verified, and archived: all five MVP changes, `tmux-auto-install`, all eight post-MVP changes, and five audit fixes (`active-spec-discovery-and-archive-isolation` as `78f6375`, `bounded-run-completion-and-cycle-limit` as `6c83615`, `takeover-cancellation-and-scheduler-coordination` as `814f2d7`, `canonical-spec-and-doc-governance` as `c1373cd`, `real-provider-live-validation` as `a8080f7`). All 24 canonical purposes under `openspec/specs` are complete.
-- Active remediation queue (1 remaining): `repository-identity-security-and-release-readiness`. Order, findings, and dependencies are in Audit remediation sequence below.
-- Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 408 tests, 1 skip (live tmux lifecycle, `tmux` binary unavailable; stdlib only; runtime requires PyYAML). Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access).
-- Quality gates: ruff check/format clean, mypy clean on `src/ariadex`, coverage 83% (gate 82 met), `openspec validate --changes --strict --no-interactive` passes.
-- Environment blockers: tmux absent on this host (live tmux round-trip skipped unless `--local-tmux` fetches it); `pip-audit` not installed here; no git remote is configured, so the canonical Ariadex repository URL is unknown and the `pyproject.toml`/`SECURITY.md` OpenCode links stay untouched for `repository-identity-security-and-release-readiness`.
+- Implemented, verified, and archived: all five MVP changes, `tmux-auto-install`, all eight post-MVP changes, and all six audit fixes (`active-spec-discovery-and-archive-isolation` as `78f6375`, `bounded-run-completion-and-cycle-limit` as `6c83615`, `takeover-cancellation-and-scheduler-coordination` as `814f2d7`, `canonical-spec-and-doc-governance` as `c1373cd`, `real-provider-live-validation` as `a8080f7`, `repository-identity-security-and-release-readiness` as `40494ef`). All 25 canonical purposes under `openspec/specs` are complete.
+- Active remediation queue: none. `openspec list` is empty; all prior per-change evidence below is historical.
+- Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 424 tests, 1 skip (live tmux lifecycle, `tmux` binary unavailable; stdlib only; runtime requires PyYAML). Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (16 tests, no publishing).
+- Quality gates: ruff check/format clean, mypy clean on `src/ariadex`, coverage 83% (gate 82 met), `openspec validate --changes --strict` reports no active changes.
+- Canonical identity: repository `https://github.com/lileililiwen/ariadex`, security contact via GitHub issues (`.../ariadex/issues`); `pyproject.toml`, `SECURITY.md`, README, CHANGELOG, and the release workflow identify Ariadex-owned resources. Release dry run: `python -m ariadex.release --tag ariadex-v<version>` (fail-closed, publishes nothing).
+- Environment blockers: tmux absent on this host (live tmux round-trip skipped unless `--local-tmux` fetches it); `pip-audit` not installed here; no git remote is configured locally and the canonical repository's existence is unverified from here; PyPI upload stays manual until ownership and environment protection are confirmed.
 
 ## Historical evidence
 
@@ -90,7 +91,7 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Select `repository-identity-security-and-release-readiness` next with `openspec list`.
+No active changes remain. Next maintainer steps: add the canonical remote (`git remote add origin https://github.com/lileililiwen/ariadex.git`), push, and tag a release (`ariadex-v<version>`); thereafter V2 capabilities from ROADMAP.
 
 ## Audit remediation sequence
 
@@ -114,7 +115,7 @@ active-spec-discovery-and-archive-isolation
   -> repository-identity-security-and-release-readiness
 ```
 
-The first three packages are implemented, tested, verified, archived, and recorded below; the remaining three stay planning-only until the same is done. Preserve the product boundary: no IDE, provider LLM API, or replacement Coding CLI.
+All six packages are implemented, tested, verified, archived, and recorded in this file. Preserve the product boundary: no IDE, provider LLM API, or replacement Coding CLI.
 
 ## Change selection rule
 
@@ -165,3 +166,11 @@ Point-in-time tool output archived with the changes above; counts below are supe
 - Live proof on this host: `ariadex evidence --local-tmux --only opencode-lifecycle,codex-lifecycle --timeout 60` reports 3 passed (both lifecycles + tmux-provision), 0 skipped, 0 blocked; with `--gate` exits 0. Versions: opencode 1.18.30, codex-cli 0.153.4, local tmux 3.4 (fetch without privileges, isolated dir removed afterwards; no leftover sessions or temp dirs). Codex run answered 4 startup gates (update-skip + trust-confirm on first start and hard-reset restart). No free-form prompts were ever submitted; no credentials stored.
 - `providers.py` capability notes updated from pending-verification to live-verified; `openspec/specs/real-provider-live-validation/spec.md` Purpose completed (24 canonical purposes, no TBD).
 - Full suite `PYTHONPATH=src python3 -m unittest discover -s tests` reports 408 tests OK (1 skip: live tmux lifecycle); ruff check/format clean, mypy clean on 21 files, coverage 83% (gate 82 met), `openspec validate --changes --strict --no-interactive` 1 passed after archiving.
+
+- `repository-identity-security-and-release-readiness` implemented, verified, and archived as `2026-09-12-repository-identity-security-and-release-readiness` (commit `40494ef`).
+- Canonical identity recorded from maintainer input: repository `https://github.com/lileililiwen/ariadex`, security contact via GitHub issues. Corrected `pyproject.toml` `[project.urls]`, `SECURITY.md` reporting route, README `git clone` URLs (2 placeholders), CHANGELOG release guidance (dry-run step), and `.github/workflows/release.yml` (dry-run step after build).
+- New module `src/ariadex/release.py`: `CANONICAL_REPO_URL`/`CANONICAL_ISSUES_URL` single source, `check_metadata_urls`/`check_security_route`/`check_version_tag`/`check_artifacts` fail-closed checks plus `dry_run` over a project root and `python -m ariadex.release --tag ...` entry (exit non-zero on any failure, publishes nothing).
+- Tests: `tests/test_release_readiness.py` (16 tests: real-file identity pass, foreign OpenCode and placeholder rejection for metadata and security route, missing/invalid inputs, version/tag match/mismatch/empty, artifact presence/hashes, dry-run pass and fail-closed paths).
+- Live proof on this host: `python -m build` produced `dist/ariadex-0.1.0.tar.gz` + `dist/ariadex-0.1.0-py3-none-any.whl`; dry run with `--tag ariadex-v9.9.9` fails closed (exit 1, tag mismatch) and with `--tag ariadex-v0.1.0` passes 4/4 (exit 0, nothing published); clean venv installed the wheel and `ariadex --version` (`0.1.0`), `init`, `--help`, `status` all succeed with no `PYTHONPATH`.
+- External blockers recorded: no git remote configured locally (remote add + push left to the maintainer); canonical repository existence unverified from here; PyPI upload stays manual; `pip-audit` not installed in this environment.
+- Full suite `PYTHONPATH=src python3 -m unittest discover -s tests` reports 424 tests OK (1 skip: live tmux lifecycle); ruff check/format clean, mypy clean on 22 files, coverage 83% (gate 82 met), `openspec validate --changes --strict` reports no active changes.
