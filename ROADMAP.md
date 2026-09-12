@@ -43,23 +43,19 @@ archived, and committed (see `HANDOFF.md` for per-change evidence):
    repository identity, corrected provenance links, and a fail-closed
    release dry run.
 
-Three follow-up changes are now active as planning packages:
+All three follow-up changes are implemented, tested, archived, and
+committed (see `HANDOFF.md` for per-change evidence):
 
-1. `release-publication-and-remote-verification` — verify the canonical remote, CI execution, protected release environment, PyPI trusted publishing, and clean installation from the published package.
-2. `reproducible-release-and-security-evidence` — make build, pip-audit, and local/supplied-tmux evidence reproducible and explicitly current.
-3. `quality-gate-hardening` — strengthen critical-path coverage, documentation fixtures, workflow security, and CI structure checks.
+1. `release-publication-and-remote-verification` — canonical remote verified, CI executed on the canonical repo, reviewer-controlled release environment, PyPI trusted publishing, `ariadex 0.1.0` published and clean-installed from the index.
+2. `reproducible-release-and-security-evidence` — `ariadex preflight` toolchain report, side-effect-controlled `--tmux-bin`/`--local-tmux` evidence (9/9 no-skip gate on a tmux-less host), documented offline build path with limitations, pinned `pip-audit` clean.
+3. `quality-gate-hardening` — failure-path coverage, workflow supply-chain pinning with stale-approval detection, fixture-based docs consistency, per-module coverage floors.
 
-## Next: follow-up release and quality evidence
+## Completed: follow-up release and quality evidence
 
-Before V2, complete the active follow-up changes, then demonstrate on a tmux host or explicit local tmux binary:
-
-- fresh-session continuity across a real multi-spec run
-- unresolved-work preservation across process restarts
-- reliable shell verification gating a real completion
-- human takeover in a live CLI session and resync back to AUTO
-- unattended tmux install success path
-- canonical GitHub CI execution and protected release review
-- clean PyPI installation after a maintainer-approved release
+The pre-V2 bar is met: reviewer-approved tag release published to PyPI
+and verified from a clean install; no-skip live evidence demonstrated via
+a fetched local tmux; security audit clean and recorded; CI green on
+every push with quality, security, and install jobs.
 
 ## Audit remediation queue
 

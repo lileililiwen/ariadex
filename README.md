@@ -16,10 +16,12 @@ single-runner concurrency and recovery, log data governance, spec
 dependency and execution governance, metrics export and notifications,
 active-spec discovery and archive isolation, bounded run completion and
 cycle limit, takeover cancellation and scheduler coordination,
-canonical spec and doc governance, real-provider live validation, and
- repository identity and release readiness (505 tests, stdlib only). Three
- follow-up planning changes are active; see [ROADMAP.md](ROADMAP.md) and
-[HANDOFF.md](HANDOFF.md).
+ canonical spec and doc governance, real-provider live validation,
+ repository identity and release readiness, release publication and
+ remote verification, reproducible release and security evidence, and
+ quality gate hardening (518 tests, stdlib only). `ariadex 0.1.0` is
+ published on PyPI; no active changes remain — see [ROADMAP.md](ROADMAP.md)
+ and [HANDOFF.md](HANDOFF.md).
 
 ## Requirements
 
