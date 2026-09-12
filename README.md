@@ -151,7 +151,8 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | `export-logs --out [--json]` | Copy telemetry (`runs/` + `metrics.jsonl`)      |
 | `events [--limit] [--json]` | Show aggregate summary and recent attention events |
 | `export-events --out [--json]` | Write the versioned export snapshot to a file  |
-| `evidence [--gate]`| Run opt-in live runtime evidence (passed/skipped/blocked)      |
+| `evidence [--gate] [--release-gate]`| Run opt-in live runtime evidence (passed/skipped/blocked) |
+| `preflight [--tmux-bin PATH]` | Report toolchain paths/versions for release evidence |
 | `pause`            | Enter `PAUSE`; the CLI session keeps running                   |
 | `resume`           | Leave `PAUSE` (valid only from `PAUSE`)                        |
 | `takeover`         | Enter `MANUAL`; automatic input stops, logs continue           |
@@ -197,7 +198,8 @@ instead of silently substituting another spec.
 
 ```bash
 pip install -e ".[dev]"                              # pinned QA toolchain
-python -m unittest discover -s tests                 # 505 tests, stdlib only
+ariadex preflight                                    # paths/versions: python, package, pip-audit, build, providers, tmux
+python -m unittest discover -s tests                 # 507 tests, stdlib only
 openspec validate --changes --strict --no-interactive
 ruff check src tests
 ruff format --check src tests
@@ -211,8 +213,29 @@ Every CI command above runs locally with the pinned `dev` extra. The
 coverage threshold is the measured baseline: raise it, never lower it.
 Bandit/pylint-style rules are intentionally out of the ruff set (they
 demand behavior-affecting changes; deferred to a hardening pass).
-Releases additionally require `ariadex evidence --gate` (no skips
-allowed) via the tag-triggered release workflow.
+Releases additionally require `ariadex evidence --release-gate`
+(blocked fails, at least one real provider lifecycle passes, skipped
+providers reported unevaluated) via the tag-triggered release workflow.
+
+Reproducible environments: the online path is a fresh checkout with the
+pinned `dev` extra and network access (build isolation downloads build
+requirements, `pip-audit` queries the vulnerability database,
+`--local-tmux` fetches tmux debs). The offline path reuses a warm cache
+instead of downloading:
+
+```bash
+pip install -e ".[dev]"                  # once, while online (warms pip cache)
+python -m build --no-isolation           # offline build; needs `build` + backends already installed
+ariadex evidence --tmux-bin PATH         # offline tmux evidence with a supplied binary
+```
+
+Limitations of the offline path: `--no-isolation` trusts the ambient
+environment instead of a pinned isolated one; `pip-audit` has no offline
+mode (it always queries a vulnerability service), so security evidence
+requires network — an unaudited tree MUST NOT claim a clean audit;
+cached wheels must be refreshed before a release. A build failure from
+unavailable dependencies is a failed gate, never a pass — diagnose with
+`ariadex preflight` (it names the exact missing tool) and rerun online.
 
 See [AGENTS.md](AGENTS.md) for the OpenSpec delivery workflow (one change
 at a time, two-commit handoff) and [HANDOFF.md](HANDOFF.md) for current

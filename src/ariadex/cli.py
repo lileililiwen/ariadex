@@ -21,6 +21,7 @@ from . import live_evidence as live_evidence_mod
 from . import logging as logging_mod
 from . import observability as observability_mod
 from . import operator as operator_mod
+from . import preflight as preflight_mod
 from . import providers as providers_mod
 from . import resync as resync_mod
 from . import runner as runner_mod
@@ -286,6 +287,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="fetch tmux without privileges into an isolated temp dir, "
         "use it for the live scenario, delete the dir afterwards",
+    )
+    preflight = sub.add_parser(
+        "preflight",
+        help="report toolchain paths/versions for release evidence (diagnostic)",
+    )
+    preflight.add_argument(
+        "--tmux-bin",
+        default=None,
+        help="explicit tmux binary to report (same value evidence would use)",
     )
     return parser
 
@@ -1242,6 +1252,9 @@ def main(argv: list[str] | None = None) -> int:
             provision=getattr(args, "provision", False),
             tmux_bin=getattr(args, "tmux_bin", None),
             local_tmux=getattr(args, "local_tmux", False),
+        ),
+        "preflight": lambda: preflight_mod.main(
+            ["--tmux-bin", args.tmux_bin] if getattr(args, "tmux_bin", None) else []
         ),
     }
     return handlers[args.command]()
