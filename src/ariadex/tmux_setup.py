@@ -5,13 +5,20 @@ manager without prompting, then hand the resolved binary to the terminal
 driver. All invocations are non-interactive; `sudo -n` fails fast instead
 of asking for a password. Failures raise TmuxSetupError with an actionable
 manual-install command.
+
+For privilege-free use, `fetch_local_tmux` extracts the official distro
+tmux package into an isolated directory (no root, no system changes) and
+returns a wrapper executable. Deleting that directory fully "uninstalls"
+it; a small binary path can be handed to `TmuxDriver(executable=...)`.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
+from pathlib import Path
 
 EXECUTABLE = "tmux"
 
@@ -180,3 +187,135 @@ def uninstall_tmux() -> str:
             f"automatic tmux removal failed ({' '.join(cmd)}): {detail}"
         )
     return manager
+
+
+# Packages whose libraries always come from the running system; extracting
+# them into an isolated dir could shadow the live libc, so they are never
+# fetched by `fetch_local_tmux`.
+_SYSTEM_LIBS = ("libc6",)
+
+
+def _c_locale() -> dict:
+    """Environment forcing English machine-readable apt output."""
+    env = dict(os.environ)
+    env["LC_ALL"] = "C"
+    return env
+
+
+def read_depends(package: str = "tmux") -> list[str]:
+    """Direct `Depends:` package names for `package` via `apt-cache`."""
+    if shutil.which("apt-cache") is None:
+        raise TmuxSetupError("local tmux fetch needs `apt-cache` on PATH")
+    proc = subprocess.run(
+        ["apt-cache", "depends", "--no-recommends", package],
+        capture_output=True, text=True, timeout=120, env=_c_locale(),
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "unknown error").strip()
+        raise TmuxSetupError(f"`apt-cache depends {package}` failed: {detail}")
+    deps: list[str] = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("Depends:"):
+            continue
+        name = line.split("Depends:", 1)[1].strip().split()[0]
+        if name and name not in deps:
+            deps.append(name)
+    return deps
+
+
+def missing_shared_libs(binary: str | Path,
+                        lib_dirs: list[str | Path] | None = None) -> list[str]:
+    """Shared libraries the loader cannot resolve for `binary` (via ldd).
+
+    `lib_dirs` are prepended to `LD_LIBRARY_PATH` so extracted-but-
+    uninstalled libraries resolve during verification.
+    """
+    env = dict(os.environ)
+    if lib_dirs:
+        extra = ":".join(str(d) for d in lib_dirs)
+        env["LD_LIBRARY_PATH"] = f"{extra}:{env.get('LD_LIBRARY_PATH', '')}"
+    proc = subprocess.run(
+        ["ldd", str(binary)], capture_output=True, text=True, timeout=120,
+        env=env,
+    )
+    if proc.returncode != 0:
+        return [f"ldd failed: {(proc.stderr or proc.stdout).strip()[:200]}"]
+    missing = []
+    for line in proc.stdout.splitlines():
+        if "not found" in line:
+            missing.append(line.strip().split()[0])
+    return missing
+
+
+def write_tmux_wrapper(wrapper: Path, target: Path, lib_dirs: list[Path]) -> Path:
+    """Write an executable wrapper that exposes extracted libs then execs tmux."""
+    joined = ":".join(str(d) for d in lib_dirs)
+    wrapper.parent.mkdir(parents=True, exist_ok=True)
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        f'LD_LIBRARY_PATH="{joined}:$LD_LIBRARY_PATH" exec "{target}" "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return wrapper
+
+
+def fetch_local_tmux(dest_dir: str | Path) -> Path:
+    """Fetch official tmux .debs into `dest_dir` without root privileges.
+
+    Downloads tmux plus its dependencies with `apt-get download` (never
+    installs), extracts them with `dpkg-deb -x`, and returns a `bin/tmux`
+    wrapper executable wired to the extracted libraries. Deleting
+    `dest_dir` fully removes it; the host system is never modified.
+    Raises TmuxSetupError when the toolchain, download, or `ldd`
+    verification fails.
+    """
+    dest = Path(dest_dir)
+    if shutil.which("apt-get") is None or shutil.which("dpkg-deb") is None:
+        raise TmuxSetupError(
+            "local tmux fetch needs `apt-get` and `dpkg-deb` on PATH"
+        )
+    dl_dir = dest / "debs"
+    root = dest / "root"
+    dl_dir.mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        deps = [d for d in read_depends("tmux") if d not in _SYSTEM_LIBS]
+        wanted = ["tmux", *[d for d in deps if d != "tmux"]]
+        proc = subprocess.run(
+            ["apt-get", "download", *wanted],
+            capture_output=True, text=True, timeout=600, cwd=str(dl_dir),
+        )
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "unknown error").strip()
+            raise TmuxSetupError(f"`apt-get download` failed: {detail}")
+        debs = sorted(dl_dir.glob("*.deb"))
+        if not any(p.name.startswith("tmux_") for p in debs):
+            raise TmuxSetupError("`apt-get download tmux` produced no tmux .deb")
+        for deb in debs:
+            proc = subprocess.run(
+                ["dpkg-deb", "-x", str(deb), str(root)],
+                capture_output=True, text=True, timeout=600,
+            )
+            if proc.returncode != 0:
+                detail = (proc.stderr or proc.stdout or "unknown error").strip()
+                raise TmuxSetupError(f"extracting `{deb.name}` failed: {detail}")
+        target = root / "usr" / "bin" / "tmux"
+        if not target.is_file():
+            raise TmuxSetupError("extracted tree has no `usr/bin/tmux`")
+        lib_dirs = sorted({p.parent for p in root.rglob("*.so*") if p.is_file()})
+        missing = missing_shared_libs(target, lib_dirs)
+        if missing:
+            raise TmuxSetupError(
+                "extracted tmux still misses libraries: "
+                + ", ".join(missing)
+                + "; install them on the host or extend the fetch list"
+            )
+        return write_tmux_wrapper(
+            dest / "bin" / "tmux", target, lib_dirs,
+        )
+    except TmuxSetupError:
+        raise
+    except OSError as exc:
+        raise TmuxSetupError(f"local tmux fetch failed: {exc}") from exc

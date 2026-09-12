@@ -136,17 +136,39 @@ def _run_probe(command: list[str], timeout_s: int = DEFAULT_TIMEOUT_S) -> str:
     return (proc.stdout or proc.stderr or "").strip()[:2000]
 
 
-def scenario_tmux_lifecycle(timeout_s: int = DEFAULT_TIMEOUT_S) -> EvidenceResult:
+def resolve_tmux(executable: str = "tmux") -> tuple[str | None, str]:
+    """Resolve the tmux binary: an explicit path must exist and be runnable,
+    otherwise fall back to PATH lookup. Returns (path, note)."""
+    if executable != "tmux" and "/" in executable:
+        candidate = Path(executable)
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate), ""
+        return None, f"`{executable}` is not an executable file"
+    found = tmux_available(executable)
+    if found is None:
+        return None, f"`{executable}` not on PATH"
+    return found, ""
+
+
+def scenario_tmux_lifecycle(timeout_s: int = DEFAULT_TIMEOUT_S,
+                            executable: str = "tmux") -> EvidenceResult:
     """Live tmux create/send/capture/terminate with a fake provider."""
     from . import terminal as terminal_mod
 
-    tmux_path = tmux_available()
+    tmux_path, note = resolve_tmux(executable)
     if tmux_path is None:
+        if executable == "tmux":
+            return EvidenceResult(
+                name="tmux-lifecycle",
+                status=SKIPPED,
+                reason="tmux binary not on PATH; install tmux to run live sessions",
+                diagnostics="prerequisite: `tmux` on PATH",
+            )
         return EvidenceResult(
             name="tmux-lifecycle",
-            status=SKIPPED,
-            reason="tmux binary not on PATH; install tmux to run live sessions",
-            diagnostics="prerequisite: `tmux` on PATH",
+            status=BLOCKED,
+            reason=f"explicit tmux binary unusable: {note}",
+            diagnostics=note,
         )
     driver = terminal_mod.TmuxDriver(executable=tmux_path)
     name = unique_session_name("lifecycle")
@@ -556,44 +578,75 @@ def unprovision_tmux(provisioned: bool) -> str:
 
 def run_all(timeout_s: int = DEFAULT_TIMEOUT_S,
             only: list[str] | None = None,
-            provision: bool = False) -> list[EvidenceResult]:
+            provision: bool = False,
+            tmux_bin: str | None = None,
+            local_tmux: bool = False) -> list[EvidenceResult]:
     """Run every scenario with isolation; unexpected errors become BLOCKED.
 
     With `provision=True`, tmux is installed when missing before the live
     scenario runs and uninstalled afterwards if this call installed it. A
     pre-existing tmux is never removed. Without provisioning, a missing
     tmux is honestly reported as skipped.
+
+    With `local_tmux=True`, tmux is fetched without privileges into an
+    isolated temporary directory and used from there; deleting that
+    directory is the whole uninstall. `tmux_bin` uses an explicit local
+    binary with no install or removal at all.
     """
     results: list[EvidenceResult] = []
     provisioned = False
     provision_attempted = False
     provision_note = ""
     skip_tmux = False
-    if provision and (only is None or "tmux-lifecycle" in only):
-        provision_attempted = True
-        from .tmux_setup import TmuxSetupError
-        try:
-            _, note = provision_tmux()
-            provisioned = note == "provisioned"
-            if provisioned:
-                provision_note = "tmux was missing; provisional install performed"
-        except TmuxSetupError as exc:
-            skip_tmux = True
-            results.append(
-                EvidenceResult(
-                    name="tmux-lifecycle", status=BLOCKED,
-                    reason=f"provisioning failed: {exc}",
-                    diagnostics=str(exc)[:2000],
-                )
-            )
+    executable = tmux_bin or "tmux"
+    local_dir: tempfile.TemporaryDirectory | None = None
     try:
+        if local_tmux and (only is None or "tmux-lifecycle" in only):
+            from . import tmux_setup as setup_mod
+            try:
+                local_dir = tempfile.TemporaryDirectory(
+                    prefix="ariadex-local-tmux-")
+                wrapper = setup_mod.fetch_local_tmux(local_dir.name)
+                executable = str(wrapper)
+                provision_note = (
+                    "local tmux fetched without privileges into an "
+                    "isolated directory"
+                )
+            except setup_mod.TmuxSetupError as exc:
+                skip_tmux = True
+                results.append(
+                    EvidenceResult(
+                        name="tmux-lifecycle", status=BLOCKED,
+                        reason=f"local tmux fetch failed: {exc}",
+                        diagnostics=str(exc)[:2000],
+                    )
+                )
+        if provision and not skip_tmux and (only is None or "tmux-lifecycle" in only):
+            from .tmux_setup import TmuxSetupError
+            provision_attempted = True
+            try:
+                _, note = provision_tmux()
+                provisioned = note == "provisioned"
+                if provisioned:
+                    provision_note = "tmux was missing; provisional install performed"
+            except TmuxSetupError as exc:
+                skip_tmux = True
+                results.append(
+                    EvidenceResult(
+                        name="tmux-lifecycle", status=BLOCKED,
+                        reason=f"provisioning failed: {exc}",
+                        diagnostics=str(exc)[:2000],
+                    )
+                )
         for name, func in SCENARIOS:
             if only and name not in only:
                 continue
             if name == "tmux-lifecycle" and skip_tmux:
-                continue  # provisioning already classified it
+                continue  # already classified above
             try:
-                if name in ("tmux-lifecycle", "provider-smoke"):
+                if name == "tmux-lifecycle":
+                    results.append(func(timeout_s=timeout_s, executable=executable))
+                elif name == "provider-smoke":
                     results.append(func(timeout_s=timeout_s))
                 else:
                     results.append(func())
@@ -615,6 +668,18 @@ def run_all(timeout_s: int = DEFAULT_TIMEOUT_S,
                         name="tmux-provision",
                         status=PASSED if provisioned else SKIPPED,
                         reason=combined,
+                    )
+                )
+        if local_dir is not None:
+            local_dir.cleanup()  # unpath the temporary tmux: full uninstall
+            if any(r.name == "tmux-lifecycle" and r.status == PASSED
+                   for r in results):
+                results.append(
+                    EvidenceResult(
+                        name="tmux-provision",
+                        status=PASSED,
+                        reason=(provision_note + "; isolated directory removed")
+                        if provision_note else "isolated directory removed",
                     )
                 )
     return results
@@ -662,10 +727,20 @@ def main(argv: list[str] | None = None) -> int:
         "--provision", action="store_true",
         help="install tmux when missing, uninstall afterwards only if installed here",
     )
+    parser.add_argument(
+        "--tmux-bin", default=None,
+        help="explicit local tmux binary for the live scenario (no install)",
+    )
+    parser.add_argument(
+        "--local-tmux", action="store_true",
+        help="fetch tmux without privileges into an isolated temp dir, "
+        "use it for the live scenario, delete the dir afterwards",
+    )
     args = parser.parse_args(argv)
     only = args.only.split(",") if args.only else None
     results = run_all(timeout_s=args.timeout, only=only,
-                      provision=args.provision)
+                      provision=args.provision, tmux_bin=args.tmux_bin,
+                      local_tmux=args.local_tmux)
     print(format_report(results))
     if args.gate:
         return gate_exit_code(results)

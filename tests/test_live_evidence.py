@@ -222,6 +222,108 @@ class ProvisionTest(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], ["apt-get", "remove", "-y", "tmux"])
 
 
+class LocalTmuxTest(unittest.TestCase):
+    def test_resolve_explicit_missing_binary_is_blocked(self):
+        result = live_evidence.scenario_tmux_lifecycle(
+            timeout_s=1, executable="/nonexistent/tmux")
+        self.assertEqual(result.status, BLOCKED)
+        self.assertIn("unusable", result.reason)
+
+    def test_resolve_explicit_binary_used_when_present(self):
+        from ariadex import tmux_setup
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_bin = Path(tmp) / "tmux"
+            fake_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_bin.chmod(0o755)
+            with mock.patch.object(
+                tmux_setup, "find_tmux", return_value=None,
+            ):
+                path, note = live_evidence.resolve_tmux(str(fake_bin))
+        self.assertEqual(path, str(fake_bin))
+        self.assertEqual(note, "")
+
+    def test_local_fetch_failure_blocks_honestly(self):
+        from ariadex import tmux_setup
+        with mock.patch.object(
+            tmux_setup, "fetch_local_tmux",
+            side_effect=tmux_setup.TmuxSetupError("no apt here"),
+        ):
+            results = run_all(only=["tmux-lifecycle"], local_tmux=True)
+        by_name = {r.name: r for r in results}
+        self.assertEqual(by_name["tmux-lifecycle"].status, BLOCKED)
+        self.assertIn("fetch failed", by_name["tmux-lifecycle"].reason)
+
+    def test_local_tmux_tempdir_removed_after_run(self):
+        from ariadex import tmux_setup
+        seen = {}
+
+        def fake_fetch(dest):
+            seen["dest"] = str(dest)
+            wrapper = Path(dest) / "bin" / "tmux"
+            wrapper.parent.mkdir(parents=True, exist_ok=True)
+            wrapper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            wrapper.chmod(0o755)
+            return wrapper
+
+        fake_result = live_evidence.EvidenceResult(
+            "tmux-lifecycle", PASSED, "mocked live pass")
+        patched = tuple(
+            (n, (lambda **kw: fake_result) if n == "tmux-lifecycle" else f)
+            for n, f in live_evidence.SCENARIOS
+        )
+        with mock.patch.object(tmux_setup, "fetch_local_tmux",
+                               side_effect=fake_fetch):
+            with mock.patch.object(live_evidence, "SCENARIOS", patched):
+                results = run_all(only=["tmux-lifecycle"], local_tmux=True)
+        self.assertFalse(Path(seen["dest"]).exists())  # unpath == uninstall
+        by_name = {r.name: r for r in results}
+        self.assertEqual(by_name["tmux-lifecycle"].status, PASSED)
+        self.assertEqual(by_name["tmux-provision"].status, PASSED)
+
+    def test_read_depends_parses_names(self):
+        from subprocess import CompletedProcess
+        from ariadex import tmux_setup
+        out = "tmux\n  Depends: libc6\n  Depends: libutempter0\n  PreDepends: x\n"
+        with mock.patch.object(
+            tmux_setup.subprocess, "run",
+            return_value=CompletedProcess(args=[], returncode=0,
+                                          stdout=out, stderr=""),
+        ):
+            self.assertEqual(tmux_setup.read_depends("tmux"),
+                             ["libc6", "libutempter0"])
+
+    def test_missing_libs_parsing(self):
+        from subprocess import CompletedProcess
+        from ariadex import tmux_setup
+        out = ("\tlibutempter.so.0 => not found\n"
+               "\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x123)\n")
+        with mock.patch.object(
+            tmux_setup.subprocess, "run",
+            return_value=CompletedProcess(args=[], returncode=0,
+                                          stdout=out, stderr=""),
+        ) as run:
+            self.assertEqual(tmux_setup.missing_shared_libs("/bin/x"),
+                             ["libutempter.so.0"])
+        self.assertIn("ldd", run.call_args.args[0])
+
+    def test_wrapper_executes_with_lib_path(self):
+        import subprocess as sp
+        from ariadex import tmux_setup
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "real"
+            target.write_text("#!/bin/sh\necho LIB=$LD_LIBRARY_PATH\n",
+                              encoding="utf-8")
+            target.chmod(0o755)
+            libdir = Path(tmp) / "lib"
+            libdir.mkdir()
+            wrapper = tmux_setup.write_tmux_wrapper(
+                Path(tmp) / "bin" / "tmux", target, [libdir])
+            proc = sp.run([str(wrapper)], capture_output=True, text=True,
+                          timeout=30)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn(str(libdir), proc.stdout)
+
+
 def run_cli(root: Path, *argv: str) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     with chdir(root), redirect_stdout(out), redirect_stderr(err):
@@ -262,6 +364,16 @@ class EvidenceCliTest(unittest.TestCase):
                                  "provider-startup")
         self.assertEqual(code, 0)
         self.assertTrue(run_all_mock.call_args.kwargs["provision"])
+
+    def test_tmux_bin_flag_reaches_runner(self):
+        with mock.patch.object(
+            live_evidence, "run_all", return_value=[],
+        ) as run_all_mock:
+            code, _, _ = run_cli(self.root, "evidence", "--tmux-bin",
+                                 "/tmp/custom/tmux", "--only", "tmux-lifecycle")
+        self.assertEqual(code, 0)
+        self.assertEqual(run_all_mock.call_args.kwargs["tmux_bin"],
+                         "/tmp/custom/tmux")
 
     def test_other_commands_still_work(self):
         code, _, _ = run_cli(self.root, "status")
