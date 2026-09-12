@@ -2,20 +2,18 @@
 
 ## Current state
 
-- `state-driven-runner-and-handoff` is implemented, verified, and archived as `2026-09-12-state-driven-runner-and-handoff` (commit `6b5bf2f`).
-- New modules: `src/ariadex/handoff.py` (versioned YAML front-matter in `.ariadex/handoff.md`, OPEN/RESOLVED/DEFERRED/BLOCKED lifecycle with history, atomic write, malformed-file `HandoffError`), `src/ariadex/runner.py` (inspect -> determine -> execute -> persist loop, `Verifier` boundary, `select_context_strategy`, `apply_reset`, stop-on-blocker, state.json sync).
-- Selection rule: highest-priority OPEN issue precedes spec advancement; missing spec dir or adapter failure records a BLOCKED item without advancing.
-- Config reconciliations: `context_strategy` enum per-spec/per-task/token-threshold/manual/never (default per-spec; legacy `fresh-session` coerced), `blocker_policy` enum stop-on-blocker/record-and-continue (default stop-on-blocker; legacy `record-and-stop` coerced). `reset_mode` soft/hard/auto unchanged.
-- Verification stays a boundary (`UnavailableVerifier`): unverified outcomes persist and stop the run; nothing completes from agent prose. `run` now executes the loop (bounded 10 cycles); `status` shows handoff status, open/blocked counts, blockers, and next action.
+- `verification-logging-and-observability` is implemented, verified, and archived as `2026-09-12-verification-logging-and-observability` (commit `bf0816d`).
+- New modules: `src/ariadex/verify.py` (`ShellVerifier`, ordered commands, exit/duration/timeout capture, 20k bounded output), `src/ariadex/logging.py` (per-cycle logs under `.ariadex/runs/`, metrics JSONL with explicit `usage: unavailable`, secret redaction), `src/ariadex/status.py` (operator projection: mode/agent/spec/session/context/elapsed/unresolved/tests/next; absent record shows `no verification record`, never PASS).
+- Runner now: `ShellVerifier` by default when commands are configured; failed verification bumps persisted `attempts`, schedules repair while `attempts <= retry_limit`, then BLOCKED (stop-on-blocker) or skip-and-continue (record-and-continue); exhausted issues are skipped by selection; every cycle writes one log + one metrics record.
 - Environment blocker (unchanged): no `tmux` binary, so live-tmux test skips and `run` stops before sending work in this environment.
-- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (105 tests, 1 skip; stdlib only; runtime requires PyYAML).
-- Active queue is the remaining two MVP changes in [ROADMAP.md](ROADMAP.md).
+- Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (139 tests, 1 skip; stdlib only; runtime requires PyYAML).
+- Active queue is the final MVP change in [ROADMAP.md](ROADMAP.md).
 
 ## Next change
 
-`verification-logging-and-observability`
+`human-control-and-resync`
 
-It implements shell-command verification gates, bounded retries, session run logs, metrics records, and status display on top of the runner boundary.
+It implements AUTO/MANUAL/PAUSE transitions, manual takeover, resume, and git/spec/handoff resync on top of the full runtime.
 
 ## Feature-to-change sequence
 
@@ -59,6 +57,6 @@ Incomplete or blocked work must not be claimed complete. Record the exact failed
 
 ## Verification evidence
 
-- `PYTHONPATH=src python3 -m unittest discover -s tests`: 105 tests ran, OK (1 skipped: live tmux lifecycle, `tmux` binary unavailable).
-- `openspec validate --changes --strict --no-interactive`: 3 passed, 0 failed (before archiving; archive generated `openspec/specs/handoff-and-unresolved-queue/spec.md` and `openspec/specs/state-driven-runner/spec.md`).
-- Scratch exercise: `init` + `status` shows handoff section; `run` without tmux exits 1 before sending work; runner restart/queue/reset paths covered by fake-driver tests.
+- `PYTHONPATH=src python3 -m unittest discover -s tests`: 139 tests ran, OK (1 skipped: live tmux lifecycle, `tmux` binary unavailable).
+- `openspec validate --changes --strict --no-interactive`: 2 passed, 0 failed (before archiving; archive generated `openspec/specs/runner-verification/spec.md` and `openspec/specs/session-observability/spec.md`).
+- Scratch exercise: `init` + `status` shows the full projection (`tests: no verification record`); `run` without tmux exits 1 before sending work.
