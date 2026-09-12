@@ -1,7 +1,7 @@
 # quality-gates Specification
 
 ## Purpose
-TBD - created by archiving change ci-quality-security-gates. Update Purpose after archive.
+Defines release eligibility through automated gates: CI must run the test suite, strict OpenSpec validation, static quality (ruff/mypy), coverage, dependency audit, live-evidence reporting, and clean-package installation, with environment gaps reported as skips rather than passes.
 ## Requirements
 ### Requirement: Every release is reproducibly verified
 

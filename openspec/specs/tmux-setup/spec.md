@@ -1,7 +1,7 @@
 # tmux-setup Specification
 
 ## Purpose
-TBD - created by archiving change tmux-auto-install. Update Purpose after archive.
+Defines unattended tmux provisioning: a missing `tmux` executable is installed via the host package manager without prompting before work or attach, failures name the exact manual install command, and `--no-auto-install` preserves the stop-before-work error.
 ## Requirements
 ### Requirement: Missing tmux is installed without prompting
 

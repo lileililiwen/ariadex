@@ -1,7 +1,7 @@
 # agent-adapter Specification
 
 ## Purpose
-TBD - created by archiving change agent-adapters-and-tmux-driver. Update Purpose after archive.
+Defines the provider-neutral adapter contract: one lifecycle interface (start, send, interrupt, new-session, capture, idle detection, terminate) with explicit capability reporting, so the runner drives OpenCode, Codex, or future providers without provider-specific commands.
 ## Requirements
 ### Requirement: Providers implement one lifecycle contract
 

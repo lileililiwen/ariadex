@@ -1,7 +1,7 @@
 # resync Specification
 
 ## Purpose
-TBD - created by archiving change human-control-and-resync. Update Purpose after archive.
+Defines return-to-`AUTO` reconciliation: rereading handoff, git status/diff, current spec, and unresolved items to rebuild execution context, while never treating manual edits or a clean tree as completion without configured verification.
 ## Requirements
 ### Requirement: Return to AUTO rebuilds execution context
 

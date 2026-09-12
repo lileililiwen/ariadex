@@ -1,7 +1,7 @@
 # spec-governance Specification
 
 ## Purpose
-TBD - created by archiving change spec-dependency-and-execution-governance. Update Purpose after archive.
+Defines deterministic spec ordering: declared `depends_on` predecessors must be verified complete, missing dependencies and cycles become durable blockers, explicit handoff selections are never silently substituted, and deferred or blocked predecessors still block.
 ## Requirements
 ### Requirement: Spec dependencies are deterministic
 

@@ -1,7 +1,7 @@
 # active-spec-discovery Specification
 
 ## Purpose
-TBD - created by archiving change active-spec-discovery-and-archive-isolation. Update Purpose after archive.
+Defines the boundary between active changes and archived history: only top-level entries under `openspec/changes` (excluding `archive/` and hidden names) are schedulable work, and graph loading, runner inspection, preview, doctor, and resync share that discovery rule.
 ## Requirements
 ### Requirement: Archived changes are never active
 

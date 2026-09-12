@@ -1,7 +1,7 @@
 # cli-lifecycle Specification
 
 ## Purpose
-TBD - created by archiving change project-foundation-and-cli. Update Purpose after archive.
+Defines the stable CLI command surface and lifecycle semantics: every command validates prerequisites and transitions, returns non-zero on invalid state, and never claims progress when execution has not started.
 ## Requirements
 ### Requirement: MVP commands have stable lifecycle semantics
 

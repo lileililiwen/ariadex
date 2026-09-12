@@ -1,7 +1,7 @@
 # live-evidence Specification
 
 ## Purpose
-TBD - created by archiving change live-runtime-evidence. Update Purpose after archive.
+Defines honest live runtime evidence: isolated scenarios (temporary projects, unique sessions, bounded timeouts, guaranteed cleanup) classified as passed, skipped, or blocked, where skips and blocks never count as passing release evidence.
 ## Requirements
 ### Requirement: Live evidence is classified honestly
 

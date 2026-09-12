@@ -1,7 +1,7 @@
 # state-driven-runner Specification
 
 ## Purpose
-TBD - created by archiving change state-driven-runner-and-handoff. Update Purpose after archive.
+Defines state-driven orchestration: the runner reads durable handoff state, inspects the repository, selects the next action (open issues before next spec), executes through an adapter, persists the outcome, and stops safely on blockers under `stop-on-blocker`.
 ## Requirements
 ### Requirement: The runner is state-driven
 

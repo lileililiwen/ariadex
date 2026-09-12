@@ -1,7 +1,7 @@
 # human-control Specification
 
 ## Purpose
-TBD - created by archiving change human-control-and-resync. Update Purpose after archive.
+Defines input ownership by mode: `AUTO` may schedule and send input, `MANUAL` observes and logs without sending input, `PAUSE` starts no new scheduling, and every transition persists so it survives restarts.
 ## Requirements
 ### Requirement: Modes define input ownership
 

@@ -1,7 +1,7 @@
 # log-governance Specification
 
 ## Purpose
-TBD - created by archiving change log-data-governance. Update Purpose after archive.
+Defines bounded, privacy-preserving telemetry: configured retention and size limits on run logs and metrics, secret redaction before persistence, restrictive file permissions, and bounded export/prune operations that never touch durable handoff history.
 ## Requirements
 ### Requirement: Local telemetry is bounded
 

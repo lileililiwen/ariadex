@@ -1,7 +1,7 @@
 # observability Specification
 
 ## Purpose
-TBD - created by archiving change metrics-export-and-notifications. Update Purpose after archive.
+Defines versioned telemetry export and bounded attention signals: a provider-neutral sink interface (file, command, webhook) with failure isolation, plus opt-in, redacted, deduplicated, rate-limited notifications that never alter scheduling decisions.
 ## Requirements
 ### Requirement: Telemetry is versioned and exportable
 

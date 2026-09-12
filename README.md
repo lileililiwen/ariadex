@@ -6,15 +6,19 @@ Ariadex keeps Coding CLI work moving across fresh contexts without losing unfini
 
 ## Status
 
-MVP plus all eight post-MVP changes are implemented, tested, archived,
-and committed: project foundation and CLI, agent adapters and tmux
-driver, state-driven runner and handoff, verification/logging/
-observability, human control and resync, unattended tmux installation,
-live runtime evidence, packaging and distribution, CI/quality/security
-gates, human supervision ergonomics, single-runner concurrency and
-recovery, log data governance, spec dependency and execution governance,
-and metrics export and notifications (358 tests, stdlib only).
-See [ROADMAP.md](ROADMAP.md) and [HANDOFF.md](HANDOFF.md).
+MVP, all eight post-MVP changes, and three audit runtime fixes are
+implemented, tested, archived, and committed: project foundation and
+CLI, agent adapters and tmux driver, state-driven runner and handoff,
+verification/logging/observability, human control and resync,
+unattended tmux installation, live runtime evidence, packaging and
+distribution, CI/quality/security gates, human supervision ergonomics,
+single-runner concurrency and recovery, log data governance, spec
+dependency and execution governance, metrics export and notifications,
+active-spec discovery and archive isolation, bounded run completion and
+cycle limit, and takeover cancellation and scheduler coordination
+(393 tests, stdlib only). An audit remediation queue remains active
+(four of six changes archived); see [ROADMAP.md](ROADMAP.md) and
+[HANDOFF.md](HANDOFF.md).
 
 ## Requirements
 
@@ -192,7 +196,7 @@ instead of silently substituting another spec.
 
 ```bash
 pip install -e ".[dev]"                              # pinned QA toolchain
-python -m unittest discover -s tests                 # 358 tests, stdlib only
+python -m unittest discover -s tests                 # 393 tests, stdlib only
 openspec validate --changes --strict --no-interactive
 ruff check src tests
 ruff format --check src tests

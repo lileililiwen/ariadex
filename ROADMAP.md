@@ -25,7 +25,19 @@ committed (see `HANDOFF.md` for per-change evidence):
 7. `spec-dependency-and-execution-governance` — deterministic dependency graph and eligible-spec selection.
 8. `metrics-export-and-notifications` — versioned metrics, provider-neutral export, and bounded attention signals.
 
-No active changes remain (`openspec list` is empty).
+Four audit fixes are additionally implemented, tested,
+archived, and committed (see `HANDOFF.md` for per-change evidence):
+
+1. `active-spec-discovery-and-archive-isolation` — archived changes are
+   never scheduled as active work.
+2. `bounded-run-completion-and-cycle-limit` — cycle-limit exhaustion is
+   an explicit incomplete outcome, never success.
+3. `takeover-cancellation-and-scheduler-coordination` — takeover and
+   pause cancel in-flight scheduling without new provider input.
+4. `canonical-spec-and-doc-governance` — complete canonical purposes,
+   reconciled current/historical docs, and a consistency test.
+
+Two remediation changes remain active (`openspec list` is non-empty).
 
 ## Next: live-environment evidence
 
@@ -36,6 +48,19 @@ Before V2, demonstrate on a tmux host with install rights:
 - reliable shell verification gating a real completion
 - human takeover in a live CLI session and resync back to AUTO
 - unattended tmux install success path
+
+## Audit remediation queue
+
+The completed implementation audit produced six remediation changes, four of which are archived above. They are ordered so runtime correctness is fixed before evidence and release hygiene:
+
+1. `active-spec-discovery-and-archive-isolation`
+2. `bounded-run-completion-and-cycle-limit`
+3. `takeover-cancellation-and-scheduler-coordination`
+4. `canonical-spec-and-doc-governance`
+5. `real-provider-live-validation`
+6. `repository-identity-security-and-release-readiness`
+
+See [HANDOFF.md](HANDOFF.md) for findings, dependencies, and verification evidence.
 
 ## Next: deferred V2 capabilities
 

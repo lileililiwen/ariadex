@@ -1,7 +1,7 @@
 # python-distribution Specification
 
 ## Purpose
-TBD - created by archiving change packaging-and-distribution. Update Purpose after archive.
+Defines Ariadex as an installable Python package: standards-compliant sdist and wheel artifacts with a console entry point, declared Python/PyYAML requirements, external tmux and provider prerequisites, and clean-environment install verification.
 ## Requirements
 ### Requirement: Ariadex is installable as a Python package
 

@@ -1,7 +1,7 @@
 # tmux-terminal Specification
 
 ## Purpose
-TBD - created by archiving change agent-adapters-and-tmux-driver. Update Purpose after archive.
+Defines the persistent terminal transport: a named tmux session supporting creation, input delivery, pane capture, and reattachment across disconnects, with actionable errors when tmux, the session, or delivery is unavailable.
 ## Requirements
 ### Requirement: Terminal access is persistent and attachable
 

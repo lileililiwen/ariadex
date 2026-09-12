@@ -1,7 +1,7 @@
 # human-operator-cli Specification
 
 ## Purpose
-TBD - created by archiving change human-supervision-ergonomics. Update Purpose after archive.
+Defines the operator supervision interface: preflight (`doctor`), no-input preview, queue/history views, explicitly confirmed scheduling, history-preserving issue lifecycle commands, and stable JSON output for scripting.
 ## Requirements
 ### Requirement: Operators can inspect before scheduling
 

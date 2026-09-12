@@ -1,7 +1,7 @@
 # handoff-and-unresolved-queue Specification
 
 ## Purpose
-TBD - created by archiving change state-driven-runner-and-handoff. Update Purpose after archive.
+Defines the durable handoff as cross-session memory: session, spec, status, and next-action records plus an unresolved queue whose items use explicit `OPEN`/`RESOLVED`/`DEFERRED`/`BLOCKED` statuses and are never silently discarded.
 ## Requirements
 ### Requirement: Handoff preserves cross-session work
 

@@ -1,7 +1,7 @@
 # project-foundation Specification
 
 ## Purpose
-TBD - created by archiving change project-foundation-and-cli. Update Purpose after archive.
+Defines the project foundation every other capability builds on: explicit validated configuration, non-destructive `init`, and durable mode-bearing state (mode, session, spec, unresolved count) readable by `status`.
 ## Requirements
 ### Requirement: Configuration is explicit and validated
 

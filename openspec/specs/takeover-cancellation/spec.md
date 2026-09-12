@@ -1,7 +1,7 @@
 # takeover-cancellation Specification
 
 ## Purpose
-TBD - created by archiving change takeover-cancellation-and-scheduler-coordination. Update Purpose after archive.
+Defines immediate human preemption of a running scheduler: takeover and pause requests cancel in-flight cycles at phase checkpoints without new provider input, send-phase uncertainty is preserved for recovery, and verified completions stand.
 ## Requirements
 ### Requirement: Manual control prevents new automatic input
 

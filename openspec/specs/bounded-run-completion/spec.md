@@ -1,7 +1,7 @@
 # bounded-run-completion Specification
 
 ## Purpose
-TBD - created by archiving change bounded-run-completion-and-cycle-limit. Update Purpose after archive.
+Defines honest run termination: cycle-limit exhaustion and zero-budget runs are explicit incomplete outcomes that preserve the next action, send no further input, and exit non-zero instead of reporting success.
 ## Requirements
 ### Requirement: Cycle-limit exhaustion is not success
 

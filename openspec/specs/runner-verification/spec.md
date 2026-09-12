@@ -1,7 +1,7 @@
 # runner-verification Specification
 
 ## Purpose
-TBD - created by archiving change verification-logging-and-observability. Update Purpose after archive.
+Defines verification-gated completion: every configured command must exit zero (with command, output, exit code, and duration captured), retries stop at the configured bound, and failures persist as visible unresolved or blocked work.
 ## Requirements
 ### Requirement: Configured commands gate completion
 

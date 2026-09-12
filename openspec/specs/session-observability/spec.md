@@ -1,7 +1,7 @@
 # session-observability Specification
 
 ## Purpose
-TBD - created by archiving change verification-logging-and-observability. Update Purpose after archive.
+Defines durable session records: per-cycle logs capturing input, output, session, spec, timing, exit code, validation, and reset reason, plus metrics that record unavailable token/cost usage explicitly instead of estimating it.
 ## Requirements
 ### Requirement: Session logs are durable
 

@@ -1,7 +1,7 @@
 # runner-recovery Specification
 
 ## Purpose
-TBD - created by archiving change single-runner-concurrency-and-recovery. Update Purpose after archive.
+Defines single-scheduler safety and crash recovery: per-project leases refuse second owners, persisted cycle phases turn interruptions into recoverable uncertain-delivery blockers, and explicit bounded `recover` reconciles state without starting sessions or sending input.
 ## Requirements
 ### Requirement: Only one scheduler owns a project
 
