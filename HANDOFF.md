@@ -2,7 +2,7 @@
 
 ## Current state
 
-- Implemented, verified, and archived: all five MVP changes, `tmux-auto-install`, all eight post-MVP changes, all six audit fixes (`active-spec-discovery-and-archive-isolation` as `78f6375`, `bounded-run-completion-and-cycle-limit` as `6c83615`, `takeover-cancellation-and-scheduler-coordination` as `814f2d7`, `canonical-spec-and-doc-governance` as `c1373cd`, `real-provider-live-validation` as `a8080f7`, `repository-identity-security-and-release-readiness` as `40494ef`), all three follow-up changes (`release-publication-and-remote-verification`, `reproducible-release-and-security-evidence`, `quality-gate-hardening`), all three daemon UX changes (`daemon-first-runtime-and-simple-cli`, `human-yield-hotkey-and-floating-control`, and `local-install-and-user-deployment`, see Verification evidence below), `companion-prerequisite-auto-install` (commit `4d447a7`), `tagged-version-pypi-release-alignment` (commit `8e879ab`), `dev-environment-bootstrap`, `daemon-widget-command`, `robot-agent-supervisor`, and `provider-auto-continuation` (commit `1890950`, see Verification evidence below). All 37 canonical purposes under `openspec/specs` are complete. `ariadex 0.1.0` is published on PyPI. No active changes remain.
+- Implemented, verified, and archived: all five MVP changes, `tmux-auto-install`, all eight post-MVP changes, all six audit fixes (`active-spec-discovery-and-archive-isolation` as `78f6375`, `bounded-run-completion-and-cycle-limit` as `6c83615`, `takeover-cancellation-and-scheduler-coordination` as `814f2d7`, `canonical-spec-and-doc-governance` as `c1373cd`, `real-provider-live-validation` as `a8080f7`, `repository-identity-security-and-release-readiness` as `40494ef`), all three follow-up changes (`release-publication-and-remote-verification`, `reproducible-release-and-security-evidence`, `quality-gate-hardening`), all three daemon UX changes (`daemon-first-runtime-and-simple-cli`, `human-yield-hotkey-and-floating-control`, and `local-install-and-user-deployment`, see Verification evidence below), `companion-prerequisite-auto-install` (commit `4d447a7`), `tagged-version-pypi-release-alignment` (commit `8e879ab`), `dev-environment-bootstrap`, `daemon-widget-command`, `robot-agent-supervisor`, `provider-auto-continuation` (commit `1890950`), and `robot-widget-runtime` (commit `dd0a8d4`). All 40 canonical purposes under `openspec/specs` are complete. `ariadex 0.1.0` is published on PyPI. No active changes remain.
 - Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 797 tests, 0 skips (fully hermetic; stdlib only; runtime requires PyYAML). Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (no publishing).
 - Follow-up `simple-widget-workflow` is implemented and archived: `widget` checks Tkinter before daemon startup, supports explicit `--yes` prerequisite installation, and hides the historical `companion` command from normal help.
 - Added [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md), a detailed user/developer reference for the current daemon, widget controls, modes, durable files, cycle flow, and troubleshooting. It explicitly separates the implemented runtime from deferred arbitrary-agent observation behavior.
@@ -95,6 +95,19 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 No active changes remain. Future work starts as a new OpenSpec change after
 approval.
+
+## Latest verification evidence
+
+- `robot-widget-runtime` was archived as `2026-09-12-robot-widget-runtime`
+  (`dd0a8d4`). Approval/confirmation screens remain a non-terminal `WAITING`
+  state; `--attach` observes an already-started conversation without sending
+  an initial prompt; `watch --widget` runs the watcher alongside the
+  independent always-on-top middle-right robot window; Pause and Quit leave
+  the user-owned tmux session running.
+- Focused verification: `PYTHONPATH=src python3 -m unittest tests.test_robot
+  tests.test_companion tests.test_cli tests.test_docs_consistency` — 168 tests
+  passed, 1 expected display-dependent skip. Strict change validation and
+  `openspec validate --specs --strict --no-interactive` passed (40 specs).
 
 ## Audit remediation sequence
 
