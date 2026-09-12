@@ -344,10 +344,17 @@ class LocalTmuxTest(unittest.TestCase):
         from ariadex import tmux_setup
 
         out = "tmux\n  Depends: libc6\n  Depends: libutempter0\n  PreDepends: x\n"
-        with mock.patch.object(
-            tmux_setup.subprocess,
-            "run",
-            return_value=CompletedProcess(args=[], returncode=0, stdout=out, stderr=""),
+        with (
+            mock.patch.object(
+                tmux_setup.shutil, "which", return_value="/usr/bin/apt-cache"
+            ),
+            mock.patch.object(
+                tmux_setup.subprocess,
+                "run",
+                return_value=CompletedProcess(
+                    args=[], returncode=0, stdout=out, stderr=""
+                ),
+            ),
         ):
             self.assertEqual(tmux_setup.read_depends("tmux"), ["libc6", "libutempter0"])
 
