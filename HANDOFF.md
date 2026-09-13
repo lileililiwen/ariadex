@@ -2,10 +2,13 @@
 
 ## Current state
 
-- Planning queue is empty: `boundary-diagnostic-evidence` is implemented
-  below and no active changes remain (`openspec list` reports no items).
-  The `/tmp` permission policy remains deferred and is intentionally not
-  included.
+- Planning queue contains two new changes. Implement
+  `version-aware-upgrade-management` first, then
+  `safe-temporary-permission-policy`; both are planning-only and must be
+  implemented one active change at a time. The upgrade change addresses the
+  installed PyPI `0.1.0` lag and safe provenance-aware updates. The permission
+  change covers the deferred private-temp approval policy; it does not grant
+  arbitrary shared `/tmp` access.
 - Implemented, verified, and archived:
   `2026-09-13-boundary-diagnostic-evidence` (commit `96dc8fe`). Every
   provider stop, boundary evaluation, failed new-conversation operation,
@@ -257,8 +260,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active changes remain. `openspec list` reports an empty queue; select
-the next change only when new planning artifacts appear, one at a time.
+Implement `version-aware-upgrade-management` first. After it is archived,
+implement `safe-temporary-permission-policy`.
 
 ## Latest verification evidence
 
