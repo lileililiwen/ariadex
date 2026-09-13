@@ -38,6 +38,7 @@ from . import state as state_mod
 from . import status as status_mod
 from . import terminal as terminal_mod
 from . import tmux_setup as tmux_setup_mod
+from . import upgrade as upgrade_mod
 from . import widget_runtime as widget_runtime_mod
 
 EXIT_OK = 0
@@ -566,6 +567,35 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="explicit tmux binary to report (same value evidence would use)",
     )
+    upgrade_parser = sub.add_parser(
+        "upgrade",
+        help="check the package index and apply a confirmed package upgrade",
+    )
+    upgrade_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="report installed/index versions without changing anything",
+    )
+    upgrade_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="confirm the planned package upgrade without prompting",
+    )
+    upgrade_parser.add_argument(
+        "--index-url",
+        default=None,
+        help="explicit package index endpoint (default: the release index)",
+    )
+    upgrade_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=upgrade_mod.INDEX_TIMEOUT_S,
+        help="index probe timeout in seconds",
+    )
+    upgrade_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
     dev_parser = sub.add_parser("dev", help="prepare the development environment")
     dev_sub = dev_parser.add_subparsers(dest="dev_command", required=True)
     setup_parser = dev_sub.add_parser(
@@ -991,6 +1021,7 @@ def cmd_status(project_dir: Path, as_json: bool = False) -> int:
     blocked = [item for item in handoff.unresolved if item.status == "BLOCKED"]
     opened = sum(1 for item in handoff.unresolved if item.status == "OPEN")
     tests = status_mod.tests_summary(records[-1] if records else None)
+    snapshot = upgrade_mod.version_snapshot()
     if as_json:
         import json as json_mod
 
@@ -1007,6 +1038,9 @@ def cmd_status(project_dir: Path, as_json: bool = False) -> int:
             "blocked_count": len(blocked),
             "tests": tests,
             "next_action": handoff.next_action,
+            "package_version": snapshot["running"],
+            "installed_version": snapshot["installed"],
+            "package_drift": snapshot["drift"],
         }
         print(json_mod.dumps(payload, sort_keys=True, indent=2))
         for item in blocked:
@@ -1024,6 +1058,8 @@ def cmd_status(project_dir: Path, as_json: bool = False) -> int:
             blocked_count=len(blocked),
             tests=tests,
             next_action=handoff.next_action,
+            package_version=snapshot["running"],
+            installed_version=snapshot["installed"],
         )
     )
     for item in blocked:
@@ -2216,6 +2252,7 @@ ADMIN_COMMANDS = (
     "status",
     "pause",
     "resume",
+    "upgrade",
 )
 
 ADMIN_PUBLIC_COMMANDS = (
@@ -2893,6 +2930,124 @@ def cmd_export_diagnostics(
     return EXIT_OK
 
 
+def cmd_upgrade(
+    project_dir: Path,
+    *,
+    check_only: bool = False,
+    confirmed: bool = False,
+    as_json: bool = False,
+    index_url: str | None = None,
+    timeout_s: int | None = None,
+) -> int:
+    """Check the package index and apply a confirmed package upgrade.
+
+    Read-only by default with `--check`: reports installed/index versions
+    and installation provenance without changing the environment or project
+    files. Without `--check`, shows the planned owner-tool operation and
+    requires explicit confirmation before mutation. Never replaces an
+    editable or source checkout, never touches project `.ariadex` state,
+    and never interrupts a running managed runtime: newly installed code
+    applies to future starts only.
+    """
+    import json as json_mod
+
+    _ = project_dir  # upgrade is environment-scoped; project files untouched
+    timeout = timeout_s if timeout_s is not None else upgrade_mod.INDEX_TIMEOUT_S
+    endpoint = (index_url or upgrade_mod.DEFAULT_INDEX_URL).strip()
+
+    def _fetch(*, timeout_s: int = timeout) -> str:
+        return upgrade_mod.fetch_index_payload(endpoint, timeout)
+
+    running = upgrade_mod.running_version()
+    installed_dist = upgrade_mod.installed_distribution_version()
+    basis = (installed_dist or running).strip()
+    try:
+        check = upgrade_mod.probe_index(basis, fetcher=_fetch, timeout_s=timeout)
+    except Exception as exc:
+        check = upgrade_mod.IndexCheck(
+            "unavailable",
+            basis,
+            "",
+            f"package index unavailable ({exc}); the installed package "
+            "is unchanged; retry `ariadex upgrade --check` later",
+        )
+    provenance = upgrade_mod.detect_provenance()
+    record = daemon_mod.read_record(project_dir)
+    daemon_running = daemon_mod.daemon_alive(record)
+    snapshot = upgrade_mod.version_snapshot(
+        running=running, installed=(installed_dist or running)
+    )
+    payload = {
+        "running": snapshot["running"],
+        "installed": snapshot["installed"],
+        "index": check.latest,
+        "status": check.status,
+        "provenance": provenance.kind,
+        "provenance_detail": provenance.detail,
+        "daemon_running": daemon_running,
+        "detail": check.detail,
+    }
+    if check_only:
+        if as_json:
+            print(json_mod.dumps(payload, sort_keys=True, indent=2))
+        else:
+            print(upgrade_mod.format_check_text(check, provenance))
+            print(upgrade_mod.drift_note(snapshot, daemon_running))
+            if daemon_running:
+                print("managed runtime is active; version checks never interrupt it")
+        return (
+            EXIT_OK
+            if check.status in ("current", "update-available", "ahead")
+            else EXIT_ERROR
+        )
+    plan = upgrade_mod.plan_upgrade(check, provenance)
+    if as_json:
+        payload["plan"] = (
+            {"argv": plan.argv, "description": plan.description}
+            if plan.allowed
+            else None
+        )
+        payload["plan_reason"] = plan.reason
+        print(json_mod.dumps(payload, sort_keys=True, indent=2))
+    else:
+        print(upgrade_mod.format_check_text(check, provenance))
+        print(upgrade_mod.format_plan_text(plan))
+        print(upgrade_mod.drift_note(snapshot, daemon_running))
+    if check.status in ("unavailable", "invalid"):
+        if not as_json:
+            print(f"error: {check.detail}", file=sys.stderr)
+        return EXIT_ERROR
+    if check.status in ("current", "ahead"):
+        return EXIT_OK
+    if not plan.allowed:
+        if not as_json:
+            print(f"error: {plan.reason}", file=sys.stderr)
+        return EXIT_ERROR
+    if daemon_running and not as_json:
+        print(
+            "managed runtime is active; the upgrade installs independently "
+            "and current work remains untouched (restart applies new code)"
+        )
+    if not _confirm_dependency(
+        confirmed,
+        "Apply `" + " ".join(plan.argv) + "`? [y/N] ",
+    ):
+        return EXIT_ERROR
+    result = upgrade_mod.execute_plan(plan)
+    if as_json:
+        payload["upgrade_ok"] = result.ok
+        payload["upgrade_detail"] = result.detail
+        print(json_mod.dumps(payload, sort_keys=True, indent=2))
+    else:
+        print(result.detail)
+        if daemon_running:
+            print(
+                "managed runtime was left running; restart it to use the "
+                "newly installed code"
+            )
+    return EXIT_OK if result.ok else EXIT_ERROR
+
+
 def cmd_evidence(
     project_dir: Path,
     gate: bool = False,
@@ -3288,6 +3443,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "preflight": lambda: preflight_mod.main(
             ["--tmux-bin", args.tmux_bin] if getattr(args, "tmux_bin", None) else []
+        ),
+        "upgrade": lambda: cmd_upgrade(
+            project_dir,
+            check_only=getattr(args, "check", False),
+            confirmed=getattr(args, "yes", False),
+            as_json=getattr(args, "json", False),
+            index_url=getattr(args, "index_url", None),
+            timeout_s=getattr(args, "timeout", upgrade_mod.INDEX_TIMEOUT_S),
         ),
         "watch": lambda: cmd_watch(
             project_dir,

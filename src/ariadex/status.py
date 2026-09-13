@@ -55,17 +55,26 @@ def render_status(
     blocked_count: int,
     tests: str,
     next_action: str | None,
+    package_version: str | None = None,
+    installed_version: str | None = None,
 ) -> str:
-    return "\n".join(
-        [
-            f"mode: {mode}",
-            f"agent: {agent}",
-            f"spec: {spec or '(none)'}",
-            f"session: {session}",
-            f"context: {context_strategy}",
-            f"elapsed: {elapsed}",
-            f"unresolved: open={open_count} blocked={blocked_count}",
-            f"tests: {tests}",
-            f"next: {next_action or '(none)'}",
-        ]
-    )
+    lines = [
+        f"mode: {mode}",
+        f"agent: {agent}",
+        f"spec: {spec or '(none)'}",
+        f"session: {session}",
+        f"context: {context_strategy}",
+        f"elapsed: {elapsed}",
+        f"unresolved: open={open_count} blocked={blocked_count}",
+        f"tests: {tests}",
+        f"next: {next_action or '(none)'}",
+    ]
+    if package_version is not None:
+        installed = installed_version or package_version
+        lines.append(f"package: ariadex {package_version} (installed {installed})")
+        if installed != package_version:
+            lines.append(
+                "package drift: running version differs from the installed "
+                "package; restart applies the new code"
+            )
+    return "\n".join(lines)

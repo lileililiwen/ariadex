@@ -431,6 +431,12 @@ def daemon_status_view(project_dir: Path) -> dict:
             "notes": [f"diagnostic context unavailable: {exc}"],
         }
     widget_record = widget_runtime_mod.read_record(project_dir)
+    try:
+        from . import upgrade as upgrade_mod
+
+        snapshot = upgrade_mod.version_snapshot()
+    except Exception:
+        snapshot = {"running": "unknown", "installed": "unknown", "drift": False}
     return {
         "daemon": record.to_dict() if record else None,
         "alive": daemon_alive(record),
@@ -442,6 +448,9 @@ def daemon_status_view(project_dir: Path) -> dict:
         "next_action": next_action,
         "open_count": open_count,
         "blocked_count": blocked_count,
+        "package_version": snapshot["running"],
+        "installed_version": snapshot["installed"],
+        "package_drift": snapshot["drift"],
         "diagnostic_context": context,
         "widget": {
             "recorded": widget_record is not None,
@@ -472,6 +481,15 @@ def format_status_text(view: dict) -> str:
         f"next: {view.get('next_action')}",
         f"queue: {view.get('open_count')} open, {view.get('blocked_count')} blocked",
     ]
+    running = view.get("package_version")
+    installed = view.get("installed_version", running)
+    if running not in (None, ""):
+        lines.append(f"package: ariadex {running} (installed {installed})")
+        if view.get("package_drift"):
+            lines.append(
+                "package drift: running version differs from the installed "
+                "package; restart applies the new code"
+            )
     return "\n".join(lines)
 
 

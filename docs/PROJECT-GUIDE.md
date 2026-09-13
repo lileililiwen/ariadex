@@ -290,6 +290,30 @@ queue are the continuity source. Provider conversation history is temporary.
 Deleting or editing the handoff is not a safe reset; use the queue and control
 commands so the reason remains durable.
 
+## Upgrading Ariadex
+
+The installed package can lag the released version. `ariadex upgrade --check`
+is read-only: it compares the installed package with the release index,
+reports the installation provenance (pipx, pip, editable, or source
+checkout), and changes nothing. Without `--check`, Ariadex shows the planned
+owner-tool operation (`pipx upgrade ariadex` for pipx installs, an exact
+`pip install --upgrade ariadex==<version>` for normal installs) and applies
+it only after explicit confirmation (`--yes` confirms non-interactively).
+
+```bash
+ariadex upgrade --check   # versions and provenance, no changes
+ariadex upgrade --yes     # apply the shown plan
+```
+
+Editable and source checkouts are never replaced with an index package; the
+refusal names the checkout path and the explicit update action. An
+unavailable index preserves the installed package and reports a retry action.
+An upgrade never interrupts a running daemon, session, widget, or watcher:
+current work continues untouched, newly installed code applies to future
+starts, and `ariadex status` (plus `doctor`) reports running-versus-installed
+version drift until a restart. Release validation reuses the existing
+tag, artifact-metadata, exact-PyPI-version, and clean-install checks.
+
 ## One automatic cycle
 
 The high-level data flow is:
@@ -355,6 +379,8 @@ Common interpretations:
   records are reconciled without starting a duplicate scheduler.
 - widget visible but no provider activity: inspect `ariadex admin status` and
   confirm the mode is `AUTO`; Play returns a paused project to `AUTO`.
+- package drift after an upgrade: the running code differs from the installed
+  package; current work is unaffected and a restart applies the new code.
 
 ## Developer map
 
@@ -373,6 +399,9 @@ The main runtime boundaries are:
 - `companion.py`: Tkinter widget and IPC client, with no direct state mutation;
 - `config.py`, `state.py`, `handoff.py`: durable data contracts;
 - `operator.py`: doctor, preview, queue, and history inspection.
+- `upgrade.py`: read-only index probe, installation provenance, and the
+  confirmed owner-tool upgrade plan; `release.py` keeps the tag, artifact,
+  and exact-PyPI-version release gates.
 
 For implementation work, read `AGENTS.md`, inspect `openspec list`, change one
 OpenSpec package at a time, run the focused tests and strict validation, then

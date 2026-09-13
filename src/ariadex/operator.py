@@ -332,6 +332,41 @@ def run_doctor(project_dir: Path) -> tuple[list[DoctorCheck], dict]:
     from . import deploy as deploy_mod
 
     checks.extend(deploy_mod.deployment_checks(project_dir))
+    try:
+        from . import upgrade as upgrade_mod
+
+        snapshot = upgrade_mod.version_snapshot()
+        if snapshot["drift"]:
+            checks.append(
+                DoctorCheck(
+                    "upgrade",
+                    True,
+                    f"running ariadex {snapshot['running']} differs from "
+                    f"installed {snapshot['installed']}; restart applies "
+                    "the new code; `ariadex upgrade --check` is read-only",
+                    False,
+                )
+            )
+        else:
+            checks.append(
+                DoctorCheck(
+                    "upgrade",
+                    True,
+                    f"running ariadex {snapshot['running']} matches the "
+                    "installed package",
+                    False,
+                )
+            )
+    except Exception as exc:
+        checks.append(
+            DoctorCheck(
+                "upgrade",
+                True,
+                f"version snapshot unavailable ({exc}); "
+                "run `ariadex upgrade --check` manually",
+                False,
+            )
+        )
     summary = {
         "ok": all(c.ok or not c.required for c in checks),
         "checks": [c.to_dict() for c in checks],
