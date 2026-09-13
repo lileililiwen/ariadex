@@ -141,9 +141,10 @@ runtime state directly and does not inject keystrokes into an editor.
 - expanded log: read-only chronological watcher diagnostics (current spec,
   OpenSpec task progress, phase, latest event, recent boundary decisions).
   OpenSpec task counts are labeled separately from HANDOFF unresolved counts.
-- `Copy log` / `Copy context`: place the bounded log or a redacted support
-  snapshot on the desktop clipboard via Tk's native clipboard (no extra
-  prerequisite). `Copy context` includes the project, provider/session,
+- `Copy log` is available in the always-visible collapsed controls; `Copy
+  context` is available after expansion. They place the bounded log or a
+  redacted support snapshot on the desktop clipboard via Tk's native
+  clipboard (no extra prerequisite). `Copy context` includes the project, provider/session,
   current spec, OpenSpec queue snapshot, boundary decision, and recent
   events. Success or failure is reported in the widget; copying never sends
   provider input and never changes scheduling.

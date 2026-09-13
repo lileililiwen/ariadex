@@ -958,7 +958,8 @@ class CompanionWindow:
         )
         self.work_label.pack(fill="x")
 
-        controls = tk.Frame(self.frame, background="#20242b")
+        self.controls = tk.Frame(self.frame, background="#20242b")
+        controls = self.controls
         controls.pack(fill="x", pady=(4, 0))
         self.play_button = tk.Button(
             controls,
@@ -993,6 +994,14 @@ class CompanionWindow:
             command=self._on_stop,
         )
         self.stop_button.pack(side="left", expand=True, fill="x")
+        self.copy_log_button = tk.Button(
+            controls,
+            text="Copy log",
+            name="copy-log-button",
+            takefocus=False,
+            command=self._on_copy_log,
+        )
+        self.copy_log_button.pack(side="left", expand=True, fill="x")
 
         self.details = tk.Frame(self.frame)
         self.status_text = tk.Text(
@@ -1016,14 +1025,6 @@ class CompanionWindow:
         self.context_log.pack(fill="x", pady=(4, 0))
         copy_row = tk.Frame(self.details)
         copy_row.pack(fill="x", pady=(4, 0))
-        self.copy_log_button = tk.Button(
-            copy_row,
-            text="Copy log",
-            name="copy-log-button",
-            takefocus=False,
-            command=self._on_copy_log,
-        )
-        self.copy_log_button.pack(side="left", expand=True, fill="x")
         self.copy_context_button = tk.Button(
             copy_row,
             text="Copy context",

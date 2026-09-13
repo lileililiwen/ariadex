@@ -30,6 +30,7 @@ BUSY = "running tool `pytest` …\nesc to interrupt\n"
 QUOTA = "Ask anything · tab agents\nModel quota expired. Switch model.\n> "
 APPROVAL = "Ask anything\nApproval required: allow `rm`? [y/n]\n"
 ERROR = "Ask anything\nerror: provider exploded\n"
+MAX_STEP_LIMIT = "Ask anything\nerror: maximum step limit reached\n"
 
 
 class FakeDriver(terminal_mod.FakeTerminalDriver):
@@ -331,6 +332,24 @@ class PromptSelectionTest(unittest.TestCase):
                 self.assertEqual(watcher.poll(), "blocked")
         self.assertIn("never reported an input-ready surface", watcher.block_reason)
         self.assertNotIn("please finish the rest", driver.sent_inputs("agent"))
+
+    def test_max_step_limit_opens_recovery_conversation(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        watcher = make_watcher(project, driver)
+        watcher.initial_sent = True
+        with (
+            clean_git(self),
+            unittest.mock.patch.object(
+                watcher, "_capture", side_effect=[MAX_STEP_LIMIT, READY]
+            ),
+            unittest.mock.patch.object(watcher.adapter, "new_conversation"),
+        ):
+            self.assertEqual(watcher.poll(), "continuing")
+        self.assertEqual(driver.sent_inputs("agent"), ["please finish the rest"])
+        self.assertEqual(watcher.confirmations_sent, 1)
 
     def test_invalid_metadata_sends_no_confirmation(self) -> None:
         project = make_project(self._tmp)

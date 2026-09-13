@@ -91,6 +91,18 @@ ERROR_MARKERS = (
     "no api key",
 )
 
+# OpenCode stops the current answer at this boundary but leaves the editor
+# usable. Treat it as a recoverable conversation boundary so task-aware
+# continuation/confirmation logic can send the next prompt.
+MAX_STEP_MARKERS = (
+    "maximum step limit",
+    "maximum number of steps",
+    "max step limit",
+    "max steps",
+    "step limit reached",
+    "maximum steps",
+)
+
 # Recoverable provider limits require operator action (switch model, account,
 # or credentials), but should not end supervision. The watcher waits on the
 # same conversation and resumes once the provider presents a usable surface.
@@ -135,6 +147,7 @@ CLASS_WORKING = "working"
 CLASS_FINISHED = "finished"
 CLASS_APPROVAL = "approval"
 CLASS_ERROR = "error"
+CLASS_MAX_STEPS = "max-steps"
 CLASS_QUOTA = "waiting"
 CLASS_UNKNOWN = "unknown"
 CLASSIFICATION_TAIL_LINES = 16
@@ -159,6 +172,8 @@ def classify_capture(provider: str, text: str) -> str:
         return CLASS_APPROVAL
     if any(marker in lowered for marker in QUOTA_MARKERS):
         return CLASS_QUOTA
+    if any(marker in lowered for marker in MAX_STEP_MARKERS):
+        return CLASS_MAX_STEPS
     if any(marker in lowered for marker in ERROR_MARKERS):
         return CLASS_ERROR
     if any(marker in lowered for marker in BUSY_MARKERS):
@@ -946,6 +961,16 @@ class RobotWatcher:
                 recovery="fix it in the session, then resume watching",
             )
             return self.phase
+        if observed == CLASS_MAX_STEPS:
+            self.phase = FINISHED_CANDIDATE
+            self.stable_polls += 1
+            self._record(
+                "boundary",
+                "provider reached max-step limit; evaluating task boundary",
+            )
+            if self.stable_polls < self.config.debounce_polls:
+                return self.phase
+            return self._on_stable_finished()
         if observed != CLASS_FINISHED:
             self.phase = WORKING if self.initial_sent else ATTACHED
             self.stable_polls = 0

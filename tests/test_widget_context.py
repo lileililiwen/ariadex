@@ -354,6 +354,12 @@ class ManagedWindowTest(unittest.TestCase):
         self.assertFalse(window.copy_log_button.options.get("takefocus"))
         self.assertFalse(window.copy_context_button.options.get("takefocus"))
 
+    def test_copy_log_button_is_visible_when_collapsed(self):
+        window = self.make_window(context_state())
+        self.assertFalse(window.expanded)
+        self.assertIs(window.copy_log_button.master, window.controls)
+        self.assertTrue(window.controls.packed)
+
     def test_copy_log_places_bounded_log_on_clipboard(self):
         window = self.make_window(context_state())
         window._on_copy_log()

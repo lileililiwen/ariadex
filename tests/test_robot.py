@@ -24,6 +24,7 @@ READY_CODEBUDDY = "CodeBuddy ready\ncodebuddy listening\n> "
 BUSY = "running tool `pytest` …\nesc to interrupt\n"
 APPROVAL = "Ask anything\nApproval required: allow `rm`? [y/n]\n"
 ERROR = "Ask anything\nerror: provider exploded\n"
+MAX_STEP_LIMIT = "Ask anything\nerror: maximum step limit reached\n"
 
 
 class FakeDriver(terminal_mod.FakeTerminalDriver):
@@ -144,6 +145,12 @@ class ClassifyTest(unittest.TestCase):
 
     def test_empty_capture_is_unknown(self) -> None:
         self.assertEqual(robot_mod.classify_capture("opencode", ""), "unknown")
+
+    def test_max_step_limit_is_a_recoverable_boundary(self) -> None:
+        self.assertEqual(
+            robot_mod.classify_capture("opencode", MAX_STEP_LIMIT),
+            robot_mod.CLASS_MAX_STEPS,
+        )
 
 
 class ConfigTest(unittest.TestCase):
