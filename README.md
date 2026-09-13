@@ -489,6 +489,12 @@ durable state:
   `ariadex export-events`. Notifications are opt-in, redacted,
   deduplicated, and rate-limited; delivery failure is recorded locally
   and never changes scheduling.
+- `.ariadex/diagnostics/diagnostics.jsonl` — bounded redacted lifecycle
+  diagnostics (startup, selection, prompts, provider, OpenSpec, boundary,
+  pause, quota, error, widget, shutdown). Inspect with
+  `ariadex admin diagnostics` and export a research bundle with
+  `ariadex admin export-diagnostics`; diagnostic failure never changes
+  scheduling.
 
 Modes define input ownership: in `AUTO` Ariadex may schedule and send
 input; in `MANUAL` it only observes and logs; in `PAUSE` it starts no new
@@ -509,6 +515,8 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | `admin recover`    | Reconcile stale or uncertain runtime state                       |
 | `admin logs ...`   | Bounded diagnostic log inspection                                |
 | `admin export-logs ...` | Bounded diagnostic log inspection                         |
+| `admin diagnostics ...` | Chronological full-log runtime diagnostics (`--limit`, `--since`, `--category`, `--json`) |
+| `admin export-diagnostics ...` | Local redacted diagnostic bundle for later research (`--out`, `--with-telemetry`) |
 | `--help`, `--version` | Show the small public command surface or version             |
 
 ## Configuration

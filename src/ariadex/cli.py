@@ -22,6 +22,7 @@ from . import control as control_mod
 from . import daemon as daemon_mod
 from . import deploy as deploy_mod
 from . import dev_setup as dev_setup_mod
+from . import diagnostics as diagnostics_mod
 from . import handoff as handoff_mod
 from . import live_evidence as live_evidence_mod
 from . import logging as logging_mod
@@ -460,6 +461,58 @@ def build_parser() -> argparse.ArgumentParser:
         help="refuse exports above this size in bytes",
     )
     export_events_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
+    diagnostics_parser = sub.add_parser(
+        "diagnostics",
+        help="show bounded chronological runtime diagnostics (full log)",
+    )
+    diagnostics_parser.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+        help="maximum recent records to show (0 shows none)",
+    )
+    diagnostics_parser.add_argument(
+        "--since",
+        default="",
+        help="only records at or after this ISO timestamp",
+    )
+    diagnostics_parser.add_argument(
+        "--category",
+        action="append",
+        default=None,
+        dest="categories",
+        help="filter to a lifecycle category (repeatable)",
+    )
+    diagnostics_parser.add_argument(
+        "--json", action="store_true", help="emit stable JSON instead of text"
+    )
+    export_diagnostics_parser = sub.add_parser(
+        "export-diagnostics",
+        help="write a local redacted diagnostic bundle for later research",
+    )
+    export_diagnostics_parser.add_argument(
+        "--out", required=True, help="destination directory for the bundle"
+    )
+    export_diagnostics_parser.add_argument(
+        "--max-bytes",
+        type=int,
+        default=52428800,
+        help="refuse bundles above this size in bytes",
+    )
+    export_diagnostics_parser.add_argument(
+        "--diagnostic-limit",
+        type=int,
+        default=1000,
+        help="maximum diagnostic records in the bundle",
+    )
+    export_diagnostics_parser.add_argument(
+        "--with-telemetry",
+        action="store_true",
+        help="also copy runs/ + metrics.jsonl beside the bundle (bounded)",
+    )
+    export_diagnostics_parser.add_argument(
         "--json", action="store_true", help="emit stable JSON instead of text"
     )
     evidence = sub.add_parser(
@@ -2151,6 +2204,8 @@ ADMIN_COMMANDS = (
     "export-logs",
     "events",
     "export-events",
+    "diagnostics",
+    "export-diagnostics",
     "evidence",
     "preflight",
     "watch",
@@ -2163,7 +2218,14 @@ ADMIN_COMMANDS = (
     "resume",
 )
 
-ADMIN_PUBLIC_COMMANDS = ("doctor", "status", "recover", "export-logs")
+ADMIN_PUBLIC_COMMANDS = (
+    "doctor",
+    "status",
+    "recover",
+    "export-logs",
+    "diagnostics",
+    "export-diagnostics",
+)
 
 
 def cmd_companion(
@@ -2507,6 +2569,18 @@ def cmd_watch(
     )
     if widget:
         try:
+            with contextlib.suppress(Exception):
+                diagnostics_mod.try_record(
+                    project_dir,
+                    diagnostics_mod.build_diagnostic(
+                        "widget",
+                        "robot widget opened",
+                        result="opened",
+                        message=f"watching session `{session}`",
+                        provider=resolved_provider,
+                        session=session,
+                    ),
+                )
             return companion_mod.run_robot_widget(
                 watcher, poll_interval_s=max(poll_interval, 0.1)
             )
@@ -2697,6 +2771,126 @@ def cmd_export_events(
             print(f"export {result.sink}: {mark} ({result.detail})")
         print(f"snapshot: schema v{observability_mod.EVENT_SCHEMA_VERSION} -> {dest}")
     return EXIT_OK if all(r.ok for r in results) else EXIT_ERROR
+
+
+def cmd_diagnostics(
+    project_dir: Path,
+    limit: int = 100,
+    since: str = "",
+    categories: list[str] | None = None,
+    as_json: bool = False,
+) -> int:
+    """Show the bounded chronological diagnostic stream (full log).
+
+    Read-only: never sends provider input, changes scheduling, or
+    fabricates history. An unavailable or unreadable stream is reported
+    honestly with its reason.
+    """
+    import json as json_mod
+
+    if _load_config(project_dir) is None:
+        return EXIT_ERROR
+    if _load_state(project_dir) is None:
+        return EXIT_ERROR
+    if limit < 0:
+        print("error: --limit must be >= 0", file=sys.stderr)
+        return EXIT_ERROR
+    wanted = tuple(categories or ())
+    unknown = [c for c in wanted if c not in diagnostics_mod.CATEGORIES]
+    if unknown:
+        print(
+            f"error: unknown categor{'y' if len(unknown) == 1 else 'ies'} "
+            f"{', '.join(sorted(unknown))}; expected one of: "
+            f"{', '.join(diagnostics_mod.CATEGORIES)}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    records, info = diagnostics_mod.read_diagnostics(
+        project_dir, limit=limit, since=since, categories=wanted
+    )
+    if as_json:
+        print(
+            json_mod.dumps({"records": records, "info": info}, sort_keys=True, indent=2)
+        )
+    else:
+        print(diagnostics_mod.format_diagnostics_text(records, info))
+    return EXIT_OK
+
+
+def cmd_export_diagnostics(
+    project_dir: Path,
+    out: str,
+    max_bytes: int = 52428800,
+    diagnostic_limit: int = 1000,
+    with_telemetry: bool = False,
+    as_json: bool = False,
+) -> int:
+    """Write a local redacted diagnostic bundle for later research.
+
+    The bundle holds manifest, durable state, OpenSpec evidence,
+    diagnostics, and selected telemetry without provider secrets.
+    Refuses above the byte bound; failures are reported, never claimed
+    as success, and never change scheduling.
+    """
+    import json as json_mod
+
+    cfg = _load_config(project_dir)
+    if cfg is None:
+        return EXIT_ERROR
+    st = _load_state(project_dir)
+    if st is None:
+        return EXIT_ERROR
+    if max_bytes < 0:
+        print("error: --max-bytes must be >= 0", file=sys.stderr)
+        return EXIT_ERROR
+    if diagnostic_limit < 0:
+        print("error: --diagnostic-limit must be >= 0", file=sys.stderr)
+        return EXIT_ERROR
+    dest = Path(out)
+    try:
+        report = diagnostics_mod.build_bundle(
+            project_dir,
+            dest,
+            max_bytes=max_bytes,
+            diagnostic_limit=diagnostic_limit,
+        )
+    except OSError as exc:
+        print(f"error: export refused: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except Exception as exc:
+        print(f"error: export failed: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    telemetry: dict | None = None
+    if with_telemetry:
+        try:
+            telemetry = diagnostics_mod.copy_telemetry_for_bundle(
+                project_dir, dest, max_bytes=max_bytes
+            )
+        except OSError as exc:
+            print(f"error: telemetry copy refused: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        except Exception as exc:
+            print(f"error: telemetry copy failed: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+    if as_json:
+        payload: dict = {"bundle": report.to_dict()}
+        if telemetry is not None:
+            payload["telemetry"] = telemetry
+        print(json_mod.dumps(payload, sort_keys=True, indent=2))
+    else:
+        print(
+            f"diagnostics: schema v{diagnostics_mod.DIAGNOSTIC_SCHEMA_VERSION} "
+            f"-> {report.destination} ({report.files} files, "
+            f"{report.total_bytes} bytes)"
+        )
+        for note in report.notes:
+            print(f"note: {note}")
+        if telemetry is not None:
+            print(
+                f"telemetry: {telemetry.get('files', 0)} files, "
+                f"{telemetry.get('total_bytes', 0)} bytes"
+            )
+    return EXIT_OK
 
 
 def cmd_evidence(
@@ -3065,6 +3259,21 @@ def main(argv: list[str] | None = None) -> int:
             project_dir,
             out=args.out,
             max_bytes=getattr(args, "max_bytes", 52428800),
+            as_json=getattr(args, "json", False),
+        ),
+        "diagnostics": lambda: cmd_diagnostics(
+            project_dir,
+            limit=getattr(args, "limit", 100),
+            since=getattr(args, "since", ""),
+            categories=getattr(args, "categories", None),
+            as_json=getattr(args, "json", False),
+        ),
+        "export-diagnostics": lambda: cmd_export_diagnostics(
+            project_dir,
+            out=args.out,
+            max_bytes=getattr(args, "max_bytes", 52428800),
+            diagnostic_limit=getattr(args, "diagnostic_limit", 1000),
+            with_telemetry=getattr(args, "with_telemetry", False),
             as_json=getattr(args, "json", False),
         ),
         "evidence": lambda: cmd_evidence(

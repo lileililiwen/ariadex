@@ -19,6 +19,7 @@ watcher and leaves the session attachable.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import subprocess
 import time
@@ -26,6 +27,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from . import diagnostics as diagnostics_mod
 from . import handoff as handoff_mod
 from . import openspec_evidence as evidence_mod
 from . import spec_graph as spec_graph_mod
@@ -745,11 +747,65 @@ class RobotWatcher:
         """Bounded copy of recorded activity events (oldest first)."""
         return [dict(event) for event in self._events]
 
+    def _diag(
+        self,
+        category: str,
+        action: str,
+        *,
+        result: str = "",
+        message: str = "",
+        current_spec: str | None = None,
+        open_tasks: int = 0,
+        closed_tasks: int = 0,
+        command_role: str = "",
+        recovery: str = "",
+    ) -> None:
+        """Persist one durable diagnostic (best-effort, never raises).
+
+        Diagnostic failure never changes scheduling: the in-memory
+        activity event is already recorded and the lifecycle decision
+        stands. Raw provider captures are never included; only bounded,
+        redacted classifications and evidence references.
+        """
+        try:
+            conversation_id = ""
+            with contextlib.suppress(Exception):
+                record = evidence_mod.read_conversation(self.project_dir)
+                if record is not None:
+                    conversation_id = record.conversation_id
+        except Exception:
+            conversation_id = ""
+        with contextlib.suppress(Exception):
+            diagnostics_mod.try_record(
+                self.project_dir,
+                diagnostics_mod.build_diagnostic(
+                    category,
+                    action,
+                    result=result,
+                    message=message,
+                    provider=self.adapter.provider_name,
+                    session=self.config.session,
+                    phase=self.phase,
+                    conversation_id=conversation_id,
+                    current_spec=current_spec,
+                    open_tasks=open_tasks,
+                    closed_tasks=closed_tasks,
+                    command_role=command_role,
+                    recovery=recovery,
+                ),
+            )
+
     def request_pause(self) -> str:
         """Stop new input; the user-owned session keeps running."""
         self._paused = True
         self.phase = PAUSED
         self._record("pause", "paused: no new input will be sent")
+        self._diag(
+            "pause",
+            "watcher paused",
+            result="paused",
+            message="no new input will be sent",
+        )
         return "paused: no new input; the provider session keeps running"
 
     def request_resume(self) -> str:
@@ -759,6 +815,12 @@ class RobotWatcher:
         self.stable_polls = 0
         self.phase = WORKING if self.initial_sent else ATTACHED
         self._record("resume", "resumed: watcher is observing the provider session")
+        self._diag(
+            "pause",
+            "watcher resumed",
+            result="resumed",
+            message="watcher is observing the provider session",
+        )
         return "resumed: watcher is observing the provider session"
 
     def request_quit(self) -> str:
@@ -766,6 +828,12 @@ class RobotWatcher:
         self._quit = True
         self.phase = STOPPED
         self._record("shutdown", "stopped: watcher exited; session untouched")
+        self._diag(
+            "shutdown",
+            "watcher stopped",
+            result="stopped",
+            message="watcher exited; session untouched",
+        )
         return "stopped: watcher exited; the provider session is untouched"
 
     @property
@@ -813,6 +881,12 @@ class RobotWatcher:
                 self.phase = PAUSED
                 self.stable_polls = 0
                 self._record("pause", "daemon mode PAUSE: no new input will be sent")
+                self._diag(
+                    "pause",
+                    "daemon mode PAUSE observed",
+                    result="paused",
+                    message="no new input will be sent",
+                )
                 return self.phase
             if self._paused and mode == "AUTO":
                 self.request_resume()
@@ -834,6 +908,12 @@ class RobotWatcher:
             self._record(
                 "waiting", "provider waits for approval; watcher continues observing"
             )
+            self._diag(
+                "provider",
+                "provider waits for approval",
+                result="waiting",
+                message="watcher continues observing",
+            )
             return self.phase
         if observed == CLASS_QUOTA:
             self.phase = WAITING
@@ -843,6 +923,13 @@ class RobotWatcher:
                 "credentials, then watcher will resume"
             )
             self._record("waiting", self.block_reason)
+            self._diag(
+                "quota",
+                "provider quota or rate limit reached",
+                result="waiting",
+                message=self.block_reason,
+                recovery="switch model or credentials, then watching resumes",
+            )
             return self.phase
         if observed == CLASS_ERROR:
             self.phase = BLOCKED
@@ -851,6 +938,13 @@ class RobotWatcher:
                 "provider reports an error; fix it in the session, then resume watching"
             )
             self._record("error", self.block_reason)
+            self._diag(
+                "provider",
+                "provider reports an error",
+                result="blocked",
+                message=self.block_reason,
+                recovery="fix it in the session, then resume watching",
+            )
             return self.phase
         if observed != CLASS_FINISHED:
             self.phase = WORKING if self.initial_sent else ATTACHED
@@ -919,11 +1013,26 @@ class RobotWatcher:
                 f"{exc}; no prompt was sent"
             )
             self._record("error", self.block_reason)
+            self._diag(
+                "openspec",
+                f"conversation target `{target}` not recorded",
+                result="blocked",
+                message=self.block_reason,
+                current_spec=target,
+                recovery="verify `.ariadex/conversation.json` before continuing",
+            )
             return False
         self._record(
             "prompt",
             f"recorded conversation {record.conversation_id} for "
             f"`{target}` (role {role})",
+        )
+        self._diag(
+            "openspec",
+            f"conversation recorded for `{target}`",
+            result="recorded",
+            message=f"role {role}; the recorded change gates the boundary",
+            current_spec=target,
         )
         return True
 
@@ -963,6 +1072,14 @@ class RobotWatcher:
             self.phase = BLOCKED
             self.block_reason = f"handoff unreadable: {exc}"
             self._record("boundary", f"blocked: {self.block_reason}")
+            self._diag(
+                "boundary",
+                "first-conversation selection blocked",
+                result="blocked",
+                message=self.block_reason,
+                command_role="handoff-read",
+                recovery="verify the handoff file before continuing",
+            )
             return self.phase
         try:
             target, queue = select_first_target(
@@ -975,15 +1092,35 @@ class RobotWatcher:
                 self.phase = BLOCKED
                 self.block_reason = str(exc)
                 self._record("boundary", f"blocked: {self.block_reason}")
+                self._diag(
+                    "selection",
+                    "first-conversation selection blocked",
+                    result="blocked",
+                    message=self.block_reason,
+                    command_role="spec-discovery",
+                )
                 return self.phase
         except evidence_mod.EvidenceBlocked as exc:
             self.phase = BLOCKED
             self.block_reason = str(exc)
             self._record("boundary", f"blocked: {self.block_reason}")
+            self._diag(
+                "selection",
+                "first-conversation selection blocked",
+                result="blocked",
+                message=self.block_reason,
+                command_role="openspec-list",
+            )
             return self.phase
         if not target:
             self.phase = DONE
             self._record("boundary", "no active OpenSpec work remains; stopping")
+            self._diag(
+                "boundary",
+                "no active OpenSpec work remains",
+                result="done",
+                message="stopping without a prompt",
+            )
             return self.phase
         if not self._record_before_prompt("first", target, queue):
             return self.phase
@@ -993,6 +1130,13 @@ class RobotWatcher:
         self.stable_polls = 0
         self.phase = CONTINUING
         self._record("prompt", "sent initial prompt to the ready conversation")
+        self._diag(
+            "prompt",
+            "sent initial prompt",
+            result="sent",
+            message="sent initial prompt to the ready conversation",
+            current_spec=target,
+        )
         return self.phase
 
     def _on_stable_finished(self) -> str:
@@ -1010,24 +1154,67 @@ class RobotWatcher:
             self.phase = BLOCKED
             self.block_reason = check.reason
             self._record("boundary", f"blocked: {check.reason}")
+            self._diag(
+                "boundary",
+                "boundary evaluation blocked",
+                result="blocked",
+                message=check.reason,
+                current_spec=check.current_spec or None,
+                open_tasks=check.open_tasks,
+                command_role=check.evidence_source,
+            )
             return self.phase
         if not check.active:
             self.phase = DONE
             self._record("boundary", "no active OpenSpec work remains; stopping")
+            self._diag(
+                "boundary",
+                "no active OpenSpec work remains",
+                result="done",
+                message="stopping without a prompt",
+                current_spec=check.current_spec or None,
+            )
             return self.phase
         if check.decision == "unfinished":
             self._record("boundary", check.task_detail or "unfinished tasks remain")
+            self._diag(
+                "boundary",
+                "unfinished tasks remain; confirmation recovery",
+                result="unfinished",
+                message=check.task_detail or "unfinished tasks remain",
+                current_spec=check.current_spec or None,
+                open_tasks=check.open_tasks,
+                command_role=check.evidence_source,
+            )
             return self._open_confirmation(check)
         if check.decision == "ready-to-archive":
             self._record(
                 "boundary",
                 check.task_detail or "tasks complete; archival needed",
             )
+            self._diag(
+                "boundary",
+                "tasks complete; archival needed",
+                result="ready-to-archive",
+                message=check.task_detail or "tasks complete; archival needed",
+                current_spec=check.current_spec or None,
+                open_tasks=check.open_tasks,
+                command_role=check.evidence_source,
+            )
             return self._open_confirmation(check, check.task_detail)
         self._record(
             "boundary",
             f"verified boundary for `{check.current_spec or check.active[0]}`; "
             "opening a new conversation",
+        )
+        self._diag(
+            "boundary",
+            f"verified boundary for `{check.current_spec or check.active[0]}`",
+            result="complete",
+            message="opening a new conversation",
+            current_spec=check.current_spec or check.active[0],
+            open_tasks=check.open_tasks,
+            command_role=check.evidence_source,
         )
         return self._open_continuation(check)
 
@@ -1064,6 +1251,13 @@ class RobotWatcher:
                 f"unavailable: {exc}"
             )
             self._record("error", self.block_reason)
+            self._diag(
+                "error",
+                "automatic continuation unavailable",
+                result="blocked",
+                message=self.block_reason,
+                current_spec=next_target,
+            )
             return self.phase
         except Exception as exc:
             self.phase = BLOCKED
@@ -1073,6 +1267,14 @@ class RobotWatcher:
                 f"new-conversation operation: {exc}; no prompt was sent"
             )
             self._record("error", self.block_reason)
+            self._diag(
+                "error",
+                "new conversation failed",
+                result="blocked",
+                message=self.block_reason,
+                current_spec=next_target,
+                recovery="verify the provider session before continuing",
+            )
             return self.phase
         ready = self._await_ready()
         if not ready:
@@ -1082,12 +1284,26 @@ class RobotWatcher:
                 "no prompt was sent"
             )
             self._record("error", self.block_reason)
+            self._diag(
+                "provider",
+                "fresh input-ready surface never observed",
+                result="blocked",
+                message=self.block_reason,
+                current_spec=next_target,
+            )
             return self.phase
         self._send(self.config.continuation_prompt)
         self.prompts_sent += 1
         self.stable_polls = 0
         self.phase = CONTINUING
         self._record("prompt", "sent continuation prompt in a fresh conversation")
+        self._diag(
+            "prompt",
+            "sent continuation prompt",
+            result="sent",
+            message="sent continuation prompt in a fresh conversation",
+            current_spec=next_target,
+        )
         return self.phase
 
     def _open_confirmation(self, check: BoundaryCheck, instruction: str = "") -> str:
@@ -1111,6 +1327,12 @@ class RobotWatcher:
                 "verify the conversation record before continuing"
             )
             self._record("error", self.block_reason)
+            self._diag(
+                "error",
+                "confirmation has no recorded change",
+                result="blocked",
+                message=self.block_reason,
+            )
             return self.phase
         if not self._record_before_prompt("confirmation", target, list(check.active)):
             return self.phase
@@ -1121,6 +1343,14 @@ class RobotWatcher:
         if instruction and instruction != detail:
             detail = f"{detail}; recovery instruction: {instruction}"
         self._record("prompt", f"confirmation recovery selected: {detail}")
+        self._diag(
+            "prompt",
+            "confirmation recovery selected",
+            result="selected",
+            message=detail,
+            current_spec=target,
+            open_tasks=check.open_tasks,
+        )
         try:
             self.adapter.new_conversation()
         except UnsupportedOperation as exc:
@@ -1130,6 +1360,13 @@ class RobotWatcher:
                 f"unavailable: {exc}"
             )
             self._record("error", self.block_reason)
+            self._diag(
+                "error",
+                "automatic confirmation unavailable",
+                result="blocked",
+                message=self.block_reason,
+                current_spec=target,
+            )
             return self.phase
         except Exception as exc:
             self.phase = BLOCKED
@@ -1139,6 +1376,14 @@ class RobotWatcher:
                 f"new-conversation operation: {exc}; no prompt was sent"
             )
             self._record("error", self.block_reason)
+            self._diag(
+                "error",
+                "new conversation failed",
+                result="blocked",
+                message=self.block_reason,
+                current_spec=target,
+                recovery="verify the provider session before continuing",
+            )
             return self.phase
         self._record("readiness", "waiting for the fresh input-ready surface")
         ready = self._await_ready()
@@ -1149,6 +1394,13 @@ class RobotWatcher:
                 "no prompt was sent"
             )
             self._record("error", self.block_reason)
+            self._diag(
+                "provider",
+                "fresh input-ready surface never observed",
+                result="blocked",
+                message=self.block_reason,
+                current_spec=target,
+            )
             return self.phase
         self._send(self.config.confirmation_prompt)
         self.prompts_sent += 1
@@ -1156,6 +1408,14 @@ class RobotWatcher:
         self.stable_polls = 0
         self.phase = CONTINUING
         self._record("prompt", "sent confirmation prompt in a fresh conversation")
+        self._diag(
+            "prompt",
+            "sent confirmation prompt",
+            result="sent",
+            message="sent confirmation prompt in a fresh conversation",
+            current_spec=target,
+            open_tasks=check.open_tasks,
+        )
         return self.phase
 
     def _await_ready(self) -> bool:
@@ -1179,8 +1439,20 @@ class RobotWatcher:
         """Poll until done, blocked, quit, or the poll budget is spent."""
         do_sleep = sleep if sleep is not None else time.sleep
         polls = 0
+        self._diag(
+            "startup",
+            "watcher started",
+            result="started",
+            message=f"watching session `{self.config.session}`",
+        )
         while True:
             if self._quit:
+                self._diag(
+                    "shutdown",
+                    "watcher quit requested",
+                    result="stopped",
+                    message=self.block_reason or "provider session untouched",
+                )
                 return RobotReport(
                     outcome=STOPPED,
                     detail=(
@@ -1193,16 +1465,35 @@ class RobotWatcher:
                 self.request_quit()
                 self.block_reason = "managed shutdown requested"
                 self._record("shutdown", "managed shutdown requested")
+                self._diag(
+                    "shutdown",
+                    "managed shutdown requested",
+                    result="stopped",
+                    message="managed shutdown requested",
+                )
                 continue
             if self.phase in (DONE, BLOCKED):
                 outcome = "done" if self.phase == DONE else BLOCKED
                 detail = self.block_reason or self._done_detail()
+                self._diag(
+                    "shutdown" if outcome == "done" else "boundary",
+                    f"watcher {outcome}",
+                    result=outcome,
+                    message=detail,
+                )
                 return RobotReport(
                     outcome=outcome,
                     detail=detail,
                     prompts_sent=self.prompts_sent,
                 )
             if self.config.max_polls and polls >= self.config.max_polls:
+                self._diag(
+                    "shutdown",
+                    "poll budget spent",
+                    result="max-polls",
+                    message=f"poll budget of {self.config.max_polls} spent "
+                    f"in phase `{self.phase}`; no completion claimed",
+                )
                 return RobotReport(
                     outcome="max-polls",
                     detail=(

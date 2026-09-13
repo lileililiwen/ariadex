@@ -16,17 +16,18 @@ Pre-release `0.x` versions are supported on a best-effort basis.
 
 ## Sensitive data handling
 
-- Run logs and metrics are redacted before persistence: OpenAI-style
+- Run logs, metrics, and diagnostics are redacted before persistence: OpenAI-style
   keys, AWS access keys, PEM private-key blocks, `password=`/`token=`
   assignments, `Bearer` tokens, GitHub (`ghp_`/`gho_`/`github_pat_`) and
   GitLab (`glpat-`) tokens, Slack tokens, JWTs, and AWS secret fields are
   replaced with `<redacted>`. Only the redaction count is recorded
-  (`redactions:` in logs, `redactions` in metrics); matched values are
-  never stored.
+  (`redactions:` in logs, `redactions` in metrics and diagnostics); matched values are
+  never stored. Raw provider captures never enter the diagnostic stream;
+  only bounded classifications and evidence references are kept.
 - Redaction is heuristic, not a guarantee. Treat logs as sensitive,
-  review `export-logs` output before sharing, and rotate any credential
+  review `export-logs` and `export-diagnostics` output before sharing, and rotate any credential
   that touched a prompt or shell output.
-- Telemetry files use restrictive permissions where supported (directories
+- Telemetry and diagnostic files use restrictive permissions where supported (directories
   `0700`, files `0600`). On Windows, POSIX modes do not apply and `doctor`
   reports the platform fallback; Windows ACLs govern access instead.
 

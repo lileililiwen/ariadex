@@ -252,6 +252,7 @@ Behavior:
 | `.ariadex/runs/` | bounded per-cycle run logs |
 | `.ariadex/metrics.jsonl` | bounded cycle metrics |
 | `.ariadex/events.jsonl` | redacted attention events and optional notification evidence |
+| `.ariadex/diagnostics/diagnostics.jsonl` | bounded redacted lifecycle diagnostics (startup, selection, prompts, provider, OpenSpec, boundary, pause, quota, error, widget, shutdown) |
 
 The repository, active OpenSpec changes, handoff, git state, and unresolved
 queue are the continuity source. Provider conversation history is temporary.
@@ -296,6 +297,19 @@ ariadex queue        # unresolved work
 ariadex history ID   # one queue item's transitions
 ariadex events       # attention events
 ```
+
+Full-log research uses the diagnostic stream (never terminal scrollback):
+
+```bash
+ariadex admin diagnostics --limit 100                 # chronological full log
+ariadex admin diagnostics --category boundary --json  # filtered machine output
+ariadex admin export-diagnostics --out /tmp/diag      # redacted research bundle
+```
+
+The bundle holds manifest, durable state, OpenSpec evidence, diagnostics,
+and selected telemetry without provider secrets; `--with-telemetry` adds
+bounded runs/metrics beside it. A failed diagnostic write never changes
+scheduling.
 
 Common interpretations:
 
