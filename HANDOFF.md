@@ -98,6 +98,14 @@ change before implementation.
 
 ## Latest verification evidence
 
+- Managed widget child startup was corrected in commit `03649a3`: when the
+  parent has already started the project daemon, the child now reuses that
+  daemon instead of attempting a second lease acquisition. This fixes the
+  silent widget exit that caused `start` to create the provider runtime but
+  show no widget. The regression suite includes the existing-daemon widget
+  launch case. The full suite passed 896 tests with 0 failures under the
+  provisioned Unix-socket test environment.
+
 - Follow-up diagnosis commit `1a1b9ab` makes `admin doctor` use the same real
   Tk display-connectivity probe as managed startup. On the current host,
   Tkinter imports successfully but X11 window creation fails for `:0`, `:1024`,
