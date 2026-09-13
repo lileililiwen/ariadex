@@ -86,6 +86,11 @@ class AgentAdapter(abc.ABC):
     provider_name: str = "unknown"
     launch_command: tuple[str, ...] = ()
     new_session_input: str | None = None
+    #: Recognized recoverable terminal-error markers for this provider.
+    #: A surface containing one of these markers is a recoverable
+    #: conversation boundary only when the same capture also contains a
+    #: verified input-ready marker; otherwise it stays a generic error.
+    recoverable_error_markers: tuple[str, ...] = ()
 
     def __init__(
         self,

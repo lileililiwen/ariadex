@@ -77,11 +77,9 @@ APPROVAL_MARKERS = (
 )
 
 # Provider failures block continuation with the exact reason reported.
-ERROR_MARKERS = (
-    "traceback",
-    "exception",
-    "error:",
-    "failed",
+# Authentication markers stay blocked (operator recovery) and take
+# precedence over any recoverable terminal-error marker.
+AUTH_MARKERS = (
     "not logged in",
     "please log in",
     "please login",
@@ -90,6 +88,77 @@ ERROR_MARKERS = (
     "missing api key",
     "no api key",
 )
+
+ERROR_MARKERS = (
+    "traceback",
+    "exception",
+    "error:",
+    "failed",
+)
+
+# Recoverable provider terminal errors: the provider stops the current
+# response but leaves its input surface usable. Declared per provider on
+# the adapters (see `providers.RECOVERABLE_TERMINAL_ERROR_MARKERS`); the
+# watcher mirrors them here so classification stays provider-neutral and
+# testable without importing provider modules. A marker is eligible for a
+# boundary only when the same current capture also contains a verified
+# input-ready marker; otherwise the surface stays a generic error.
+RECOVERABLE_TERMINAL_ERROR_MARKERS: dict[str, tuple[str, ...]] = {
+    "opencode": (
+        "stream interrupted",
+        "response interrupted",
+        "connection reset",
+        "connection error",
+        "network error",
+        "request timeout",
+        "request timed out",
+        "timed out",
+        "deadline exceeded",
+        "internal server error",
+        "service unavailable",
+        "bad gateway",
+        "gateway timeout",
+        "server overloaded",
+        "overloaded",
+        "try again",
+    ),
+    "codex": (
+        "stream interrupted",
+        "response interrupted",
+        "connection reset",
+        "connection error",
+        "network error",
+        "request timeout",
+        "request timed out",
+        "timed out",
+        "deadline exceeded",
+        "internal server error",
+        "service unavailable",
+        "bad gateway",
+        "gateway timeout",
+        "server overloaded",
+        "overloaded",
+        "try again",
+    ),
+    "codebuddy": (
+        "stream interrupted",
+        "response interrupted",
+        "connection reset",
+        "connection error",
+        "network error",
+        "request timeout",
+        "request timed out",
+        "timed out",
+        "deadline exceeded",
+        "internal server error",
+        "service unavailable",
+        "bad gateway",
+        "gateway timeout",
+        "server overloaded",
+        "overloaded",
+        "try again",
+    ),
+}
 
 # OpenCode stops the current answer at this boundary but leaves the editor
 # usable. Treat it as a recoverable conversation boundary so task-aware
@@ -148,6 +217,7 @@ CLASS_FINISHED = "finished"
 CLASS_APPROVAL = "approval"
 CLASS_ERROR = "error"
 CLASS_MAX_STEPS = "max-steps"
+CLASS_TERMINAL_ERROR = "terminal-error"
 CLASS_QUOTA = "waiting"
 CLASS_UNKNOWN = "unknown"
 CLASSIFICATION_TAIL_LINES = 16
@@ -160,9 +230,12 @@ class RobotError(Exception):
 def classify_capture(provider: str, text: str) -> str:
     """Classify one pane capture without sending input.
 
-    Conservative order: approval, quota, and error states win over a ready
-    marker, and busy markers win over a stale ready prompt. Unknown
-    surfaces (including unknown providers) never classify as finished.
+    Conservative order: approval, quota/authentication, and known
+    recoverable terminal errors win over a generic error; a recoverable
+    terminal error is eligible only when the same current capture also
+    contains a verified input-ready marker. Busy markers win over a stale
+    ready prompt. Unknown surfaces (including unknown providers) never
+    classify as finished.
     """
     # Pane capture includes scrollback. Only the current tail can describe
     # the provider's present surface; old approvals/errors must not block a
@@ -172,14 +245,24 @@ def classify_capture(provider: str, text: str) -> str:
         return CLASS_APPROVAL
     if any(marker in lowered for marker in QUOTA_MARKERS):
         return CLASS_QUOTA
+    if any(marker in lowered for marker in AUTH_MARKERS):
+        return CLASS_ERROR
     if any(marker in lowered for marker in MAX_STEP_MARKERS):
         return CLASS_MAX_STEPS
+    recoverable = RECOVERABLE_TERMINAL_ERROR_MARKERS.get(provider, ())
+    markers = READY_MARKERS.get(provider)
+    ready_present = bool(
+        markers and any(marker.lower() in lowered for marker in markers)
+    )
+    if recoverable and any(marker in lowered for marker in recoverable):
+        if ready_present:
+            return CLASS_TERMINAL_ERROR
+        return CLASS_ERROR
     if any(marker in lowered for marker in ERROR_MARKERS):
         return CLASS_ERROR
     if any(marker in lowered for marker in BUSY_MARKERS):
         return CLASS_WORKING
-    markers = READY_MARKERS.get(provider)
-    if markers and any(marker.lower() in lowered for marker in markers):
+    if ready_present:
         return CLASS_FINISHED
     if markers:
         return CLASS_UNKNOWN
@@ -741,6 +824,10 @@ class RobotWatcher:
         self.prompts_sent = 0
         self.confirmations_sent = 0
         self.last_classification = CLASS_UNKNOWN
+        #: Recoverable boundary category driving the current debounce
+        #: ("" for a clean finish, "max-steps"/"terminal-error" otherwise).
+        #: Recorded in boundary diagnostics without raw provider captures.
+        self.boundary_error_category = ""
         self.block_reason = ""
         self._paused = False
         self._quit = False
@@ -956,6 +1043,7 @@ class RobotWatcher:
         if observed == CLASS_ERROR:
             self.phase = BLOCKED
             self.stable_polls = 0
+            self.boundary_error_category = ""
             self.block_reason = (
                 "provider reports an error; fix it in the session, then resume watching"
             )
@@ -970,6 +1058,7 @@ class RobotWatcher:
             return self.phase
         if observed == CLASS_MAX_STEPS:
             self.phase = FINISHED_CANDIDATE
+            self.boundary_error_category = "max-steps"
             self.stable_polls += 1
             self._record(
                 "boundary",
@@ -978,10 +1067,31 @@ class RobotWatcher:
             if self.stable_polls < self.config.debounce_polls:
                 return self.phase
             return self._on_stable_finished()
+        if observed == CLASS_TERMINAL_ERROR:
+            self.phase = FINISHED_CANDIDATE
+            self.boundary_error_category = "terminal-error"
+            self.stable_polls += 1
+            self._record(
+                "boundary",
+                "provider reported a recoverable terminal error; "
+                "evaluating task boundary",
+            )
+            self._diag(
+                "provider",
+                "provider reported a recoverable terminal error",
+                result="recoverable",
+                message="evaluating the OpenSpec task boundary; "
+                "no raw provider capture stored",
+                recovery="fresh conversation with the task-selected prompt",
+            )
+            if self.stable_polls < self.config.debounce_polls:
+                return self.phase
+            return self._on_stable_finished()
         if observed != CLASS_FINISHED:
             self.phase = WORKING if self.initial_sent else ATTACHED
             self.stable_polls = 0
             return self.phase
+        self.boundary_error_category = ""
         self.stable_polls += 1
         if self.stable_polls < self.config.debounce_polls:
             self.phase = FINISHED_CANDIDATE
@@ -1182,11 +1292,12 @@ class RobotWatcher:
             return self._send_initial()
         self.phase = VERIFIED_BOUNDARY
         check = check_boundary(self.project_dir, self.config, self.evidence_runner)
+        error_category = self.boundary_error_category or "clean-finish"
         evidence_detail = (
             f"decision={check.decision}; current_spec="
             f"{check.current_spec or '(none)'}; active="
             f"{','.join(check.active) or '(none)'}; open_tasks={check.open_tasks}; "
-            f"evidence={check.evidence_source}"
+            f"evidence={check.evidence_source}; error_category={error_category}"
         )
         if not check.ok:
             self.phase = BLOCKED
@@ -1204,6 +1315,7 @@ class RobotWatcher:
                 open_tasks=check.open_tasks,
                 command_role=check.evidence_source,
             )
+            self.boundary_error_category = ""
             return self.phase
         if not check.active:
             self.phase = DONE
@@ -1218,6 +1330,7 @@ class RobotWatcher:
                 message="stopping without a prompt",
                 current_spec=check.current_spec or None,
             )
+            self.boundary_error_category = ""
             return self.phase
         if check.decision == "unfinished":
             self._record(
@@ -1345,14 +1458,21 @@ class RobotWatcher:
         self.prompts_sent += 1
         self.stable_polls = 0
         self.phase = CONTINUING
-        self._record("prompt", "sent continuation prompt in a fresh conversation")
+        error_category = self.boundary_error_category or "clean-finish"
+        self._record(
+            "prompt",
+            f"sent continuation prompt in a fresh conversation "
+            f"(error_category={error_category})",
+        )
         self._diag(
             "prompt",
             "sent continuation prompt",
             result="sent",
-            message="sent continuation prompt in a fresh conversation",
+            message="sent continuation prompt in a fresh conversation; "
+            f"error_category={error_category}; no raw provider capture stored",
             current_spec=next_target,
         )
+        self.boundary_error_category = ""
         return self.phase
 
     def _open_confirmation(self, check: BoundaryCheck, instruction: str = "") -> str:
@@ -1391,12 +1511,17 @@ class RobotWatcher:
         )
         if instruction and instruction != detail:
             detail = f"{detail}; recovery instruction: {instruction}"
-        self._record("prompt", f"confirmation recovery selected: {detail}")
+        error_category = self.boundary_error_category or "clean-finish"
+        self._record(
+            "prompt",
+            f"confirmation recovery selected: {detail} "
+            f"(error_category={error_category})",
+        )
         self._diag(
             "prompt",
             "confirmation recovery selected",
             result="selected",
-            message=detail,
+            message=f"{detail}; error_category={error_category}",
             current_spec=target,
             open_tasks=check.open_tasks,
         )
@@ -1456,15 +1581,22 @@ class RobotWatcher:
         self.confirmations_sent += 1
         self.stable_polls = 0
         self.phase = CONTINUING
-        self._record("prompt", "sent confirmation prompt in a fresh conversation")
+        error_category = self.boundary_error_category or "clean-finish"
+        self._record(
+            "prompt",
+            f"sent confirmation prompt in a fresh conversation "
+            f"(error_category={error_category})",
+        )
         self._diag(
             "prompt",
             "sent confirmation prompt",
             result="sent",
-            message="sent confirmation prompt in a fresh conversation",
+            message="sent confirmation prompt in a fresh conversation; "
+            f"error_category={error_category}; no raw provider capture stored",
             current_spec=target,
             open_tasks=check.open_tasks,
         )
+        self.boundary_error_category = ""
         return self.phase
 
     def _await_ready(self) -> bool:

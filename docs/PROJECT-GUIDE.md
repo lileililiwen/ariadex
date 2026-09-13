@@ -195,14 +195,22 @@ conversation and continues after a verified completion boundary.
 Behavior:
 
 - While the provider shows active output, a running tool, an approval
-  request, or an error, the robot sends nothing. Quota/rate-limit responses
+  request, or an error, the robot sends nothing. A recognized recoverable
+  terminal error (interrupted stream, reset or failed connection, timeout,
+  overloaded or unavailable service) shown together with a usable
+  input-ready surface is the exception: it reaches the task-aware
+  OpenSpec boundary and, after the fresh input-ready surface, receives
+  the confirmation or continuation prompt. Quota/rate-limit responses
   are also non-terminal waiting states: no further prompt is sent while the
   operator switches the model or credentials. Approval and confirmation
   requests are non-terminal waiting states; the watcher continues polling
   until the provider resumes or the user pauses/quits.
 - A finished conversation is recognized only when the provider-specific
   input-ready signal is stable for `--debounce` polls (default 3) with no
-  approval, tool, or error state present.
+  approval, tool, quota/authentication, or generic error state present. A
+  recognized recoverable terminal error shown with that ready surface, and
+  the existing maximum-step-limit surface, are recoverable boundary
+  candidates instead of dead blocks.
 - The initial prompt is sent once to the attached ready conversation. The
   continuation prompt (default `Please read the HANDOFF.md, and implement
   the next spec.`) is sent to a fresh conversation when the current spec's

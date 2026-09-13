@@ -33,10 +33,35 @@ PROVIDER_CODEX = "codex"
 PROVIDER_CODEBUDDY = "codebuddy"
 
 
+# Recoverable transport failures: the provider stops the current response
+# but leaves its input surface usable. Quota, authentication, approval, and
+# generic error markers never appear here; classification gives those
+# precedence and requires a verified input-ready marker in the same capture.
+RECOVERABLE_TERMINAL_ERROR_MARKERS: tuple[str, ...] = (
+    "stream interrupted",
+    "response interrupted",
+    "connection reset",
+    "connection error",
+    "network error",
+    "request timeout",
+    "request timed out",
+    "timed out",
+    "deadline exceeded",
+    "internal server error",
+    "service unavailable",
+    "bad gateway",
+    "gateway timeout",
+    "server overloaded",
+    "overloaded",
+    "try again",
+)
+
+
 class OpenCodeAdapter(AgentAdapter):
     provider_name = PROVIDER_OPENCODE
     launch_command = ("opencode",)
     new_session_input = "/new"
+    recoverable_error_markers = RECOVERABLE_TERMINAL_ERROR_MARKERS
 
     @property
     def capabilities(self) -> Capabilities:
@@ -55,6 +80,7 @@ class CodexAdapter(AgentAdapter):
     provider_name = PROVIDER_CODEX
     launch_command = ("codex",)
     new_session_input = None
+    recoverable_error_markers = RECOVERABLE_TERMINAL_ERROR_MARKERS
 
     @property
     def capabilities(self) -> Capabilities:
@@ -73,6 +99,7 @@ class CodeBuddyAdapter(AgentAdapter):
     provider_name = PROVIDER_CODEBUDDY
     launch_command = ("codebuddy",)
     new_session_input = None
+    recoverable_error_markers = RECOVERABLE_TERMINAL_ERROR_MARKERS
 
     @property
     def capabilities(self) -> Capabilities:

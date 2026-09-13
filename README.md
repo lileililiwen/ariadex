@@ -346,7 +346,13 @@ strict validation) advances to the next spec or stops. Missing tooling,
 malformed output, timeouts, or contradictory evidence block with the
 exact reason and send no prompt. Approval requests are a
 non-terminal waiting state: the watcher keeps polling and sends no input.
-Provider errors pause with the exact reason instead of advancing. When
+Provider errors pause with the exact reason instead of advancing, except
+for a recognized recoverable terminal error (interrupted stream, reset or
+failed connection, timeout, overloaded or unavailable service) shown
+together with a usable input-ready surface: that surface reaches the same
+task-aware boundary and, after a fresh ready surface, receives the
+confirmation or continuation prompt. Quota, authentication, and approval
+surfaces still wait or block with no prompt. When
 no active OpenSpec work remains, the robot stops and reports completion
 without sending another prompt. The robot widget is a minimal
 middle-right control showing provider/session identity, robot state, and
