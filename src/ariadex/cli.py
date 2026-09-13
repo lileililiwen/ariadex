@@ -2088,7 +2088,13 @@ def cmd_widget(
         if dependency.state != "installed":
             print(f"error: {dependency.detail}", file=sys.stderr)
             return EXIT_ERROR
-    if _start_daemon_only(project_dir) != EXIT_OK:
+    daemon_record = daemon_mod.read_record(project_dir)
+    daemon_running = daemon_mod.daemon_alive(daemon_record)
+    if (
+        not daemon_running
+        and _daemon_ipc_or_none(project_dir, "status") is None
+        and _start_daemon_only(project_dir) != EXIT_OK
+    ):
         return EXIT_ERROR
     return cmd_companion(project_dir, hotkey=hotkey, editor=editor)
 

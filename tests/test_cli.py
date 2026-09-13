@@ -129,6 +129,18 @@ class WidgetCommandTest(unittest.TestCase):
         start.assert_called_once_with(self.root)
         companion.assert_not_called()
 
+    def test_widget_reuses_existing_daemon(self):
+        with (
+            mock.patch("ariadex.cli.cmd_init", return_value=0),
+            mock.patch("ariadex.cli._daemon_ipc_or_none", return_value={"ok": True}),
+            mock.patch("ariadex.cli._start_daemon_only", return_value=0) as start,
+            mock.patch("ariadex.cli.cmd_companion", return_value=0) as companion,
+        ):
+            code, _, _ = run_cli(self.root, "admin", "widget")
+        self.assertEqual(code, 0)
+        start.assert_not_called()
+        companion.assert_called_once_with(self.root, hotkey=None, editor=None)
+
     def test_widget_does_not_start_daemon_when_tkinter_is_missing(self):
         with (
             mock.patch("ariadex.cli.cmd_init", return_value=0) as init,
