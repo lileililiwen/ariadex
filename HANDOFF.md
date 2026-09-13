@@ -2,10 +2,18 @@
 
 ## Current state
 
-- No active changes remain (`openspec list` is empty). The latest boundary
-  fix is implemented, verified, and archived below.
+- The latest boundary fix is implemented, verified, and archived below.
 - Implemented, verified, and archived:
-  `2026-09-13-scoped-git-boundary-evidence` (commit pending). Git status at
+  `2026-09-13-interactive-permission-init` (commit `c2bff42`). `ariadex init`
+  and `init --force` now ask for permission policy, private project temp
+  root, allowed file actions, and explicit allowlist paths before writing
+  configuration. Blank or skip answers retain `prompt`, `.ariadex/tmp`, all
+  safe file actions, and an empty allowlist. Shared `/tmp` requires an
+  explicit `allowlist` selection and path entry; it is never enabled by
+  default. Verified with 85 tests, Ruff, mypy, diff check, and strict
+  validation.
+- Implemented, verified, and archived:
+  `2026-09-13-scoped-git-boundary-evidence` (commit `a371f0c`). Git status at
   the conversation boundary still judges unresolved user source, handoff,
   and OpenSpec work, but excludes Ariadex-owned `.ariadex/` runtime state.
   OpenSpec remains authoritative: the recorded current spec is matched
