@@ -372,8 +372,10 @@ no active OpenSpec work remains, the robot stops and reports completion
 without sending another prompt. The robot widget is a minimal
 middle-right control showing provider/session identity, robot state, and
 the latest Ariadex activity event, with Pause (stops new input, session
-keeps running) and Quit (stops watching, session left attachable) plus an
-expandable read-only activity log. On Linux X11, `Ctrl+Esc` globally toggles
+keeps running) and Quit. In managed `start`, Quit stops the daemon and
+provider session; an unexpected widget crash is repaired by rerunning
+`start`. The lower-level watch widget leaves the provider session attachable,
+and provides an expandable read-only activity log. On Linux X11, `Ctrl+Esc` globally toggles
 Pause/Resume. `Ctrl+C` cleanly stops the watcher and closes the widget without
 a Python traceback.
 

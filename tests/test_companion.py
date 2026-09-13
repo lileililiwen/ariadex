@@ -805,6 +805,12 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.assertEqual(self.client.calls, ["stop"])
         self.assertEqual(self.adapter.unregistered, 1)
 
+    def test_close_button_stays_visible_when_daemon_stop_fails(self):
+        self.client.failure = "daemon unreachable"
+        self.window.close_button.invoke()
+        self.assertFalse(self.root.destroyed)
+        self.assertIn("daemon unreachable", self.window.model["failure"])
+
     def test_poll_loops_bounded(self):
         self.window._poll()
         self.assertTrue(self.root.after_calls)

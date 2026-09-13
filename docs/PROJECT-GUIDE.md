@@ -274,8 +274,10 @@ Behavior:
   prompt is sent.
 - The robot widget is minimal: fixed middle-right, provider/session
   identity plus robot state and the latest Ariadex activity event, Pause
-  (no new input, session keeps running), and Quit (watcher exits, session
-  left attachable). Initial placement and log expand/collapse are clamped
+  (no new input, session keeps running), and Quit. In managed `start`, Quit
+  stops the daemon and provider session; an unexpected widget crash is
+  repaired by rerunning `start`. The lower-level watch widget leaves the
+  provider session attachable. Initial placement and log expand/collapse are clamped
   to the usable virtual-screen bounds with the same small margin, so the
   dialog and its controls stay reachable on multi-monitor and small
   screens. A Show log/Hide log toggle expands a bounded read-only

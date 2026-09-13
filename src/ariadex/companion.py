@@ -1562,8 +1562,18 @@ class CompanionWindow:
 
     def _on_close(self) -> None:
         """Stop the daemon, then exit the widget process."""
-        with contextlib.suppress(CompanionError):
+        try:
             self.client.stop()
+        except CompanionError as exc:
+            # Do not close the only visible control while the daemon is still
+            # running. The operator must be able to retry or use the
+            # diagnostic controls; a silent IPC failure leaves the managed
+            # editor alive after an intentional quit.
+            model = dict(self.model)
+            model["failure"] = str(exc)
+            self.model = model
+            self._render()
+            return
         self._quit()
 
     # -- polling / rendering -------------------------------------------
