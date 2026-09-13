@@ -148,14 +148,14 @@ class HandleRequestTest(unittest.TestCase):
             reply = daemon.handle_request(self.root, name)
             self.assertTrue(reply["ok"])
             self.assertIn("mode", reply["state"])
-        self.assertEqual(state.read(self.root).mode, "MANUAL")
+        self.assertEqual(state.read(self.root).mode, "AUTO")
         self.assertEqual(self.runs_count(), before)
 
     def test_unknown_request_changes_nothing(self):
         before = self.runs_count()
         reply = daemon.handle_request(self.root, "reboot")
         self.assertFalse(reply["ok"])
-        self.assertEqual(state.read(self.root).mode, "MANUAL")
+        self.assertEqual(state.read(self.root).mode, "AUTO")
         self.assertEqual(self.runs_count(), before)
 
     def test_pause_prevents_scheduling_without_input(self):
@@ -173,14 +173,14 @@ class HandleRequestTest(unittest.TestCase):
         daemon.handle_request(self.root, "pause")
         reply = daemon.handle_request(self.root, "resume")
         self.assertTrue(reply["ok"], reply)
-        self.assertEqual(state.read(self.root).mode, "MANUAL")
+        self.assertEqual(state.read(self.root).mode, "AUTO")
         self.assertIn("resync_next", reply["state"])
         self.assertIsNone(concurrency.cancellation_requested(self.root))
 
     def test_resume_rejected_outside_pause(self):
         reply = daemon.handle_request(self.root, "resume")
         self.assertFalse(reply["ok"])
-        self.assertEqual(state.read(self.root).mode, "MANUAL")
+        self.assertEqual(state.read(self.root).mode, "AUTO")
 
     def test_stop_marks_stopping_without_deleting_work(self):
         handoff_before = (handoff_path(self.root)).read_text()
@@ -247,7 +247,7 @@ class IpcRoundTripTest(unittest.TestCase):
         try:
             response = daemon.send_request(self.root, "status", timeout_s=5.0)
             self.assertTrue(response["ok"])
-            self.assertEqual(response["state"]["mode"], "MANUAL")
+            self.assertEqual(response["state"]["mode"], "AUTO")
         finally:
             stop.set()
             thread.join(timeout=10)
@@ -394,7 +394,7 @@ class LifecycleCommandTest(unittest.TestCase):
         self.assertEqual(payload["mode"], "PAUSE")
         code, out, _ = run_cli(self.root, "resume", "--json")
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(out)["mode"], "MANUAL")
+        self.assertEqual(json.loads(out)["mode"], "AUTO")
 
     def test_full_start_stop_cycle(self):
         driver = FakeTerminalDriver()
@@ -428,7 +428,7 @@ class LifecycleCommandTest(unittest.TestCase):
         self.assertEqual(code, 0)
         payload = json.loads(out)
         self.assertNotIn("daemon", payload)
-        self.assertEqual(payload["mode"], "MANUAL")
+        self.assertEqual(payload["mode"], "AUTO")
         code, _, _ = run_cli(self.root, "stop")
         self.assertEqual(code, 0)
 

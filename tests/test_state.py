@@ -16,6 +16,7 @@ class StateTest(unittest.TestCase):
 
     def test_initial_state_has_explicit_mode(self):
         st = state.initial_state()
+        self.assertEqual(st.mode, "AUTO")
         self.assertIn(st.mode, state.MODES)
         self.assertTrue(st.session_id)
         self.assertGreaterEqual(st.unresolved_count, 0)

@@ -207,7 +207,7 @@ class TransitionTest(unittest.TestCase):
     def test_resume_leaves_pause(self):
         run_cli(self.root, "pause")
         self.assertEqual(run_cli(self.root, "resume")[0], 0)
-        self.assertEqual(self.mode(), "MANUAL")
+        self.assertEqual(self.mode(), "AUTO")
 
     def test_takeover_enters_manual(self):
         run_cli(self.root, "--no-auto-install", "auto")

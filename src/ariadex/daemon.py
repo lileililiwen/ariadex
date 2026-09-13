@@ -377,7 +377,7 @@ def handle_request(project_dir: Path, request_type: str) -> dict:
 
     `status` and `wake` are read-only. `pause` transitions to PAUSE and
     coordinates cancellation of in-flight work. `resume` resynchronizes
-    before returning to manual control. `stop` marks the daemon stopping;
+    before returning to AUTO scheduling. `stop` marks the daemon stopping;
     the loop finishes the current cycle and exits. Unknown types are
     rejected without touching scheduling or durable work.
     """
@@ -431,7 +431,7 @@ def handle_request(project_dir: Path, request_type: str) -> dict:
                 False, daemon_status_view(project_dir), error=f"resync refused: {exc}"
             )
         try:
-            mode = control_mod.transition(stored.mode, "MANUAL", via="resume")
+            mode = control_mod.transition(stored.mode, "AUTO", via="resume")
         except control_mod.TransitionError as exc:
             return build_response(
                 False, daemon_status_view(project_dir), error=str(exc)

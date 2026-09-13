@@ -2,6 +2,10 @@
 
 ## Purpose
 Defines input ownership by mode: `AUTO` may schedule and send input, `MANUAL` observes and logs without sending input, `PAUSE` starts no new scheduling, and every transition persists so it survives restarts.
+
+Managed `start` initializes a project in `AUTO`. The normal widget controls
+are Play/Resume (`PAUSE` to `AUTO`), Pause (`AUTO` to `PAUSE`), and Stop;
+`MANUAL` remains an internal takeover or diagnostic mode.
 ## Requirements
 ### Requirement: Modes define input ownership
 
@@ -18,4 +22,3 @@ Successful mode transitions MUST be persisted and visible to status before the c
 #### Scenario: Manual mode survives restart
 - **WHEN** Ariadex restarts after takeover
 - **THEN** it remains in `MANUAL` and sends no automatic input
-

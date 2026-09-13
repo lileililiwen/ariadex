@@ -230,16 +230,16 @@ through `ariadex admin doctor`, `ariadex admin status`, and
 
 On Linux X11 with Tkinter installed, `ariadex start` opens a small
 always-on-top mini-player near the middle-right edge: a text status
-indicator, the current work label, and compact Play/Yield/Stop controls.
+indicator, the current work label, and compact Play/Pause/Stop controls.
 Expanding the widget reveals full status text, a hotkey field, and
 Reconcile/Editor/Session controls. Every daemon mutation goes through the
 same typed local IPC as the terminal commands; the companion never writes
 state, touches the lease or tmux, or injects keystrokes into your editor.
 
-Manual-yield workflow: press the global hotkey (default `Ctrl+Esc`) while
-the agent works — the daemon yields to PAUSE at the safe cancellation
-boundary. Edit freely, then press Play: the daemon resynchronizes handoff,
-git, specs, queue, lease, and session state before any new provider input.
+Pause workflow: press the global hotkey (default `Ctrl+Esc`) while the agent
+works — the daemon enters `PAUSE` at the safe cancellation boundary. Edit
+freely, then press Play: the daemon resynchronizes handoff, git, specs, queue,
+lease, and session state, returns to `AUTO`, and continues provider work.
 The top-right close button stops the daemon and exits Ariadex. The Stop action
 in the expanded controls remains separately confirmation-gated.
 
@@ -403,9 +403,11 @@ The normal lifecycle is:
 `AUTO` means Ariadex may schedule and send provider input through its
 configured agent adapter and tmux session. Provider text alone never proves
 completion; configured verification must pass. `MANUAL` means Ariadex keeps
-observing and logging but sends no automatic provider input. `PAUSE` means no
-new scheduling begins and in-flight work is cancelled at the safe boundary.
-Returning to `AUTO` reconciles durable state before scheduling resumes.
+observing and logging but sends no automatic provider input; it is an internal
+takeover/diagnostic mode, not the default. `PAUSE` means no new scheduling
+begins and in-flight work is cancelled at the safe boundary. A new `start`
+begins in `AUTO`; Play also reconciles durable state and returns a paused
+project to `AUTO` before scheduling resumes.
 
 ### Widget behavior
 
@@ -417,12 +419,11 @@ the provider terminal.
 The widget displays the daemon mode, next action, queue counts, verification
 or failure text, and hotkey state. Its controls are daemon requests, not
 direct tmux commands. `Play` resynchronizes and returns a paused project to
-`MANUAL`; `Yield` enters `PAUSE`; and `Stop` requests graceful daemon
+`AUTO`; `Pause` enters `PAUSE`; and `Stop` requests graceful daemon
 shutdown. The top-right `×` requests daemon shutdown and then exits the widget.
 
-The current widget does not expose an `AUTO`/`MANUAL` mode switch. To resume
-automatic scheduling after reconciliation, use `ariadex auto`; to stop
-automatic input while continuing observation, use `ariadex takeover`.
+The widget does not expose the internal `MANUAL` takeover mode. Its normal
+controls are only Play (`PAUSE` -> `AUTO`), Pause (`AUTO` -> `PAUSE`), and Stop.
 
 The widget is part of the managed `start` lifecycle when the desktop
 prerequisites are available. If it crashes while the daemon and provider

@@ -50,7 +50,7 @@ def now_iso() -> str:
 
 def initial_state() -> State:
     return State(
-        mode="MANUAL",
+        mode="AUTO",
         session_id=new_session_id(),
         current_spec=None,
         unresolved_count=0,

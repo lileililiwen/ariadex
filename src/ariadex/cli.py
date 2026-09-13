@@ -135,7 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit stable JSON instead of human-readable text",
     )
     resume_parser = sub.add_parser(
-        "resume", help="leave PAUSE and return to manual control"
+        "resume", help="leave PAUSE and return to AUTO scheduling"
     )
     resume_parser.add_argument(
         "--json",
@@ -1382,8 +1382,8 @@ def cmd_pause(project_dir: Path, as_json: bool = False) -> int:
 
 
 def cmd_resume(project_dir: Path, as_json: bool = False) -> int:
-    # Valid only from PAUSE; returns to manual control. `auto` resumes
-    # scheduling after resynchronization. Daemon-mediated when healthy.
+    # Valid only from PAUSE; returns to AUTO scheduling after resynchronization.
+    # Daemon-mediated when healthy.
     ipc = _daemon_ipc_or_none(project_dir, "resume")
     if ipc:
         import json as json_mod
@@ -1396,7 +1396,7 @@ def cmd_resume(project_dir: Path, as_json: bool = False) -> int:
     return _transition(
         project_dir,
         "resume",
-        "manual control; use `ariadex auto` to resume scheduling",
+        "automatic scheduling resumed after reconciliation",
         as_json=as_json,
     )
 

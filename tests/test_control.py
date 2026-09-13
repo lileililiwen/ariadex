@@ -24,7 +24,7 @@ class TransitionTest(unittest.TestCase):
             self.assertEqual(transition(current, "AUTO", via="auto"), "AUTO")
 
     def test_resume_from_pause(self):
-        self.assertEqual(transition("PAUSE", "MANUAL", via="resume"), "MANUAL")
+        self.assertEqual(transition("PAUSE", "AUTO", via="resume"), "AUTO")
 
     def test_idempotent_repeats_succeed(self):
         self.assertEqual(transition("PAUSE", "PAUSE", via="pause"), "PAUSE")
@@ -34,7 +34,7 @@ class TransitionTest(unittest.TestCase):
     def test_resume_rejected_outside_pause(self):
         for current in ("AUTO", "MANUAL"):
             with self.assertRaises(TransitionError) as ctx:
-                transition(current, "MANUAL", via="resume")
+                transition(current, "AUTO", via="resume")
             self.assertIn("resume rejected", str(ctx.exception))
 
     def test_via_target_mismatch_rejected(self):

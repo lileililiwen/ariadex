@@ -98,7 +98,7 @@ class PauseResumeTest(unittest.TestCase):
         self.assertEqual(stored.session_id, before)
 
     def test_resume_rejected_outside_pause(self):
-        code, _, err = run_cli(self.root, "resume")  # MANUAL after init
+        code, _, err = run_cli(self.root, "resume")  # AUTO after init
         self.assertNotEqual(code, 0)
         self.assertIn("resume rejected", err)
         st = state.read(self.root)
@@ -108,11 +108,11 @@ class PauseResumeTest(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertIn("resume rejected", err)
 
-    def test_pause_then_resume_returns_to_manual(self):
+    def test_pause_then_resume_returns_to_auto(self):
         run_cli(self.root, "pause")
         code, _, _ = run_cli(self.root, "resume")
         self.assertEqual(code, 0)
-        self.assertEqual(state.read(self.root).mode, "MANUAL")
+        self.assertEqual(state.read(self.root).mode, "AUTO")
 
 
 class AutoTest(unittest.TestCase):

@@ -12,7 +12,7 @@ MODES = ("AUTO", "MANUAL", "PAUSE")
 
 VIA_TARGETS = {
     "pause": "PAUSE",
-    "resume": "MANUAL",
+    "resume": "AUTO",
     "takeover": "MANUAL",
     "auto": "AUTO",
 }

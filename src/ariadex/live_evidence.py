@@ -439,9 +439,7 @@ def scenario_takeover_resync() -> EvidenceResult:
             assert mode == "MANUAL"
             mode = control_mod.transition("MANUAL", "PAUSE", via="pause")
             assert mode == "PAUSE"
-            mode = control_mod.transition("PAUSE", "MANUAL", via="resume")
-            assert mode == "MANUAL"
-            mode = control_mod.transition("MANUAL", "AUTO", via="auto")
+            mode = control_mod.transition("PAUSE", "AUTO", via="resume")
             assert mode == "AUTO"
             handoff = handoff_mod.read_handoff(root / cfg.handoff_file)
             handoff.next_action = "stale probe action"

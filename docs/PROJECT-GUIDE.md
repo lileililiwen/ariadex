@@ -128,14 +128,14 @@ The widget is a small control surface over daemon IPC. It does not write the
 runtime state directly and does not inject keystrokes into an editor.
 
 - `Play`: calls daemon `resume`; this resynchronizes and returns the project
-  to `MANUAL`. It does not mean AUTO and does not start a conversation.
-- `Yield`: calls daemon `pause`; no new scheduling starts.
+  to `AUTO`, allowing the next conversation to start.
+- `Pause`: calls daemon `pause`; no new scheduling starts.
 - `Stop`: requests graceful daemon shutdown.
 - top-right `×`: requests daemon shutdown, then exits the widget process.
 - expanded controls: reconcile status, open the configured editor, and attach
   to the provider session.
 
-The widget’s Play/Yield/Stop controls are the normal lifecycle controls. The
+The widget’s Play/Pause/Stop controls are the normal lifecycle controls. The
 provider terminal’s Ctrl+C stops the managed provider; the daemon observes the
 exit and reconciles the widget and durable state.
 
@@ -267,15 +267,15 @@ Common interpretations:
 
 - `mode is MANUAL`: automatic input is intentionally disabled; run `ariadex
   auto` after reviewing the resync result.
-- `mode is PAUSE`: run `ariadex resume` for a manual, resynchronized state, or
-  `ariadex auto` to explicitly re-enable scheduling.
+- `mode is PAUSE`: click Play in the widget to resynchronize and return to
+  `AUTO`; lower-level commands are for diagnosis only.
 - missing Tkinter: install `python3-tk`, then rerun `ariadex start` (or `ariadex admin widget` for a direct widget launch).
 - missing tmux: install tmux or allow Ariadex's supported automatic tmux setup;
   `--no-auto-install` makes the command stop before provider work.
 - daemon record with no live process: rerun `ariadex start`; stale daemon
   records are reconciled without starting a duplicate scheduler.
-- widget visible but no provider activity: inspect `status` and confirm the
-  mode is `AUTO`; the widget's Play button returns to `MANUAL` by design.
+- widget visible but no provider activity: inspect `ariadex admin status` and
+  confirm the mode is `AUTO`; Play returns a paused project to `AUTO`.
 
 ## Developer map
 

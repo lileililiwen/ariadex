@@ -743,7 +743,7 @@ class CompanionWindow:
         self.play_button.pack(side="left", expand=True, fill="x")
         self.pause_button = tk.Button(
             controls,
-            text="Yield",
+            text="Pause",
             name="pause-button",
             width=8,
             padx=6,
