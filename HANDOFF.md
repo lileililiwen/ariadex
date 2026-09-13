@@ -2,6 +2,12 @@
 
 ## Current state
 
+- Follow-up managed single-writer correction: `ariadex start` marks the
+  project as managed, so the resident daemon keeps lease/IPC/status/control
+  responsibilities but never sends `Runner` prompts. The managed watcher is
+  the only provider-input writer, preventing Ariadex status logs from being
+  typed into OpenCode. Verified with 904 tests, Ruff check/format, and strict
+  OpenSpec validation (no active changes).
 - Follow-up quota-safety correction: quota/rate-limit output now overrides a
   retained provider ready marker and enters a recoverable waiting state. No
   additional prompt is sent while the operator switches model or credentials;
