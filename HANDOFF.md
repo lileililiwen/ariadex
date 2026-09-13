@@ -1,6 +1,12 @@
 # Ariadex handoff
 
 - Implemented and archived:
+  `2026-09-13-stale-daemon-owner-recovery`. Dead daemon records and missing
+  sockets no longer suppress `start`; live-owner reuse requires a responsive
+  typed daemon endpoint. Verified with 3 focused recovery tests, Ruff, and
+  diff check.
+
+- Implemented and archived:
   `2026-09-13-widget-close-stops-managed-workflow`. Managed widget close now
   exits only after typed daemon stop succeeds; failed stop IPC keeps the
   widget visible with the failure, while unexpected widget death remains
@@ -353,7 +359,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 - Tests: `tests/test_observability.py` (30 tests: versioned stable schema, redaction, non-attention mapping, aggregation, export failure isolation without success claims, multi-sink continuation, file round-trip, command failure, dedup/rate-limit/window-expiry, single-attempt failure records with retry on next observation, bounded state, no-sink suppression, runner blocker/completed/verification-failed/interrupted/idle events, default opt-out, failing notification never changes scheduling, config validation, CLI events/export bound).
 - Project test command: `PYTHONPATH=src python3 -m unittest discover -s tests` (358 tests, 1 skip: live tmux lifecycle; stdlib only; runtime requires PyYAML).
 - Live proof on this host: ruff check/format clean, mypy clean on 21 files, coverage 82% (gate met), `openspec validate --changes --strict --no-interactive` 1 passed before archiving, no active changes after archiving.
-- All post-MVP changes are implemented, verified, and archived. No active changes remain.
+- `stale-daemon-owner-recovery` is the active OpenSpec change; its stale-owner
+  recovery implementation is complete and awaiting archive.
 - `active-spec-discovery-and-archive-isolation` implemented, verified, and archived as `2026-09-12-active-spec-discovery-and-archive-isolation` (commit `78f6375`).
 - New boundary in `src/ariadex/spec_graph.py`: `ARCHIVE_DIRNAME = "archive"`, `is_active_change_name` (rejects `archive` and `.`-hidden names), `discover_active_changes` (sorted active names plus operator-visible ignore reasons for archived/hidden/non-directory entries; `archive/` descendants excluded via the reserved top-level directory). `load_graph` builds over active changes only.
 - `runner.py`: `inspect_repository` shares the same discovery (`specs` active only, new `ignored_specs` diagnostics); `select_next_action` unchanged and returns idle when only `archive` remains, never `start-spec archive`. `operator.py` `_spec_dir_ok` shares the same discovery and reports `no active changes` plus ignored-entry reasons, so doctor/preview/resync cannot disagree with the runner.
@@ -377,8 +384,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active changes remain. Select the next spec with `openspec list` when new
-work is planned.
+`stale-daemon-owner-recovery` is active and is the next change to archive after
+verification.
 
 ## Latest verification evidence
 
