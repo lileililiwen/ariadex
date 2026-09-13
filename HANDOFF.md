@@ -5,6 +5,17 @@
 - Planning queue is empty: both diagnostics follow-ups are implemented,
   verified, and archived. No active changes remain.
 - Implemented, verified, and archived:
+  `2026-09-13-max-step-recovery-and-visible-copy-control` (commit `2a4bcd5`).
+  The managed widget now exposes `Copy log` in its always-visible collapsed
+  controls, so a stalled run can be copied without navigating the expanded
+  view. Recognized OpenCode maximum-step-limit surfaces are recoverable
+  conversation boundaries: after debounce and a fresh ready surface, the
+  existing OpenSpec/task-aware decision sends the configured confirmation or
+  continuation prompt. Generic provider errors remain blocked, and no raw
+  provider capture is typed into the editor. Verified with 1025 tests,
+  coverage floors, Ruff check/format, mypy, `git diff --check`, and strict
+  validation of all 47 canonical specs.
+- Implemented, verified, and archived:
   `2026-09-13-managed-widget-log-copy-and-context` (commit `1d0cf09`).
   The daemon status (IPC and `admin status`) now carries a bounded
   `diagnostic_context` (durable current spec, OpenSpec queue with
