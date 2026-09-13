@@ -1,6 +1,13 @@
 # Ariadex handoff
 
 - Implemented and archived:
+  `2026-09-13-opencode-api-session-state`. Managed OpenCode now launches with
+  a project-scoped API port and the watcher uses session status (`active`,
+  `idle`, `retry`, `error`) for scheduling. Build footer and pane text no
+  longer decide conversation boundaries; API-unavailable state fails closed.
+  Verified with 24 focused adapter/robot tests, Ruff, and strict validation.
+
+- Implemented and archived:
   `2026-09-13-opencode-composer-whitespace`. The provider-owned OpenCode
   readiness matcher now handles the live `▣  Build` footer spacing. Verified
   against the live pane: `ready=True`, `classification=finished`; 27 focused
