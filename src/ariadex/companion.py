@@ -32,6 +32,10 @@ POLL_INTERVAL_S = 2.0
 #: Collapsed mini-player target width in pixels.
 WIDGET_WIDTH = 360
 WIDGET_COLLAPSED_HEIGHT = 116
+WIDGET_EXPANDED_HEIGHT = 320
+
+#: Bounded robot activity lines rendered in the expanded widget log.
+ROBOT_LOG_VIEW_LINES = 20
 
 HOTKEY_MODIFIERS = ("Ctrl", "Shift", "Alt", "Super")
 
@@ -111,7 +115,8 @@ def display_available() -> bool:
         return False
     finally:
         with contextlib.suppress(Exception):
-            root.destroy()
+            if root is not None:
+                root.destroy()
     return True
 
 
@@ -1090,13 +1095,39 @@ def build_robot_view_model(status: dict) -> dict:
 
     Only provider/session identity and robot state are shown; there are
     no scheduler controls. Pause stops new input, quit stops watching,
-    and both leave the user-owned provider session untouched.
+    and both leave the user-owned provider session untouched. The model
+    also carries the latest Ariadex activity event plus a bounded
+    read-only activity list for the expandable widget log.
     """
     phase = str(status.get("phase", "unknown"))
     provider = str(status.get("provider", "unknown"))
     session = str(status.get("session", "unknown"))
     paused = bool(status.get("paused"))
     reason = str(status.get("block_reason", "") or "")
+    raw_activity = status.get("activity", [])
+    activity: list[dict] = []
+    if isinstance(raw_activity, list):
+        for entry in raw_activity[-ROBOT_LOG_VIEW_LINES:]:
+            if not isinstance(entry, dict):
+                continue
+            activity.append(
+                {
+                    "category": str(entry.get("category", "info")),
+                    "message": str(entry.get("message", ""))[:280],
+                }
+            )
+    latest_raw = status.get("latest_event")
+    latest: dict | None = None
+    if isinstance(latest_raw, dict):
+        latest = {
+            "category": str(latest_raw.get("category", "info")),
+            "message": str(latest_raw.get("message", ""))[:280],
+        }
+    elif activity:
+        latest = dict(activity[-1])
+    latest_text = (
+        f"{latest['category']}: {latest['message']}" if latest else "no activity yet"
+    )
     if phase in ("stopped",):
         indicator = "stopped"
     elif phase in ("done",):
@@ -1122,6 +1153,10 @@ def build_robot_view_model(status: dict) -> dict:
         "identity": identity,
         "work_label": work_label,
         "failure": reason if indicator == "blocked" else None,
+        "latest_event": latest,
+        "latest_text": latest_text,
+        "activity": activity,
+        "expanded": bool(status.get("expanded", False)),
         "actions": {
             "pause": indicator in ("watching", "working", "waiting"),
             "resume": indicator == "paused",
@@ -1130,17 +1165,30 @@ def build_robot_view_model(status: dict) -> dict:
     }
 
 
+def format_robot_activity_line(entry: dict) -> str:
+    """Render one activity entry as a single operator-readable line."""
+    return f"{entry.get('category', 'info')}: {entry.get('message', '')}"
+
+
 def format_robot_text(model: dict) -> str:
     """Text status equivalent of the robot widget (screen-reader use)."""
     lines = [
         f"robot: {model.get('indicator_text')} (phase {model.get('phase')})",
         f"watching: {model.get('identity')}",
+        f"latest: {model.get('latest_text', 'no activity yet')}",
     ]
     actions = model.get("actions", {})
     enabled = sorted(name for name, on in actions.items() if on)
     lines.append(f"actions: {', '.join(enabled) if enabled else 'none available'}")
     if model.get("failure"):
         lines.append(f"blocked: {model['failure']}")
+    activity = model.get("activity", [])
+    if activity:
+        lines.append("activity:")
+        for entry in activity[-ROBOT_LOG_VIEW_LINES:]:
+            lines.append(f"- {format_robot_activity_line(entry)}")
+    else:
+        lines.append("activity: (none)")
     return "\n".join(lines)
 
 
@@ -1150,6 +1198,9 @@ class RobotWindow:
     The window polls a status function and forwards Pause/Quit to the
     watcher callbacks. It never touches tmux, leases, or state files;
     closing it quits watching and leaves the provider session running.
+    The collapsed view shows the latest Ariadex activity event; an
+    explicit toggle expands a bounded read-only activity log without
+    moving the window or taking focus from the provider editor.
     """
 
     def __init__(
@@ -1212,6 +1263,18 @@ class RobotWindow:
             foreground="#c9d1d9",
         )
         self.identity_label.pack(fill="x")
+        self.event_label = tk.Label(
+            self.frame,
+            text="no activity yet",
+            anchor="w",
+            justify="left",
+            wraplength=WIDGET_WIDTH - 20,
+            background="#20242b",
+            foreground="#9aa4b2",
+        )
+        self.event_label.pack(fill="x")
+        self.expanded = False
+        self.log_text = self._build_log_panel(tk)
         controls = tk.Frame(self.frame, background="#20242b")
         controls.pack(fill="x", pady=(4, 0))
         self.pause_button = tk.Button(
@@ -1232,10 +1295,56 @@ class RobotWindow:
             command=self._on_quit,
         )
         self.quit_button.pack(side="left", expand=True, fill="x")
+        self.toggle_button = tk.Button(
+            controls,
+            text="Show log",
+            name="robot-log-toggle",
+            width=8,
+            takefocus=False,
+            command=self._on_toggle,
+        )
+        self.toggle_button.pack(side="left", expand=True, fill="x")
         if self.hotkey_adapter is not None:
             self.hotkey_adapter.register(self.hotkey, self._on_hotkey)
         self._refresh()
         self._schedule_poll()
+
+    def _build_log_panel(self, tk):
+        """Create the read-only activity log without touching window focus."""
+        text_cls = getattr(tk, "Text", None)
+        if text_cls is None:
+            return None
+        try:
+            widget = text_cls(
+                self.frame,
+                height=8,
+                wrap="word",
+                takefocus=False,
+                background="#14171c",
+                foreground="#c9d1d9",
+            )
+        except Exception:
+            return None
+        with contextlib.suppress(Exception):
+            widget.configure(state="disabled")
+        return widget
+
+    def _on_toggle(self) -> None:
+        """Expand or collapse the activity log; never sends provider input."""
+        self.expanded = not self.expanded
+        with contextlib.suppress(Exception):
+            if self.expanded and self.log_text is not None:
+                self.log_text.pack(fill="both", expand=True, pady=(4, 0))
+            elif self.log_text is not None:
+                pack_forget = getattr(self.log_text, "pack_forget", None)
+                if callable(pack_forget):
+                    pack_forget()
+        with contextlib.suppress(Exception):
+            height = (
+                WIDGET_EXPANDED_HEIGHT if self.expanded else WIDGET_COLLAPSED_HEIGHT
+            )
+            self.root.geometry(f"{WIDGET_WIDTH}x{height}")  # type: ignore[attr-defined]
+        self._render()
 
     def _on_pause(self) -> None:
         with contextlib.suppress(Exception):
@@ -1288,10 +1397,31 @@ class RobotWindow:
             self.model = build_robot_view_model(status)
         self._render()
 
+    def _log_lines(self, model: dict) -> list[str]:
+        """Honest expanded-log lines for empty/unreachable/blocked states."""
+        activity = model.get("activity", [])
+        lines = [format_robot_activity_line(entry) for entry in activity]
+        if lines:
+            return lines[-ROBOT_LOG_VIEW_LINES:]
+        if model.get("indicator_text") == "UNREACHABLE":
+            detail = str(model.get("failure", "") or "").strip()
+            return [f"watcher unreachable{': ' + detail if detail else ''}"]
+        if model.get("failure"):
+            return ["(no activity yet)", f"blocked: {model['failure']}"]
+        return ["(no activity yet)"]
+
     def _render(self) -> None:
         model = self.model
         self.state_label.configure(text=str(model.get("indicator_text", "?")))
         self.identity_label.configure(text=str(model.get("work_label", "")))
+        with contextlib.suppress(Exception):
+            self.event_label.configure(
+                text=str(model.get("latest_text", "no activity yet"))
+            )
+            self.toggle_button.configure(
+                text="Hide log" if self.expanded else "Show log"
+            )
+        self._render_log(model)
         actions = model.get("actions", {})
         self.pause_button.configure(
             text="Resume" if model.get("indicator") == "paused" else "Pause"
@@ -1306,6 +1436,23 @@ class RobotWindow:
         self.quit_button.configure(
             state="normal" if actions.get("quit") else "disabled"
         )
+
+    def _render_log(self, model: dict) -> None:
+        """Write the read-only log; never raises into the poll loop."""
+        if self.log_text is None or not self.expanded:
+            return
+        lines = self._log_lines(model)
+        with contextlib.suppress(Exception):
+            self.log_text.configure(state="normal")
+        with contextlib.suppress(Exception):
+            delete = getattr(self.log_text, "delete", None)
+            insert = getattr(self.log_text, "insert", None)
+            if callable(delete):
+                delete("1.0", "end")
+            if callable(insert):
+                insert("1.0", "\n".join(lines))
+        with contextlib.suppress(Exception):
+            self.log_text.configure(state="disabled")
 
 
 class RobotWatcherBoundary(Protocol):

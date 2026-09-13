@@ -33,15 +33,15 @@ ariadex init
 ariadex start
 ```
 
-`ariadex init` asks for the provider and first/continuation prompts (blank
-answers keep the built-in defaults) and creates missing `.ariadex/`
+`ariadex init` asks for the provider and first/continuation/confirmation prompts
+(blank answers keep the built-in defaults) and creates missing `.ariadex/`
 configuration, handoff, and state files without overwriting existing work.
 Plain `init` refuses when the project is already initialized; `init --force`
 confirms, then removes only `.ariadex/` and reinitializes.
 
 `ariadex start` runs the managed workflow described under The daemon
-lifecycle below. `--agent`, `--first-prompt`, and `--continuation-prompt`
-override the configuration for one run.
+lifecycle below. `--agent`, `--first-prompt`, `--continuation-prompt`, and
+`--confirmation-prompt` override the configuration for one run.
 
 The current directory is the project. The managed `start` command owns the
 widget lifecycle. Maintainers can diagnose the widget through
@@ -63,9 +63,10 @@ provider in a private project-scoped tmux session through its declared
 adapter command, opens the independent widget when the desktop supports it,
 attaches your terminal to the provider session, sends the configured first
 prompt once the provider is ready, and supervises verified continuation
-until the queue is empty. `--agent`, `--first-prompt`, and
-`--continuation-prompt` override the configuration for one run; session
-names and watcher options are never user inputs. A duplicate `start`
+until the queue is empty. `--agent`, `--first-prompt`,
+`--continuation-prompt`, and `--confirmation-prompt` override the
+configuration for one run; session names and watcher options are never
+user inputs. A duplicate `start`
 reuses the live owner; if only the widget is unhealthy it recreates that widget
 and creates no second daemon, provider session, supervisor, or prompt.
 
@@ -187,11 +188,19 @@ Behavior:
   approval, tool, or error state present.
 - The initial prompt is sent once to the attached ready conversation. The
   continuation prompt (default `Please read the HANDOFF.md, and implement
-  the next spec.`) is sent to every subsequent new conversation.
+  the next spec.`) is sent to a fresh conversation when the current spec's
+  tasks are complete; the confirmation prompt (default `Please finish the
+  remaining open tasks from HANDOFF.md and the active spec's tasks.md, then
+  update the handoff.`) is sent to a fresh conversation when valid tasks
+  remain open, and repeats in bounded attempts until the tasks complete or
+  a real blocker occurs. Neither prompt is sent before the fresh
+  input-ready surface is observed.
 - Before each continuation, the robot checks the durable boundary:
-  handoff readability, a clean git tree, and the active OpenSpec list. Open
-  tasks are expected across multiple conversations and do not block `/new`;
-  configured verification and task completion gate actual spec completion.
+  handoff readability, task-marker completion for the current spec
+  (`--finished-change` overrides the handoff's current spec), a clean git
+  tree, and the active OpenSpec list. Missing or malformed task metadata
+  stays blocked with the exact reason and sends no prompt; configured
+  verification and task completion gate actual spec completion.
   An empty active list stops the watcher with a completion report and no
   further prompt. `--max-polls` bounds a run (0 means
   unbounded); `--poll-interval` sets the seconds between pane polls.
@@ -204,9 +213,13 @@ Behavior:
   `BLOCKED` with the provider, operation, and recovery reason, and no
   prompt is sent.
 - The robot widget is minimal: fixed middle-right, provider/session
-  identity plus robot state, Pause (no new input, session keeps running),
-  and Quit (watcher exits, session left attachable). On Linux X11,
-  `Ctrl+Esc` globally toggles Pause/Resume. `Ctrl+C` cleanly stops the watch
+  identity plus robot state and the latest Ariadex activity event, Pause
+  (no new input, session keeps running), and Quit (watcher exits, session
+  left attachable). A Show log/Hide log toggle expands a bounded read-only
+  activity log (boundary decisions, prompt selection, readiness, waiting,
+  pause, and error events; never raw provider transcripts or secrets)
+  without moving the window or taking focus from the provider editor.
+  On Linux X11, `Ctrl+Esc` globally toggles Pause/Resume. `Ctrl+C` cleanly stops the watch
   process and closes the widget without a Python traceback.
 
 ## Durable project files
@@ -215,7 +228,7 @@ Behavior:
 
 | Path | Purpose |
 | --- | --- |
-| `.ariadex/config.yaml` | provider, first/continuation prompts, tmux, active-spec, verification, retry, and telemetry configuration |
+| `.ariadex/config.yaml` | provider, first/continuation/confirmation prompts, tmux, active-spec, verification, retry, and telemetry configuration |
 | `HANDOFF.md` | durable context: current spec, completed work, unresolved work, blockers, and next action; configurable via `handoff_file` |
 | `.ariadex/state.json` | mode, session ID, current spec, unresolved count, and update time |
 | `.ariadex/daemon.json` | daemon PID, socket endpoint, lease/runtime status |

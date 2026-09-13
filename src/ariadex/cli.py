@@ -163,6 +163,12 @@ def build_parser() -> argparse.ArgumentParser:
         "(default: configured continuation_prompt)",
     )
     start_parser.add_argument(
+        "--confirmation-prompt",
+        default=None,
+        help="unfinished-task recovery prompt for this run "
+        "(default: configured confirmation_prompt)",
+    )
+    start_parser.add_argument(
         "--json",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -269,6 +275,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--continuation-prompt",
         default=None,
         help="prompt sent to every new conversation (default: HANDOFF prompt)",
+    )
+    watch_parser.add_argument(
+        "--confirmation-prompt",
+        default=None,
+        help="prompt sent to recover unfinished tasks "
+        "(default: configured confirmation_prompt)",
     )
     watch_parser.add_argument(
         "--finished-change",
@@ -562,13 +574,14 @@ def _coerce_answer(raw: str, default: str) -> str:
 
 def _ask_init_answers(
     read_answer=None,
-) -> tuple[str, str, str]:
-    """Prompt for provider, first prompt, and continuation prompt.
+) -> tuple[str, str, str, str]:
+    """Prompt for provider, first, continuation, and confirmation prompts.
 
     `read_answer` maps a prompt string to the user's raw answer; the default
     reads interactively (defaults headless). Invalid providers are rejected
     and re-prompted without touching durable state. Returns validated
-    `(provider, first_prompt, continuation_prompt)` with non-empty values.
+    `(provider, first_prompt, continuation_prompt, confirmation_prompt)`
+    with non-empty values.
     """
     read = read_answer if read_answer is not None else _wizard_answer
     providers = providers_mod.supported_providers()
@@ -590,6 +603,7 @@ def _ask_init_answers(
             file=sys.stderr,
         )
     default_prompt = config_mod.DEFAULT_MANAGED_PROMPT
+    default_confirmation = config_mod.DEFAULT_CONFIRMATION_PROMPT
     first_prompt = _coerce_answer(
         read("First prompt [blank keeps the built-in default]: "),
         default_prompt,
@@ -598,11 +612,18 @@ def _ask_init_answers(
         read("Continuation prompt [blank keeps the built-in default]: "),
         default_prompt,
     )
-    return provider, first_prompt, continuation_prompt
+    confirmation_prompt = _coerce_answer(
+        read("Confirmation prompt [blank keeps the built-in default]: "),
+        default_confirmation,
+    )
+    return provider, first_prompt, continuation_prompt, confirmation_prompt
 
 
 def _render_config_text(
-    provider: str, first_prompt: str, continuation_prompt: str
+    provider: str,
+    first_prompt: str,
+    continuation_prompt: str,
+    confirmation_prompt: str | None = None,
 ) -> str:
     """Render the commented default config with the wizard answers applied.
 
@@ -611,6 +632,8 @@ def _render_config_text(
     """
     import json as json_mod
 
+    if confirmation_prompt is None:
+        confirmation_prompt = config_mod.DEFAULT_CONFIRMATION_PROMPT
     text = config_mod.default_config_text()
     text = text.replace(
         "\nagent_provider: opencode\n", f"\nagent_provider: {provider}\n", 1
@@ -625,11 +648,27 @@ def _render_config_text(
         f"\ncontinuation_prompt: {json_mod.dumps(continuation_prompt)}\n",
         1,
     )
+    marker = config_mod.DEFAULT_CONFIRMATION_PROMPT
+    if f"\nconfirmation_prompt: {marker}\n" in text:
+        text = text.replace(
+            f"\nconfirmation_prompt: {marker}\n",
+            f"\nconfirmation_prompt: {json_mod.dumps(confirmation_prompt)}\n",
+            1,
+        )
+    else:
+        text = (
+            text.rstrip()
+            + f"\nconfirmation_prompt: {json_mod.dumps(confirmation_prompt)}\n"
+        )
     return text
 
 
 def _create_missing_files(
-    project_dir: Path, provider: str, first_prompt: str, continuation_prompt: str
+    project_dir: Path,
+    provider: str,
+    first_prompt: str,
+    continuation_prompt: str,
+    confirmation_prompt: str | None = None,
 ) -> tuple[list, list]:
     """Create absent .ariadex/config.yaml, handoff, and state files.
 
@@ -645,7 +684,9 @@ def _create_missing_files(
         preserved.append(str(config_mod.CONFIG_REL_PATH))
     else:
         cfg_path.write_text(
-            _render_config_text(provider, first_prompt, continuation_prompt),
+            _render_config_text(
+                provider, first_prompt, continuation_prompt, confirmation_prompt
+            ),
             encoding="utf-8",
         )
         created.append(str(config_mod.CONFIG_REL_PATH))
@@ -696,7 +737,9 @@ def _cmd_init_force(
         return EXIT_ERROR
     # Same wizard as first initialization; nothing is removed or created
     # until every answer validates.
-    provider, first_prompt, continuation_prompt = _ask_init_answers(read_answer)
+    provider, first_prompt, continuation_prompt, confirmation_prompt = (
+        _ask_init_answers(read_answer)
+    )
     print(
         "init --force removes the complete .ariadex directory (configuration, "
         "state, daemon records, locks, logs, events). HANDOFF.md, openspec/, "
@@ -716,7 +759,11 @@ def _cmd_init_force(
         return EXIT_ERROR
     try:
         created, preserved = _create_missing_files(
-            project_dir, provider, first_prompt, continuation_prompt
+            project_dir,
+            provider,
+            first_prompt,
+            continuation_prompt,
+            confirmation_prompt,
         )
     except OSError as exc:
         print(
@@ -796,10 +843,16 @@ def cmd_init(
         return EXIT_ERROR
     # Atomic from the user's perspective: the directory and files are only
     # created after every answer validates; existing project files are kept.
-    provider, first_prompt, continuation_prompt = _ask_init_answers(read_answer)
+    provider, first_prompt, continuation_prompt, confirmation_prompt = (
+        _ask_init_answers(read_answer)
+    )
     try:
         created, preserved = _create_missing_files(
-            project_dir, provider, first_prompt, continuation_prompt
+            project_dir,
+            provider,
+            first_prompt,
+            continuation_prompt,
+            confirmation_prompt,
         )
     except OSError as exc:
         print(f"error: initialization failed: {exc}", file=sys.stderr)
@@ -1559,13 +1612,18 @@ def _attach_session(argv: list[str]) -> int:
 
 
 def _resolve_managed_config(
-    cfg, *, agent=None, first_prompt=None, continuation_prompt=None
+    cfg,
+    *,
+    agent=None,
+    first_prompt=None,
+    continuation_prompt=None,
+    confirmation_prompt=None,
 ):
     """Resolve provider/prompts from config with one-run overrides applied.
 
-    Returns `(provider, first, continuation)` or prints an error and
-    returns None. Overrides must be non-empty; unknown providers are
-    rejected with the supported list.
+    Returns `(provider, first, continuation, confirmation)` or prints an
+    error and returns None. Overrides must be non-empty; unknown providers
+    are rejected with the supported list.
     """
     provider = agent if agent is not None else cfg.agent_provider
     if provider not in providers_mod.supported_providers():
@@ -1581,6 +1639,11 @@ def _resolve_managed_config(
         if continuation_prompt is not None
         else cfg.continuation_prompt
     )
+    confirmation = (
+        confirmation_prompt
+        if confirmation_prompt is not None
+        else cfg.confirmation_prompt
+    )
     if not first.strip():
         print("error: --first-prompt requires a non-empty value", file=sys.stderr)
         return None
@@ -1590,22 +1653,34 @@ def _resolve_managed_config(
             file=sys.stderr,
         )
         return None
-    return provider, first, continuation
+    if not confirmation.strip():
+        print(
+            "error: --confirmation-prompt requires a non-empty value",
+            file=sys.stderr,
+        )
+        return None
+    return provider, first, continuation, confirmation
 
 
 def _build_managed_watcher(project_dir, cfg, driver, adapter, session, resolved):
     """Build the supervision watcher for the managed session.
 
-    `resolved` is the `(provider, first, continuation)` triple. Raises
-    RobotError for invalid watcher configuration.
+    `resolved` is the `(provider, first, continuation, confirmation)`
+    quadruple (a legacy 3-tuple resolves confirmation from config).
+    Raises RobotError for invalid watcher configuration.
     """
-    provider, first, continuation = resolved
+    if len(resolved) == 3:
+        provider, first, continuation = resolved
+        confirmation = cfg.confirmation_prompt
+    else:
+        provider, first, continuation, confirmation = resolved
     robot_config = robot_mod.validate_config(
         robot_mod.RobotConfig(
             session=session,
             provider=provider,
             initial_prompt=first,
             continuation_prompt=continuation,
+            confirmation_prompt=confirmation,
             spec_dir=cfg.spec_dir,
             handoff_file=cfg.handoff_file,
         )
@@ -1667,6 +1742,7 @@ def run_managed_start(
     provider: str,
     first_prompt: str,
     continuation_prompt: str,
+    confirmation_prompt: str | None = None,
     interactive: bool,
     as_json: bool = False,
     has_terminal: bool | None = None,
@@ -1742,6 +1818,11 @@ def run_managed_start(
     else:
         print("widget: skipped (unavailable); terminal controls apply")
     make_watcher = watcher_factory or _build_managed_watcher
+    resolved_confirmation = (
+        confirmation_prompt
+        if confirmation_prompt is not None
+        else cfg.confirmation_prompt
+    )
     try:
         watcher = make_watcher(
             project_dir,
@@ -1749,7 +1830,7 @@ def run_managed_start(
             adapter.driver,
             adapter,
             session,
-            (provider, first_prompt, continuation_prompt),
+            (provider, first_prompt, continuation_prompt, resolved_confirmation),
         )
     except robot_mod.RobotError as exc:
         print(f"error: supervision setup failed: {exc}", file=sys.stderr)
@@ -1822,14 +1903,16 @@ def cmd_start(
     agent: str | None = None,
     first_prompt: str | None = None,
     continuation_prompt: str | None = None,
+    confirmation_prompt: str | None = None,
 ) -> int:
     """Start the managed provider workflow. Idempotent; never steals a lease.
 
     Composes initialization guard, config plus one-run overrides, the
     prerequisite coordinator, one project daemon, one private adapter-owned
     tmux session, the independent widget, terminal attach, supervision with
-    automatic first/continuation prompts, and reconciled shutdown. Reports
-    the existing daemon when one owns the project and creates nothing new.
+    automatic first/continuation/confirmation prompts, and reconciled
+    shutdown. Reports the existing daemon when one owns the project and
+    creates nothing new.
     """
     if not is_initialized(project_dir):
         print(
@@ -1849,10 +1932,11 @@ def cmd_start(
         agent=agent,
         first_prompt=first_prompt,
         continuation_prompt=continuation_prompt,
+        confirmation_prompt=confirmation_prompt,
     )
     if resolved is None:
         return EXIT_ERROR
-    provider, first, continuation = resolved
+    provider, first, continuation, confirmation = resolved
     try:
         (project_dir / daemon_mod.MANAGED_RUNTIME_REL_PATH).touch(exist_ok=True)
     except OSError as exc:
@@ -1886,6 +1970,7 @@ def cmd_start(
         provider=provider,
         first_prompt=first,
         continuation_prompt=continuation,
+        confirmation_prompt=confirmation,
         interactive=interactive,
         as_json=as_json,
     )
@@ -2276,6 +2361,7 @@ def cmd_watch(
     initial_prompt: str | None = None,
     attach: bool = False,
     continuation_prompt: str | None = None,
+    confirmation_prompt: str | None = None,
     finished_change: str = "",
     debounce: int = 3,
     poll_interval: float = 5.0,
@@ -2288,7 +2374,8 @@ def cmd_watch(
 
     Attaches to a user-selected existing tmux session, sends the initial
     prompt once the conversation is ready, then continues verified work
-    with the continuation prompt. Sends no input while the agent works,
+    with the continuation prompt or recovers unfinished tasks with the
+    confirmation prompt. Sends no input while the agent works,
     never terminates the user-owned session, and stops with a report
     when no active OpenSpec work remains.
     """
@@ -2382,7 +2469,20 @@ def cmd_watch(
                 continuation_prompt=(
                     continuation_prompt
                     if continuation_prompt is not None
-                    else robot_mod.DEFAULT_CONTINUATION_PROMPT
+                    else (
+                        cfg.continuation_prompt
+                        if cfg is not None
+                        else robot_mod.DEFAULT_CONTINUATION_PROMPT
+                    )
+                ),
+                confirmation_prompt=(
+                    confirmation_prompt
+                    if confirmation_prompt is not None
+                    else (
+                        cfg.confirmation_prompt
+                        if cfg is not None
+                        else robot_mod.DEFAULT_ROBOT_CONFIRMATION_PROMPT
+                    )
                 ),
                 debounce_polls=debounce,
                 poll_interval_s=poll_interval,
@@ -2872,6 +2972,7 @@ def main(argv: list[str] | None = None) -> int:
             agent=getattr(args, "agent", None),
             first_prompt=getattr(args, "first_prompt", None),
             continuation_prompt=getattr(args, "continuation_prompt", None),
+            confirmation_prompt=getattr(args, "confirmation_prompt", None),
         ),
         "stop": lambda: cmd_stop(project_dir, as_json=getattr(args, "json", False)),
         "companion": lambda: cmd_companion(
@@ -2982,6 +3083,7 @@ def main(argv: list[str] | None = None) -> int:
             initial_prompt=getattr(args, "initial_prompt", None),
             attach=getattr(args, "attach", False),
             continuation_prompt=getattr(args, "continuation_prompt", None),
+            confirmation_prompt=getattr(args, "confirmation_prompt", None),
             finished_change=getattr(args, "finished_change", "") or "",
             debounce=getattr(args, "debounce", 3),
             poll_interval=getattr(args, "poll_interval", 5.0),

@@ -179,15 +179,24 @@ class OverrideResolutionTest(unittest.TestCase):
         resolved = cli._resolve_managed_config(cfg)
         self.assertEqual(
             resolved,
-            (cfg.agent_provider, cfg.first_prompt, cfg.continuation_prompt),
+            (
+                cfg.agent_provider,
+                cfg.first_prompt,
+                cfg.continuation_prompt,
+                cfg.confirmation_prompt,
+            ),
         )
 
     def test_flags_override_config(self):
         cfg = config.load(self.root)
         resolved = cli._resolve_managed_config(
-            cfg, agent="codex", first_prompt="first!", continuation_prompt="next!"
+            cfg,
+            agent="codex",
+            first_prompt="first!",
+            continuation_prompt="next!",
+            confirmation_prompt="confirm!",
         )
-        self.assertEqual(resolved, ("codex", "first!", "next!"))
+        self.assertEqual(resolved, ("codex", "first!", "next!", "confirm!"))
 
     def test_unknown_agent_rejected(self):
         cfg = config.load(self.root)
@@ -203,6 +212,8 @@ class OverrideResolutionTest(unittest.TestCase):
             self.assertIsNone(cli._resolve_managed_config(cfg, first_prompt="  "))
         with redirect_stderr(io.StringIO()):
             self.assertIsNone(cli._resolve_managed_config(cfg, continuation_prompt=""))
+        with redirect_stderr(io.StringIO()):
+            self.assertIsNone(cli._resolve_managed_config(cfg, confirmation_prompt=" "))
 
     def test_cli_flags_reach_facade(self):
         seen = {}

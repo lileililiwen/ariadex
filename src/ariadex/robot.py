@@ -28,9 +28,23 @@ from pathlib import Path
 from . import handoff as handoff_mod
 from . import spec_graph as spec_graph_mod
 from .adapters import AgentAdapter, UnsupportedOperation
+from .config import DEFAULT_CONFIRMATION_PROMPT
+from .logging import redact
 from .terminal import TerminalDriver
 
 DEFAULT_CONTINUATION_PROMPT = "Please read the HANDOFF.md, and implement the next spec."
+
+# Re-exported so watcher defaults stay identical to managed configuration.
+DEFAULT_ROBOT_CONFIRMATION_PROMPT = DEFAULT_CONFIRMATION_PROMPT
+
+#: Maximum stored activity events per watcher (in-memory, informational only).
+MAX_ACTIVITY_EVENTS = 50
+
+#: Maximum activity events exposed through `status_view()` to the widget.
+MAX_ACTIVITY_VIEW = 20
+
+#: Maximum characters per activity message shown in the widget.
+MAX_ACTIVITY_MESSAGE = 280
 
 SUPPORTED_ROBOT_PROVIDERS = ("opencode", "codex", "codebuddy")
 
@@ -161,6 +175,7 @@ class RobotConfig:
     provider: str = "opencode"
     initial_prompt: str = ""
     continuation_prompt: str = DEFAULT_CONTINUATION_PROMPT
+    confirmation_prompt: str = DEFAULT_ROBOT_CONFIRMATION_PROMPT
     debounce_polls: int = 3
     poll_interval_s: float = 5.0
     max_polls: int = 0  # 0 means unbounded; widgets quit explicitly
@@ -188,6 +203,8 @@ def validate_config(config: RobotConfig) -> RobotConfig:
     # already in progress and must be observed without injecting input.
     if not config.continuation_prompt.strip():
         raise RobotError("continuation prompt must not be empty")
+    if not config.confirmation_prompt.strip():
+        raise RobotError("confirmation prompt must not be empty")
     if config.debounce_polls < 1:
         raise RobotError("debounce must be at least 1 poll")
     if config.poll_interval_s <= 0:
@@ -259,22 +276,90 @@ def _tasks_complete(project_dir: Path, spec_dir: str, change: str) -> tuple[bool
 
 @dataclasses.dataclass
 class BoundaryCheck:
-    """Durable completion boundary outcome (fail-closed)."""
+    """Durable completion boundary outcome (fail-closed).
+
+    `decision` distinguishes the task-aware result without changing the
+    historical `ok` contract: `complete` (tasks done, work remains),
+    `unfinished` (valid open tasks, recoverable via confirmation),
+    `empty` (no active specs remain), and `blocked` (hard failure, no
+    prompt). `current_spec` names the task target; `open_tasks` counts
+    its unchecked markers; `task_detail` carries the operator-readable
+    unfinished/invalid task description.
+    """
 
     ok: bool = False
     reason: str = ""
     active: list[str] = dataclasses.field(default_factory=list)
+    decision: str = "blocked"
+    current_spec: str = ""
+    open_tasks: int = 0
+    task_detail: str = ""
+
+
+def _boundary_target(
+    project_dir: Path, config: RobotConfig, handoff: handoff_mod.Handoff
+) -> str:
+    """Resolve which change's tasks.md gates the boundary decision."""
+    override = (config.finished_change or "").strip()
+    if override:
+        return override
+    return (handoff.current_spec or "").strip()
+
+
+def _task_decision(
+    project_dir: Path, config: RobotConfig, target: str
+) -> tuple[str, int, str]:
+    """Inspect one change's task markers without touching provider state.
+
+    Returns `(decision, open_count, detail)` where decision is `complete`,
+    `unfinished`, or `blocked`. A missing change directory means the work
+    was archived or recorded elsewhere: no open tasks. A present directory
+    without a readable/valid tasks.md is a hard metadata failure, never a
+    silent recovery.
+    """
+    if not target:
+        return "complete", 0, ""
+    tasks_path = project_dir / config.spec_dir / target / "tasks.md"
+    if not (project_dir / config.spec_dir / target).is_dir():
+        return "complete", 0, ""
+    if not tasks_path.is_file():
+        return (
+            "blocked",
+            0,
+            f"`{target}` has no tasks.md; task completion unverifiable",
+        )
+    try:
+        text = tasks_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return "blocked", 0, f"tasks.md for `{target}` unreadable: {exc}"
+    open_names = [
+        line.strip()[len("- [ ]") :].strip() or "(unnamed task)"
+        for line in text.splitlines()
+        if line.strip().startswith("- [ ]")
+    ]
+    if not open_names:
+        return "complete", 0, ""
+    shown = ", ".join(open_names[:3])
+    if len(open_names) > 3:
+        shown += f", +{len(open_names) - 3} more"
+    return (
+        "unfinished",
+        len(open_names),
+        f"`{target}` has {len(open_names)} open task(s): {shown}",
+    )
 
 
 def check_boundary(
     project_dir: Path,
     config: RobotConfig,
 ) -> BoundaryCheck:
-    """Inspect HANDOFF.md, git, and the active OpenSpec list.
+    """Inspect HANDOFF.md, git, tasks, and the active OpenSpec list.
 
     Returns ok only when the previous conversation's work is represented
     durably. An empty active list is ok with no remaining work: the
-    caller stops instead of sending a continuation prompt.
+    caller stops instead of sending a continuation prompt. Valid open
+    tasks stay ok but carry the `unfinished` decision so the caller sends
+    the confirmation prompt instead of claiming completion.
     """
     handoff_path = project_dir / config.handoff_file
     if not handoff_path.is_file():
@@ -285,11 +370,17 @@ def check_boundary(
                 "record the work before continuing"
             ),
             active=[],
+            decision="blocked",
         )
     try:
-        handoff_mod.read_handoff(handoff_path)
+        handoff = handoff_mod.read_handoff(handoff_path)
     except (handoff_mod.HandoffError, OSError) as exc:
-        return BoundaryCheck(ok=False, reason=f"handoff unreadable: {exc}", active=[])
+        return BoundaryCheck(
+            ok=False,
+            reason=f"handoff unreadable: {exc}",
+            active=[],
+            decision="blocked",
+        )
     graph, errors = spec_graph_mod.load_graph(project_dir, config.spec_dir)
     if errors:
         first = sorted(errors)[0]
@@ -297,15 +388,49 @@ def check_boundary(
             ok=False,
             reason=f"spec metadata blocked: {errors[first]}",
             active=sorted(graph),
+            decision="blocked",
         )
-    # Open tasks are expected between conversations: a spec commonly needs
-    # several prompts. Task markers gate verified spec completion in Runner;
-    # they must not prevent the watcher from opening the next conversation.
     clean, reason = _git_tree_clean(project_dir)
     if not clean:
-        return BoundaryCheck(ok=False, reason=reason, active=sorted(graph))
+        return BoundaryCheck(
+            ok=False,
+            reason=reason,
+            active=sorted(graph),
+            decision="blocked",
+        )
     active, _ = spec_graph_mod.discover_active_changes(project_dir / config.spec_dir)
-    return BoundaryCheck(ok=True, reason="", active=sorted(active))
+    ordered = sorted(active)
+    if not ordered:
+        return BoundaryCheck(ok=True, reason="", active=[], decision="empty")
+    target = _boundary_target(project_dir, config, handoff)
+    task_decision, open_count, task_detail = _task_decision(project_dir, config, target)
+    if task_decision == "blocked":
+        return BoundaryCheck(
+            ok=False,
+            reason=task_detail,
+            active=ordered,
+            decision="blocked",
+            current_spec=target,
+            open_tasks=0,
+            task_detail=task_detail,
+        )
+    if task_decision == "unfinished":
+        return BoundaryCheck(
+            ok=True,
+            reason="",
+            active=ordered,
+            decision="unfinished",
+            current_spec=target,
+            open_tasks=open_count,
+            task_detail=task_detail,
+        )
+    return BoundaryCheck(
+        ok=True,
+        reason="",
+        active=ordered,
+        decision="complete",
+        current_spec=target,
+    )
 
 
 @dataclasses.dataclass
@@ -352,15 +477,38 @@ class RobotWatcher:
         # never inject a synthetic first request.
         self.initial_sent = not self.config.initial_prompt.strip()
         self.prompts_sent = 0
+        self.confirmations_sent = 0
         self.last_classification = CLASS_UNKNOWN
         self.block_reason = ""
         self._paused = False
         self._quit = False
+        self._events: list[dict] = []
+        self._event_seq = 0
+
+    def _record(self, category: str, message: str) -> dict:
+        """Append one bounded, redacted activity event (informational only)."""
+        self._event_seq += 1
+        safe = redact(str(message or ""))[:MAX_ACTIVITY_MESSAGE]
+        event = {
+            "seq": self._event_seq,
+            "category": str(category),
+            "message": safe,
+        }
+        self._events.append(event)
+        if len(self._events) > MAX_ACTIVITY_EVENTS:
+            self._events = self._events[-MAX_ACTIVITY_EVENTS:]
+        return event
+
+    @property
+    def activity_events(self) -> list[dict]:
+        """Bounded copy of recorded activity events (oldest first)."""
+        return [dict(event) for event in self._events]
 
     def request_pause(self) -> str:
         """Stop new input; the user-owned session keeps running."""
         self._paused = True
         self.phase = PAUSED
+        self._record("pause", "paused: no new input will be sent")
         return "paused: no new input; the provider session keeps running"
 
     def request_resume(self) -> str:
@@ -369,12 +517,14 @@ class RobotWatcher:
         self.block_reason = ""
         self.stable_polls = 0
         self.phase = WORKING if self.initial_sent else ATTACHED
+        self._record("resume", "resumed: watcher is observing the provider session")
         return "resumed: watcher is observing the provider session"
 
     def request_quit(self) -> str:
         """Stop watching; the user-owned session is left attachable."""
         self._quit = True
         self.phase = STOPPED
+        self._record("shutdown", "stopped: watcher exited; session untouched")
         return "stopped: watcher exited; the provider session is untouched"
 
     @property
@@ -383,6 +533,8 @@ class RobotWatcher:
 
     def status_view(self) -> dict:
         """Widget-visible robot state (pure data, no I/O)."""
+        visible = self._events[-MAX_ACTIVITY_VIEW:]
+        latest = dict(visible[-1]) if visible else None
         return {
             "provider": self.adapter.provider_name,
             "session": self.config.session,
@@ -391,6 +543,9 @@ class RobotWatcher:
             "initial_sent": self.initial_sent,
             "stable_polls": self.stable_polls,
             "block_reason": self.block_reason,
+            "latest_event": latest,
+            "activity": [dict(event) for event in visible],
+            "confirmations_sent": self.confirmations_sent,
         }
 
     def _capture(self) -> str:
@@ -416,6 +571,7 @@ class RobotWatcher:
                 self._paused = True
                 self.phase = PAUSED
                 self.stable_polls = 0
+                self._record("pause", "daemon mode PAUSE: no new input will be sent")
                 return self.phase
             if self._paused and mode == "AUTO":
                 self.request_resume()
@@ -434,6 +590,9 @@ class RobotWatcher:
             self.block_reason = (
                 "provider waits for approval; watcher continues observing"
             )
+            self._record(
+                "waiting", "provider waits for approval; watcher continues observing"
+            )
             return self.phase
         if observed == CLASS_QUOTA:
             self.phase = WAITING
@@ -442,6 +601,7 @@ class RobotWatcher:
                 "provider quota or rate limit reached; switch the model or "
                 "credentials, then watcher will resume"
             )
+            self._record("waiting", self.block_reason)
             return self.phase
         if observed == CLASS_ERROR:
             self.phase = BLOCKED
@@ -449,6 +609,7 @@ class RobotWatcher:
             self.block_reason = (
                 "provider reports an error; fix it in the session, then resume watching"
             )
+            self._record("error", self.block_reason)
             return self.phase
         if observed != CLASS_FINISHED:
             self.phase = WORKING if self.initial_sent else ATTACHED
@@ -467,16 +628,27 @@ class RobotWatcher:
             self.prompts_sent += 1
             self.stable_polls = 0
             self.phase = CONTINUING
+            self._record("prompt", "sent initial prompt to the ready conversation")
             return self.phase
         self.phase = VERIFIED_BOUNDARY
         check = check_boundary(self.project_dir, self.config)
         if not check.ok:
             self.phase = BLOCKED
             self.block_reason = check.reason
+            self._record("boundary", f"blocked: {check.reason}")
             return self.phase
         if not check.active:
             self.phase = DONE
+            self._record("boundary", "no active OpenSpec work remains; stopping")
             return self.phase
+        if check.decision == "unfinished":
+            self._record("boundary", check.task_detail or "unfinished tasks remain")
+            return self._open_confirmation(check)
+        self._record(
+            "boundary",
+            f"verified boundary for `{check.current_spec or check.active[0]}`; "
+            "opening a new conversation",
+        )
         return self._open_continuation()
 
     def _open_continuation(self) -> str:
@@ -498,6 +670,7 @@ class RobotWatcher:
                 f"`{self.adapter.provider_name}` automatic continuation "
                 f"unavailable: {exc}"
             )
+            self._record("error", self.block_reason)
             return self.phase
         except Exception as exc:
             self.phase = BLOCKED
@@ -506,6 +679,7 @@ class RobotWatcher:
                 f"`{self.adapter.provider_name}` via automatic "
                 f"new-conversation operation: {exc}; no prompt was sent"
             )
+            self._record("error", self.block_reason)
             return self.phase
         ready = self._await_ready()
         if not ready:
@@ -514,11 +688,64 @@ class RobotWatcher:
                 "new conversation never reported an input-ready surface; "
                 "no prompt was sent"
             )
+            self._record("error", self.block_reason)
             return self.phase
         self._send(self.config.continuation_prompt)
         self.prompts_sent += 1
         self.stable_polls = 0
         self.phase = CONTINUING
+        self._record("prompt", "sent continuation prompt in a fresh conversation")
+        return self.phase
+
+    def _open_confirmation(self, check: BoundaryCheck) -> str:
+        """Recover unfinished tasks via the adapter contract only.
+
+        Provider commands, restart details, and input-delivery rules stay
+        inside the adapter (`new_conversation`); this method never branches
+        on provider identity or command strings. The confirmation prompt
+        is sent only after the fresh input-ready surface is observed, so a
+        repeated unfinished boundary simply opens another bounded attempt.
+        """
+        self.phase = NEW_CONVERSATION
+        detail = check.task_detail or (
+            f"`{check.current_spec}` has {check.open_tasks} open task(s)"
+        )
+        self._record("prompt", f"confirmation recovery selected: {detail}")
+        try:
+            self.adapter.new_conversation()
+        except UnsupportedOperation as exc:
+            self.phase = BLOCKED
+            self.block_reason = (
+                f"`{self.adapter.provider_name}` automatic confirmation "
+                f"unavailable: {exc}"
+            )
+            self._record("error", self.block_reason)
+            return self.phase
+        except Exception as exc:
+            self.phase = BLOCKED
+            self.block_reason = (
+                "new conversation failed for "
+                f"`{self.adapter.provider_name}` via automatic "
+                f"new-conversation operation: {exc}; no prompt was sent"
+            )
+            self._record("error", self.block_reason)
+            return self.phase
+        self._record("readiness", "waiting for the fresh input-ready surface")
+        ready = self._await_ready()
+        if not ready:
+            self.phase = BLOCKED
+            self.block_reason = (
+                "new conversation never reported an input-ready surface; "
+                "no prompt was sent"
+            )
+            self._record("error", self.block_reason)
+            return self.phase
+        self._send(self.config.confirmation_prompt)
+        self.prompts_sent += 1
+        self.confirmations_sent += 1
+        self.stable_polls = 0
+        self.phase = CONTINUING
+        self._record("prompt", "sent confirmation prompt in a fresh conversation")
         return self.phase
 
     def _await_ready(self) -> bool:
@@ -555,6 +782,7 @@ class RobotWatcher:
             if self.shutdown_requested is not None and self.shutdown_requested():
                 self.request_quit()
                 self.block_reason = "managed shutdown requested"
+                self._record("shutdown", "managed shutdown requested")
                 continue
             if self.phase in (DONE, BLOCKED):
                 outcome = "done" if self.phase == DONE else BLOCKED

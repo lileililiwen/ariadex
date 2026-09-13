@@ -828,7 +828,7 @@ class BoundaryTest(unittest.TestCase):
         self.assertTrue(check.ok, check.reason)
         self.assertEqual(check.active, ["demo"])
 
-    def test_missing_tasks_file_does_not_block_next_conversation(self) -> None:
+    def test_missing_tasks_file_blocks_with_metadata_reason(self) -> None:
         project = make_project(self._tmp)
         (project / "openspec" / "changes" / "demo").mkdir(parents=True)
         with unittest.mock.patch.object(
@@ -837,7 +837,9 @@ class BoundaryTest(unittest.TestCase):
             check = robot_mod.check_boundary(
                 project, self._config(finished_change="demo")
             )
-        self.assertTrue(check.ok, check.reason)
+        self.assertFalse(check.ok)
+        self.assertEqual(check.decision, "blocked")
+        self.assertIn("tasks.md", check.reason)
 
     def test_archived_change_has_no_open_tasks(self) -> None:
         project = make_project(self._tmp)

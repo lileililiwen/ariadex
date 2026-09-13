@@ -36,6 +36,14 @@ SUPPORTED_TERMINAL_DRIVERS = ("tmux",)
 #: starts by implementing the next durable spec, exactly like a continuation.
 DEFAULT_MANAGED_PROMPT = "Please read the HANDOFF.md, and implement the next spec."
 
+#: Built-in default for unfinished-task recovery. It is deliberately distinct
+#: from the first/continuation prompts: it asks the provider to finish the
+#: remaining open tasks instead of advancing to the next spec.
+DEFAULT_CONFIRMATION_PROMPT = (
+    "Please finish the remaining open tasks from HANDOFF.md and the active "
+    "spec's tasks.md, then update the handoff."
+)
+
 
 @dataclasses.dataclass
 class Config:
@@ -58,6 +66,7 @@ class Config:
     notification_window_seconds: int = 3600
     first_prompt: str = DEFAULT_MANAGED_PROMPT
     continuation_prompt: str = DEFAULT_MANAGED_PROMPT
+    confirmation_prompt: str = DEFAULT_CONFIRMATION_PROMPT
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -68,7 +77,10 @@ class ConfigError(Exception):
 
 
 def default_config_text() -> str:
-    return """\
+    # The confirmation default exceeds the source line-length gate, so it is
+    # interpolated from the constant instead of embedded as a long literal.
+    # The rendered YAML keeps a single plain-scalar line per prompt.
+    text = """\
 # Ariadex project configuration.
 # Created by `ariadex init`. Unknown keys are reported as warnings and ignored.
 # Invalid enum values, missing required paths, and negative retry limits
@@ -117,10 +129,13 @@ notification_rate_limit: 5
 notification_window_seconds: 3600
 # Managed startup prompts, asked by `ariadex init` (blank answers keep these
 # defaults). The first prompt is sent once the first provider conversation is
-# ready; the continuation prompt follows each verified conversation boundary.
+# ready; the continuation prompt follows each verified conversation boundary;
+# the confirmation prompt recovers unfinished tasks without claiming completion.
 first_prompt: Please read the HANDOFF.md, and implement the next spec.
 continuation_prompt: Please read the HANDOFF.md, and implement the next spec.
+confirmation_prompt: __CONFIRMATION_PROMPT__
 """
+    return text.replace("__CONFIRMATION_PROMPT__", DEFAULT_CONFIRMATION_PROMPT)
 
 
 def defaults() -> Config:
@@ -143,7 +158,7 @@ def migrate_managed_prompt_keys(project_dir: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
     missing = [
         name
-        for name in ("first_prompt", "continuation_prompt")
+        for name in ("first_prompt", "continuation_prompt", "confirmation_prompt")
         if not re.search(rf"^\s*{re.escape(name)}\s*:", text, re.MULTILINE)
     ]
     if not missing:
@@ -152,8 +167,13 @@ def migrate_managed_prompt_keys(project_dir: Path) -> list[str]:
         "",
         "# Managed startup prompts. Edit these values to control `ariadex start`.",
     ]
+    prompt_defaults = {
+        "first_prompt": DEFAULT_MANAGED_PROMPT,
+        "continuation_prompt": DEFAULT_MANAGED_PROMPT,
+        "confirmation_prompt": DEFAULT_CONFIRMATION_PROMPT,
+    }
     for name in missing:
-        additions.append(f"{name}: {json.dumps(DEFAULT_MANAGED_PROMPT)}")
+        additions.append(f"{name}: {json.dumps(prompt_defaults[name])}")
     path.write_text(
         text.rstrip() + "\n" + "\n".join(additions) + "\n", encoding="utf-8"
     )
@@ -288,7 +308,7 @@ def validate(raw: dict, source: str = "configuration") -> Config:
             raise ConfigError(f"invalid {name} in {source}: expected an integer >= 0")
         if value < 0:
             raise ConfigError(f"invalid {name} in {source}: expected an integer >= 0")
-    for name in ("first_prompt", "continuation_prompt"):
+    for name in ("first_prompt", "continuation_prompt", "confirmation_prompt"):
         value = get(name, getattr(base, name))
         if not isinstance(value, str) or not value.strip():
             raise ConfigError(
@@ -318,4 +338,5 @@ def validate(raw: dict, source: str = "configuration") -> Config:
         ),
         first_prompt=get("first_prompt", base.first_prompt),
         continuation_prompt=get("continuation_prompt", base.continuation_prompt),
+        confirmation_prompt=get("confirmation_prompt", base.confirmation_prompt),
     )

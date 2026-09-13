@@ -36,18 +36,22 @@ class FirstRunWizardTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
 
     def test_blank_answers_store_program_defaults(self):
-        self.assertEqual(cli.cmd_init(self.root, read_answer=scripted("", "", "")), 0)
+        self.assertEqual(
+            cli.cmd_init(self.root, read_answer=scripted("", "", "", "")), 0
+        )
 
         cfg = config.load(self.root)
         self.assertEqual(cfg.agent_provider, "opencode")
         self.assertEqual(cfg.first_prompt, config.DEFAULT_MANAGED_PROMPT)
         self.assertEqual(cfg.continuation_prompt, config.DEFAULT_MANAGED_PROMPT)
+        self.assertEqual(cfg.confirmation_prompt, config.DEFAULT_CONFIRMATION_PROMPT)
         self.assertTrue((self.root / "HANDOFF.md").is_file())
         self.assertTrue(cli.is_initialized(self.root))
 
     def test_skip_words_select_defaults(self):
         self.assertEqual(
-            cli.cmd_init(self.root, read_answer=scripted("skip", "-", "SKIP")), 0
+            cli.cmd_init(self.root, read_answer=scripted("skip", "-", "SKIP", "skip")),
+            0,
         )
         cfg = config.load(self.root)
         self.assertEqual(cfg.agent_provider, "opencode")
@@ -57,7 +61,10 @@ class FirstRunWizardTest(unittest.TestCase):
         code = cli.cmd_init(
             self.root,
             read_answer=scripted(
-                "codex", "Implement the active spec.", "Next, do this."
+                "codex",
+                "Implement the active spec.",
+                "Next, do this.",
+                "Finish the rest.",
             ),
         )
         self.assertEqual(code, 0)
@@ -65,11 +72,12 @@ class FirstRunWizardTest(unittest.TestCase):
         self.assertEqual(cfg.agent_provider, "codex")
         self.assertEqual(cfg.first_prompt, "Implement the active spec.")
         self.assertEqual(cfg.continuation_prompt, "Next, do this.")
+        self.assertEqual(cfg.confirmation_prompt, "Finish the rest.")
 
     def test_prompt_with_yaml_special_chars_round_trips(self):
         tricky = "Do: the thing # now [brackets] 'quoted'"
         self.assertEqual(
-            cli.cmd_init(self.root, read_answer=scripted("", tricky, "")), 0
+            cli.cmd_init(self.root, read_answer=scripted("", tricky, "", "")), 0
         )
         cfg = config.load(self.root)
         self.assertEqual(cfg.first_prompt, tricky)
@@ -84,7 +92,7 @@ class FirstRunWizardTest(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             code = cli.cmd_init(
-                self.root, read_answer=scripted("wat", "codebuddy", "", "")
+                self.root, read_answer=scripted("wat", "codebuddy", "", "", "")
             )
         self.assertEqual(code, 0)
         self.assertIn("unsupported provider `wat`", err.getvalue())
@@ -102,7 +110,7 @@ class FirstRunWizardTest(unittest.TestCase):
         fake_stdin.isatty = lambda: True  # type: ignore[method-assign]
         with (
             mock.patch.object(sys, "stdin", fake_stdin),
-            mock.patch("builtins.input", side_effect=["codex", "", ""]),
+            mock.patch("builtins.input", side_effect=["codex", "", "", ""]),
         ):
             self.assertEqual(cli.cmd_init(self.root), 0)
         cfg = config.load(self.root)
@@ -126,7 +134,9 @@ class FirstRunWizardTest(unittest.TestCase):
         handoff = self.root / "HANDOFF.md"
         handoff.write_text("human content\n", encoding="utf-8")
         self.assertFalse(cli.is_initialized(self.root))
-        self.assertEqual(cli.cmd_init(self.root, read_answer=scripted("", "", "")), 0)
+        self.assertEqual(
+            cli.cmd_init(self.root, read_answer=scripted("", "", "", "")), 0
+        )
         text = cfg_path.read_text(encoding="utf-8")
         self.assertIn("agent_provider: codex", text)
         self.assertEqual(handoff.read_text(encoding="utf-8"), "human content\n")
@@ -138,7 +148,9 @@ class RepeatedInitTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.assertEqual(cli.cmd_init(self.root, read_answer=scripted("", "", "")), 0)
+        self.assertEqual(
+            cli.cmd_init(self.root, read_answer=scripted("", "", "", "")), 0
+        )
 
     def test_reinit_migrates_missing_prompt_keys(self):
         path = self.root / config.CONFIG_REL_PATH
@@ -147,7 +159,13 @@ class RepeatedInitTest(unittest.TestCase):
             "\n".join(
                 line
                 for line in text.splitlines()
-                if not line.startswith(("first_prompt:", "continuation_prompt:"))
+                if not line.startswith(
+                    (
+                        "first_prompt:",
+                        "continuation_prompt:",
+                        "confirmation_prompt:",
+                    )
+                )
             )
             + "\n",
             encoding="utf-8",
@@ -158,6 +176,11 @@ class RepeatedInitTest(unittest.TestCase):
         migrated = path.read_text(encoding="utf-8")
         self.assertIn("first_prompt:", migrated)
         self.assertIn("continuation_prompt:", migrated)
+        self.assertIn("confirmation_prompt:", migrated)
+        self.assertEqual(
+            config.load(self.root).confirmation_prompt,
+            config.DEFAULT_CONFIRMATION_PROMPT,
+        )
 
     def test_plain_reinit_refuses_without_changing_state(self):
         before_cfg = (self.root / config.CONFIG_REL_PATH).read_text(encoding="utf-8")
@@ -193,7 +216,8 @@ class ForceResetTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.assertEqual(
             cli.cmd_init(
-                self.root, read_answer=scripted("codex", "first-one", "cont-one")
+                self.root,
+                read_answer=scripted("codex", "first-one", "cont-one", "conf-one"),
             ),
             0,
         )
@@ -211,7 +235,7 @@ class ForceResetTest(unittest.TestCase):
             self.root,
             force=True,
             confirmed=True,
-            read_answer=scripted("opencode", "", ""),
+            read_answer=scripted("opencode", "", "", ""),
         )
         self.assertEqual(code, 0)
         cfg = config.load(self.root)
@@ -235,7 +259,7 @@ class ForceResetTest(unittest.TestCase):
                 self.root,
                 force=True,
                 confirmed=False,
-                read_answer=scripted("opencode", "", ""),
+                read_answer=scripted("opencode", "", "", ""),
             )
         self.assertNotEqual(code, 0)
         self.assertIn("--yes", err.getvalue())
@@ -255,7 +279,7 @@ class ForceResetTest(unittest.TestCase):
                 self.root,
                 force=True,
                 confirmed=False,
-                read_answer=scripted("opencode", "", ""),
+                read_answer=scripted("opencode", "", "", ""),
             )
         self.assertNotEqual(code, 0)
         self.assertTrue((self.root / ".ariadex" / "daemon.json").exists())
@@ -272,7 +296,7 @@ class ForceResetTest(unittest.TestCase):
                 self.root,
                 force=True,
                 confirmed=False,
-                read_answer=scripted("opencode", "", ""),
+                read_answer=scripted("opencode", "", "", ""),
             )
         self.assertEqual(code, 0)
         self.assertEqual(config.load(self.root).agent_provider, "opencode")
@@ -292,7 +316,7 @@ class ForceResetTest(unittest.TestCase):
             self.root,
             force=True,
             confirmed=True,
-            read_answer=scripted("", "", ""),
+            read_answer=scripted("", "", "", ""),
         )
         self.assertNotEqual(code, 0)
 
@@ -318,7 +342,9 @@ class StartGuardTest(unittest.TestCase):
         self.assertFalse((self.root / ".ariadex").exists())
 
     def test_start_passes_guard_once_initialized(self):
-        self.assertEqual(cli.cmd_init(self.root, read_answer=scripted("", "", "")), 0)
+        self.assertEqual(
+            cli.cmd_init(self.root, read_answer=scripted("", "", "", "")), 0
+        )
         report = cli.prerequisites_mod.CoordinatorReport(
             results=[
                 cli.prerequisites_mod.PrerequisiteResult("runtime", "present", "ok"),
@@ -350,21 +376,27 @@ class InitConfigValidationTest(unittest.TestCase):
         cfg = config.defaults()
         self.assertEqual(cfg.first_prompt, config.DEFAULT_MANAGED_PROMPT)
         self.assertEqual(cfg.continuation_prompt, config.DEFAULT_MANAGED_PROMPT)
+        self.assertEqual(cfg.confirmation_prompt, config.DEFAULT_CONFIRMATION_PROMPT)
         self.assertNotEqual(cfg.first_prompt.strip(), "")
+        self.assertNotEqual(cfg.confirmation_prompt.strip(), "")
+        self.assertNotEqual(cfg.confirmation_prompt, cfg.continuation_prompt)
 
     def test_missing_prompt_keys_receive_defaults(self):
         cfg = config.validate({"agent_provider": "codex"}, source="test")
         self.assertEqual(cfg.first_prompt, config.DEFAULT_MANAGED_PROMPT)
         self.assertEqual(cfg.continuation_prompt, config.DEFAULT_MANAGED_PROMPT)
+        self.assertEqual(cfg.confirmation_prompt, config.DEFAULT_CONFIRMATION_PROMPT)
 
     def test_blank_prompts_rejected(self):
-        for key in ("first_prompt", "continuation_prompt"):
+        for key in ("first_prompt", "continuation_prompt", "confirmation_prompt"):
             with self.assertRaises(config.ConfigError, msg=key):
                 config.validate({key: "  "}, source="test")
 
     def test_non_string_prompts_rejected(self):
         with self.assertRaises(config.ConfigError):
             config.validate({"first_prompt": ["x"]}, source="test")
+        with self.assertRaises(config.ConfigError):
+            config.validate({"confirmation_prompt": {"x": 1}}, source="test")
 
     def test_default_config_text_loads_with_prompts(self):
         cfg = config.validate(
@@ -372,6 +404,7 @@ class InitConfigValidationTest(unittest.TestCase):
         )
         self.assertEqual(cfg.first_prompt, config.DEFAULT_MANAGED_PROMPT)
         self.assertEqual(cfg.continuation_prompt, config.DEFAULT_MANAGED_PROMPT)
+        self.assertEqual(cfg.confirmation_prompt, config.DEFAULT_CONFIRMATION_PROMPT)
 
 
 if __name__ == "__main__":
