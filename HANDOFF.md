@@ -4,6 +4,18 @@
 
 - The latest boundary fix is implemented, verified, and archived below.
 - Implemented, verified, and archived:
+  `2026-09-13-handoff-revision-and-prompt-delivery` (commit `7fc8fd7`).
+  Ariadex structured lifecycle state is stored under `.ariadex/handoff.md`;
+  public `HANDOFF.md` remains ordinary user prose and is never a scheduling
+  authority. The robot no longer queries Git or uses repository cleanliness
+  for prompt delivery, conversation transitions, or OpenSpec decisions.
+  Verified with 211 focused tests, 40 host-permission daemon/socket tests,
+  Ruff, formatting, mypy, diff check, and strict validation of 49 canonical
+  specs. The complete `PYTHONPATH=src python3 -m unittest discover -s tests
+  -q` run did not complete because an unrelated subprocess-based test left
+  the suite running after output stopped; that process was terminated and is
+  not claimed as a passing full-suite result.
+- Implemented, verified, and archived:
   `2026-09-13-interactive-permission-init` (commit `c2bff42`). `ariadex init`
   and `init --force` now ask for permission policy, private project temp
   root, allowed file actions, and explicit allowlist paths before writing
