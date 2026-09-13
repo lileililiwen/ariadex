@@ -300,6 +300,7 @@ def daemon_status_view(project_dir: Path) -> dict:
     from . import concurrency as concurrency_mod
     from . import config as config_mod
     from . import handoff as handoff_mod
+    from . import runner as runner_mod
     from . import state as state_mod
     from . import widget_runtime as widget_runtime_mod
 
@@ -314,7 +315,16 @@ def daemon_status_view(project_dir: Path) -> dict:
     try:
         cfg = config_mod.load(project_dir)
         handoff = handoff_mod.read_handoff(project_dir / cfg.handoff_file)
-        next_action = handoff.next_action
+        repo = runner_mod.inspect_repository(project_dir, cfg.spec_dir)
+        kind, target = runner_mod.select_next_action(
+            handoff, repo, retry_limit=cfg.retry_limit
+        )
+        if kind == runner_mod.ACTION_IDLE:
+            next_action = "none — idle"
+        elif kind == runner_mod.ACTION_STOP:
+            next_action = "none — blocked"
+        else:
+            next_action = f"{kind} {target}"
         open_count = sum(1 for i in handoff.unresolved if i.status == "OPEN")
         blocked_count = sum(1 for i in handoff.unresolved if i.status == "BLOCKED")
     except Exception:

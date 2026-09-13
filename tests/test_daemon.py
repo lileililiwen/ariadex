@@ -378,6 +378,15 @@ class LifecycleCommandTest(unittest.TestCase):
             stop.set()
             thread.join(timeout=10)
 
+    def test_status_calculates_pending_spec_from_active_changes(self):
+        change = self.root / "openspec" / "changes" / "next-change"
+        change.mkdir(parents=True)
+        (change / "tasks.md").write_text(
+            "# Tasks\n\n- [ ] implement\n", encoding="utf-8"
+        )
+        view = daemon.daemon_status_view(self.root)
+        self.assertEqual(view["next_action"], "start-spec next-change")
+
     def test_pause_resume_json_options(self):
         code, out, _ = run_cli(self.root, "pause", "--json")
         self.assertEqual(code, 0)
