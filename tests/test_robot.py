@@ -438,9 +438,29 @@ class WatcherStateTest(unittest.TestCase):
         self.assertIn("approval", watcher.block_reason)
         self.assertEqual(driver.sent_inputs("agent"), [])
 
+    def test_initial_prompt_is_not_resent_when_provider_waits_for_approval(
+        self,
+    ) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": self._ready(),
+            "workdir": "/t",
+        }
+        watcher = make_watcher(project, driver, debounce_polls=1)
+        self.assertEqual(watcher.poll(), robot_mod.CONTINUING)
+        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+
+        driver.sessions["agent"]["output"] = APPROVAL
+        self.assertEqual(watcher.poll(), robot_mod.WAITING)
+        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+        self.assertIn("answer the approval", watcher.block_reason)
+
         driver.sessions["agent"]["output"] = BUSY
-        self.assertEqual(watcher.poll(), "attached")
-        self.assertEqual(driver.sent_inputs("agent"), [])
+        self.assertEqual(watcher.poll(), "working")
+        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
 
     def test_error_is_blocked_without_input(self) -> None:
         project = make_project(self._tmp)
@@ -842,10 +862,25 @@ class BoundaryTest(unittest.TestCase):
 
     def test_missing_handoff_blocks(self) -> None:
         project = make_project(self._tmp)
-        (project / "HANDOFF.md").unlink()
+        (project / "HANDOFF.md").unlink(missing_ok=True)
         check = self._check(project, self._config())
-        self.assertFalse(check.ok)
-        self.assertIn("handoff", check.reason)
+        self.assertTrue(check.ok, check.reason)
+
+    def test_arbitrary_handoff_content_does_not_block_openspec_boundary(self) -> None:
+        project = make_project(self._tmp)
+        (project / "HANDOFF.md").write_text(
+            "This is an ordinary project handoff written by another tool.\n",
+            encoding="utf-8",
+        )
+        check = self._check(project, self._config())
+        self.assertTrue(check.ok, check.reason)
+        self.assertEqual(check.evidence_source, "openspec")
+
+    def test_missing_public_handoff_does_not_block_openspec_boundary(self) -> None:
+        project = make_project(self._tmp)
+        (project / "HANDOFF.md").unlink(missing_ok=True)
+        check = self._check(project, self._config())
+        self.assertTrue(check.ok, check.reason)
 
     def test_malformed_spec_metadata_blocks(self) -> None:
         project = make_project(self._tmp)
@@ -889,18 +924,14 @@ class BoundaryTest(unittest.TestCase):
         self.assertTrue(done)
         self.assertEqual(reason, "")
 
-    def test_completed_tasks_pass_to_git_gate(self) -> None:
+    def test_completed_tasks_do_not_require_git_state(self) -> None:
         project = make_project(self._tmp)
         change = project / "openspec" / "changes" / "demo"
         change.mkdir(parents=True)
         (change / "tasks.md").write_text("# Tasks\n\n- [x] Done\n", encoding="utf-8")
-        # The fixture is not a git checkout, so the git gate blocks next.
         check = self._check(project, self._config(finished_change="demo"))
-        self.assertFalse(check.ok)
-        self.assertTrue(
-            "git" in check.reason or "uncommitted" in check.reason,
-            check.reason,
-        )
+        self.assertTrue(check.ok, check.reason)
+        self.assertEqual(check.decision, "ready-to-archive")
 
     def test_handoff_current_spec_is_checked_without_override(self) -> None:
         project = make_project(self._tmp)
@@ -940,12 +971,6 @@ class BoundaryTest(unittest.TestCase):
 
         self.assertTrue(check.ok, check.reason)
         self.assertEqual(check.active, ["demo"])
-
-    def test_git_gate_refuses_outside_a_repo(self) -> None:
-        project = make_project(self._tmp)
-        clean, reason = robot_mod._git_tree_clean(project)
-        self.assertFalse(clean)
-        self.assertTrue(reason)
 
 
 class ProviderBoundaryTest(unittest.TestCase):

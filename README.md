@@ -331,8 +331,9 @@ override; otherwise the change in `HANDOFF.md` is checked),
 
 The robot waits for the provider's stable input-ready signal (debounced,
 default 3 polls), sends the initial prompt once, then verifies the
-durable boundary — handoff, task markers, git state, active OpenSpec
-list — before opening a new conversation. When the current spec's tasks
+durable boundary — Ariadex hidden state, task markers, and active OpenSpec
+list — before opening a new conversation. `HANDOFF.md` is ordinary
+user-owned prose; Git is outside the robot scheduler. When the current spec's tasks
 are complete it sends the continuation prompt (default `Please read the
 HANDOFF.md, and implement the next spec.`; override with
 `--continuation-prompt`); when valid tasks remain open it sends the
@@ -343,7 +344,7 @@ confirmation attempts until the tasks complete or a real blocker occurs.
 Missing or malformed task metadata stays blocked with the exact reason
 and sends no prompt. Before every first, continuation, or confirmation
 prompt, Ariadex records the selected change as a versioned conversation
-in `.ariadex/conversation.json` and synchronizes `HANDOFF.current_spec`,
+in `.ariadex/conversation.json` and synchronizes hidden Ariadex state,
 so a restart recovers the recorded target instead of inferring one from
 a stale field. Inside an OpenSpec repository the queue and task progress
 come from `openspec list --json`; a recorded change with complete tasks
@@ -418,16 +419,17 @@ missing prerequisites are never presented as ready.
 
 Ariadex is a project-scoped runtime for repeatedly executing verified coding
 work from durable repository state. It is not a chat window. Its durable
-inputs are the project configuration, `HANDOFF.md` by default, active OpenSpec
-changes, git state, the unresolved-work queue, and configured verification
-commands.
+inputs are the project configuration, Ariadex's hidden `.ariadex/` state,
+active OpenSpec changes, the unresolved-work queue, and configured
+verification commands. `HANDOFF.md` is user-owned prose only.
 
 The normal lifecycle is:
 
 1. `ariadex init` asks for the provider, managed prompts, and permission
    policy settings (blank answers keep the built-in defaults), then creates missing
-   `.ariadex/` configuration, the configured handoff file (default
-   `HANDOFF.md`), and state files without overwriting existing files.
+   `.ariadex/` configuration and state files plus a plain public
+   `HANDOFF.md` without overwriting existing files. Structured lifecycle
+   fields are stored only under `.ariadex/`.
    Plain `init` refuses when the project is already initialized;
    `init --force` confirms, then removes only `.ariadex/` and reinitializes.
 2. `ariadex start` runs the managed provider workflow: it prepares

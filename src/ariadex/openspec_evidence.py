@@ -1,7 +1,7 @@
 """OpenSpec-authoritative current-spec lifecycle evidence.
 
 The managed watcher must tie every provider conversation to the OpenSpec
-change it works on. This module is the only place that executes the
+  change it works on. This module is the only place that executes the
 ``openspec`` CLI for lifecycle decisions:
 
 - Commands run with an argument array (no shell), a bounded timeout, and
@@ -15,8 +15,8 @@ change it works on. This module is the only place that executes the
   of blocking non-OpenSpec projects.
 - Before any first, continuation, or confirmation prompt is sent, the
   selected change is recorded atomically as a versioned conversation
-  record under ``.ariadex/`` and ``HANDOFF.current_spec`` /
-  ``current_spec_file`` are synchronized without touching completed or
+  record under ``.ariadex/`` and Ariadex's hidden handoff state are
+  synchronized without touching completed or
   unresolved history. Crash recovery reads the record and never infers
   a target from a stale ``next_action``.
 - After task completion, archival is proven by active-list absence plus
@@ -593,8 +593,8 @@ def record_conversation(
     """Record the conversation target before any provider input is sent.
 
     Atomically persists a fresh versioned record (a new conversation id
-    per prompt) and synchronizes ``HANDOFF.current_spec`` and
-    ``current_spec_file`` without touching completed or unresolved
+    per prompt) and synchronizes hidden Ariadex state without touching
+    completed or unresolved
     history. Raises ``ConversationError`` for an invalid role or an
     empty target and ``handoff.HandoffError`` for an untrusted handoff.
     """

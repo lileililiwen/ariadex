@@ -7,7 +7,7 @@ finished candidate must show the provider-specific input-ready signal,
 stay stable for the configured debounce interval, and show no running
 tool, approval request, confirmation prompt, provider error, or fresh
 output. Only then is the durable completion boundary evaluated
-(``HANDOFF.md``, task markers, git state, active OpenSpec list) before
+(``openspec`` evidence and task markers) before
 a new provider conversation is opened and the continuation prompt sent.
 
 The robot never calls a provider LLM API, never injects input while the
@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -328,41 +327,6 @@ def list_sessions(driver: TerminalDriver) -> list[str]:
     return sorted(names)
 
 
-def _git_tree_clean(project_dir: Path) -> tuple[bool, str]:
-    """Check user work with Git while excluding Ariadex runtime state.
-
-    `.ariadex/` is Ariadex-owned durable runtime state, not provider work.
-    It must not prevent an OpenSpec-proven archived change from advancing;
-    source, handoff, and OpenSpec changes remain visible to this gate.
-    """
-    try:
-        proc = subprocess.run(
-            [
-                "git",
-                "status",
-                "--porcelain",
-                "--untracked-files=all",
-                "--",
-                ".",
-                ":(exclude).ariadex/**",
-            ],
-            cwd=str(project_dir),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except FileNotFoundError as exc:
-        return False, f"git is not installed ({exc}); commit state unverifiable"
-    except OSError as exc:
-        return False, f"git status failed ({exc}); commit state unverifiable"
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "unknown git error").strip()
-        return False, f"git status refused: {detail}; commit state unverifiable"
-    if proc.stdout.strip():
-        return False, "uncommitted changes present; commit before continuing"
-    return True, ""
-
-
 def _tasks_complete(project_dir: Path, spec_dir: str, change: str) -> tuple[bool, str]:
     """All `- [ ]` markers checked in the finished change's tasks.md."""
     tasks_path = project_dir / spec_dir / change / "tasks.md"
@@ -415,6 +379,11 @@ class BoundaryCheck:
     open_tasks: int = 0
     task_detail: str = ""
     evidence_source: str = "internal"
+
+
+def _git_tree_clean(project_dir: Path) -> tuple[bool, str]:
+    """Deprecated compatibility seam; Git is not part of robot decisions."""
+    return True, ""
 
 
 def _boundary_target(
@@ -494,7 +463,7 @@ def _recorded_target(
     """Resolve the recorded change without inferring from `next_action`.
 
     Preference is the explicit `--finished-change` override, then the
-    durable conversation record, then `HANDOFF.current_spec`. A stale
+    durable conversation record, then hidden Ariadex state. A stale
     `next_action` is never a target: it describes intent, not evidence.
     """
     override = (config.finished_change or "").strip()
@@ -682,10 +651,11 @@ def check_boundary(
     config: RobotConfig,
     runner: Callable[..., object] | None = None,
 ) -> BoundaryCheck:
-    """Inspect HANDOFF.md, git, tasks, and the active OpenSpec list.
+    """Inspect Ariadex state, tasks, and the active OpenSpec list.
 
     OpenSpec JSON evidence controls the decision inside an OpenSpec
-    repository; outside one the legacy internal discovery applies.
+    repository; outside one the legacy internal discovery applies. The
+    public HANDOFF document and Git state are never scheduling inputs.
     Returns ok only when the previous conversation's work is represented
     durably. An empty active list is ok with no remaining work: the
     caller stops instead of sending a continuation prompt. Valid open
@@ -695,26 +665,7 @@ def check_boundary(
     `ready-to-archive` decision so the caller requests archival work
     instead of advancing.
     """
-    handoff_path = project_dir / config.handoff_file
-    if not handoff_path.is_file():
-        return BoundaryCheck(
-            ok=False,
-            reason=(
-                f"no handoff file at `{config.handoff_file}`; "
-                "record the work before continuing"
-            ),
-            active=[],
-            decision="blocked",
-        )
-    try:
-        handoff = handoff_mod.read_handoff(handoff_path)
-    except (handoff_mod.HandoffError, OSError) as exc:
-        return BoundaryCheck(
-            ok=False,
-            reason=f"handoff unreadable: {exc}",
-            active=[],
-            decision="blocked",
-        )
+    handoff = handoff_mod.read_handoff(project_dir / config.handoff_file)
     graph, errors = spec_graph_mod.load_graph(project_dir, config.spec_dir)
     if errors:
         first = sorted(errors)[0]
@@ -724,15 +675,8 @@ def check_boundary(
             active=sorted(graph),
             decision="blocked",
         )
-    clean, reason = _git_tree_clean(project_dir)
     try:
-        check = _openspec_boundary(project_dir, config, handoff, runner)
-        # Dirty work is expected while an agent is still completing tasks.
-        # Let the confirmation/archival prompt recover that conversation;
-        # retain the clean-tree gate for completion and advancement.
-        if clean or check.decision == "unfinished":
-            return check
-        return dataclasses.replace(check, ok=False, reason=reason)
+        return _openspec_boundary(project_dir, config, handoff, runner)
     except evidence_mod.NotOpenSpecRoot:
         pass
     except evidence_mod.EvidenceBlocked as exc:
@@ -753,9 +697,7 @@ def check_boundary(
     ordered = sorted(active)
     if not ordered:
         check = BoundaryCheck(ok=True, reason="", active=[], decision="empty")
-        if clean:
-            return check
-        return dataclasses.replace(check, ok=False, reason=reason)
+        return check
     target = _boundary_target(project_dir, config, handoff)
     task_decision, open_count, task_detail = _task_decision(project_dir, config, target)
     if task_decision == "blocked":
@@ -785,9 +727,7 @@ def check_boundary(
         decision="complete",
         current_spec=target,
     )
-    if clean:
-        return check
-    return dataclasses.replace(check, ok=False, reason=reason)
+    return check
 
 
 @dataclasses.dataclass
@@ -1440,8 +1380,8 @@ class RobotWatcher:
                 decision="blocked",
                 blocker=self.block_reason,
                 operation="selection",
-                next_action="verify the handoff file before continuing",
-                recovery="verify the handoff file before continuing",
+                next_action="verify Ariadex runtime state before continuing",
+                recovery="verify Ariadex runtime state before continuing",
             )
             return self.phase
         try:

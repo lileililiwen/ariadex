@@ -24,6 +24,7 @@ import yaml
 
 HANDOFF_VERSION = 1
 FRONT_MATTER_DELIMITER = "---"
+MACHINE_HANDOFF_REL_PATH = Path(".ariadex") / "handoff.md"
 
 ITEM_STATUSES = ("OPEN", "RESOLVED", "DEFERRED", "BLOCKED")
 PRIORITIES = ("high", "medium", "low")
@@ -85,6 +86,18 @@ def new_item_id() -> str:
 
 def empty_handoff(session_id: str = "") -> Handoff:
     return Handoff(session_id=session_id, updated_at=now_iso())
+
+
+def machine_handoff_path(path: Path) -> Path:
+    """Map the configured human handoff name to Ariadex-owned state.
+
+    The public handoff is ordinary user documentation. Ariadex's structured
+    lifecycle state is always kept under `.ariadex/`, regardless of the
+    configured public handoff filename.
+    """
+    if path.parent.name == ".ariadex":
+        return path
+    return path.parent / MACHINE_HANDOFF_REL_PATH
 
 
 def _require_enum(value, allowed: tuple, what: str) -> None:
@@ -164,6 +177,7 @@ def read_handoff(path: Path) -> Handoff:
     front matter or schema violations raise HandoffError instead of
     silently discarding work.
     """
+    path = machine_handoff_path(path)
     if not path.is_file():
         return empty_handoff()
     text = path.read_text(encoding="utf-8")
@@ -234,6 +248,7 @@ def render_body(handoff: Handoff) -> str:
 
 def write_handoff(path: Path, handoff: Handoff) -> Handoff:
     """Persist the handoff atomically (temp file + rename)."""
+    path = machine_handoff_path(path)
     handoff.updated_at = now_iso()
     front = {
         "ariadex_handoff_version": HANDOFF_VERSION,

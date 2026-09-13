@@ -60,6 +60,22 @@ class SchemaTest(unittest.TestCase):
         leftovers = list(self.path.parent.glob(".handoff.*.tmp"))
         self.assertEqual(leftovers, [])
 
+    def test_public_handoff_stays_plain_and_state_is_hidden(self):
+        public = self.path.parent.parent / "HANDOFF.md"
+        public.write_text("# Human handoff\n\noperator notes\n", encoding="utf-8")
+        doc = handoff.empty_handoff(session_id="session-1")
+        doc.current_spec = "demo"
+        write_handoff(public, doc)
+
+        self.assertEqual(
+            public.read_text(encoding="utf-8"), "# Human handoff\n\noperator notes\n"
+        )
+        hidden = self.path.parent / "handoff.md"
+        self.assertTrue(hidden.is_file())
+        loaded = read_handoff(public)
+        self.assertEqual(loaded.session_id, "session-1")
+        self.assertEqual(loaded.current_spec, "demo")
+
     def test_malformed_front_matter_rejected(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text("---\nnot: [valid\n---\nbody\n", encoding="utf-8")

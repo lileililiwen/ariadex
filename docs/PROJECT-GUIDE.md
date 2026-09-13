@@ -251,9 +251,9 @@ Behavior:
   unbounded); `--poll-interval` sets the seconds between pane polls.
 - Before any first, continuation, or confirmation prompt is sent, the
   selected active change is recorded as a versioned conversation in
-  `.ariadex/conversation.json` and `HANDOFF.current_spec` /
-  `current_spec_file` are synchronized without touching completed or
-  unresolved history. A restart recovers that recorded target; a stale
+  `.ariadex/conversation.json` and hidden Ariadex state are synchronized
+  without touching completed or unresolved history. A restart recovers that
+  recorded target; a stale
   `next_action` is never treated as evidence. Inside an OpenSpec
   repository, `openspec list --json` is the authoritative queue and task
   progress source, `openspec status --change --json` probes the recorded
@@ -320,7 +320,8 @@ provider output.
 | Path | Purpose |
 | --- | --- |
 | `.ariadex/config.yaml` | provider, first/continuation/confirmation prompts, tmux, active-spec, verification, retry, and telemetry configuration |
-| `HANDOFF.md` | durable context: current spec, completed work, unresolved work, blockers, and next action; configurable via `handoff_file` |
+| `HANDOFF.md` | user-owned prose and operator notes; its content is not a scheduling authority |
+| `.ariadex/handoff.md` | Ariadex-owned structured lifecycle state |
 | `.ariadex/state.json` | mode, session ID, current spec, unresolved count, and update time |
 | `.ariadex/daemon.json` | daemon PID, socket endpoint, lease/runtime status |
 | `.ariadex/managed-runtime` | marks the project as using the managed watcher; daemon scheduler input is disabled |
@@ -330,10 +331,10 @@ provider output.
 | `.ariadex/events.jsonl` | redacted attention events and optional notification evidence |
 | `.ariadex/diagnostics/diagnostics.jsonl` | bounded redacted lifecycle diagnostics (startup, selection, prompts, provider, OpenSpec, boundary, pause, quota, error, widget, shutdown) |
 
-The repository, active OpenSpec changes, handoff, git state, and unresolved
-queue are the continuity source. Provider conversation history is temporary.
-Deleting or editing the handoff is not a safe reset; use the queue and control
-commands so the reason remains durable.
+The active OpenSpec changes and Ariadex hidden state are the continuity source.
+Provider conversation history is temporary. `HANDOFF.md` and Git state are
+outside the robot scheduler and cannot block prompt delivery or conversation
+transitions.
 
 ## Upgrading Ariadex
 
@@ -364,7 +365,7 @@ tag, artifact-metadata, exact-PyPI-version, and clean-install checks.
 The high-level data flow is:
 
 ```text
-active specs + git + handoff + queue
+active specs + Ariadex hidden state + queue
               |
               v
         resync / select next action

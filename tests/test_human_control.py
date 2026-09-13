@@ -122,14 +122,13 @@ class AutoTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         run_cli(self.root, "init")
 
-    def test_auto_refuses_unreadable_handoff(self):
+    def test_auto_ignores_unreadable_public_handoff(self):
         run_cli(self.root, "takeover")
-        path = handoff_path(self.root)
+        path = self.root / "HANDOFF.md"
         path.write_text("---\nversion: 1\nstatus: BOGUS\n---\n", encoding="utf-8")
-        code, _, err = run_cli(self.root, "--no-auto-install", "auto")
-        self.assertNotEqual(code, 0)
-        self.assertIn("resync refused", err)
-        self.assertEqual(state.read(self.root).mode, "MANUAL")
+        _, _, err = run_cli(self.root, "--no-auto-install", "auto")
+        self.assertNotIn("unreadable handoff", err)
+        self.assertEqual(state.read(self.root).mode, "AUTO")
 
     def test_auto_resyncs_then_reports_missing_tmux(self):
         (self.root / "openspec" / "changes" / "demo").mkdir(parents=True)

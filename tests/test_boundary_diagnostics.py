@@ -9,7 +9,6 @@ blocker and next action; and Copy log/Context carrying the same redacted
 evidence without secrets or raw transcripts.
 """
 
-import subprocess
 import tempfile
 import unittest
 import unittest.mock
@@ -83,14 +82,10 @@ def make_watcher(
 
 
 def clean_git() -> unittest.mock._patch:
-    real_run = subprocess.run
-
-    def fake_run(cmd, **kwargs):
-        if cmd[:2] == ["git", "status"]:
-            return unittest.mock.Mock(returncode=0, stdout="", stderr="")
-        return real_run(cmd, **kwargs)
-
-    return unittest.mock.patch("ariadex.robot.subprocess.run", fake_run)
+    """Compatibility context; robot scheduling no longer queries Git."""
+    return unittest.mock.patch.object(
+        robot_mod, "_git_tree_clean", return_value=(True, "")
+    )
 
 
 def last_record(project: Path) -> dict:
