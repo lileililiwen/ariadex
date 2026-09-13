@@ -1152,11 +1152,25 @@ class RobotWatcher:
             self.phase = PAUSED
             return self.phase
         capture = self._capture()
-        observed = classify_capture(
-            self.adapter.provider_name,
-            capture,
-            input_ready=self.adapter.is_input_ready(capture),
-        )
+        provider_state = self.adapter.provider_state()
+        if self.adapter.provider_state_required and provider_state is None:
+            observed = CLASS_UNKNOWN
+        else:
+            observed = classify_capture(
+                self.adapter.provider_name,
+                capture,
+                input_ready=(
+                    provider_state == "idle"
+                    if provider_state is not None
+                    else self.adapter.is_input_ready(capture)
+                ),
+            )
+            if provider_state == "active":
+                observed = CLASS_WORKING
+            elif provider_state == "retry":
+                observed = CLASS_QUOTA
+            elif provider_state == "error":
+                observed = CLASS_ERROR
         self.last_classification = observed
         if observed == CLASS_APPROVAL:
             # Approval/confirmation belongs to the provider conversation.
@@ -1910,14 +1924,19 @@ class RobotWatcher:
         stable = 0
         for _ in range(bound):
             capture = self._capture()
-            if (
-                classify_capture(
-                    self.adapter.provider_name,
-                    capture,
-                    input_ready=self.adapter.is_input_ready(capture),
+            provider_state = self.adapter.provider_state()
+            if self.adapter.provider_state_required:
+                ready = provider_state == "idle"
+            else:
+                ready = (
+                    classify_capture(
+                        self.adapter.provider_name,
+                        capture,
+                        input_ready=self.adapter.is_input_ready(capture),
+                    )
+                    == CLASS_FINISHED
                 )
-                == CLASS_FINISHED
-            ):
+            if ready:
                 stable += 1
                 if stable >= self.config.debounce_polls:
                     return True

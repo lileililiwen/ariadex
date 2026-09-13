@@ -23,10 +23,14 @@ interrupt, reset, termination, and restart in isolated tmux sessions):
 
 from __future__ import annotations
 
+import hashlib
+import json
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from .adapters import AgentAdapter, Capabilities, UnsupportedOperation
-from .terminal import TerminalDriver
+from .terminal import TerminalDriver, TmuxDriver
 
 PROVIDER_OPENCODE = "opencode"
 PROVIDER_CODEX = "codex"
@@ -81,6 +85,55 @@ class OpenCodeAdapter(AgentAdapter):
             line.strip().startswith("▣") and "Build" in line for line in lines
         )
         return (has_composer and has_footer) or super().is_input_ready(capture)
+
+    @property
+    def api_port(self) -> int:
+        digest = hashlib.sha256(str(Path(self.workdir).resolve()).encode()).digest()
+        return 43000 + int.from_bytes(digest[:2], "big") % 1000
+
+    @property
+    def provider_state_required(self) -> bool:
+        return isinstance(self.driver, TmuxDriver)
+
+    def launch_command_for_provider(self) -> list[str]:
+        return [*self.launch_command, "--port", str(self.api_port)]
+
+    def provider_state(self) -> str | None:
+        """Read OpenCode session state without inspecting pane text."""
+        if not isinstance(self.driver, TmuxDriver):
+            return None
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.api_port}/session/status",
+                timeout=0.75,
+            ) as response:
+                payload = json.load(response)
+        except (OSError, ValueError, urllib.error.URLError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        statuses = []
+        for raw in payload.values():
+            if not isinstance(raw, dict):
+                continue
+            value = str(raw.get("type", raw.get("status", ""))).lower()
+            if value in {"busy", "active", "working"}:
+                statuses.append("active")
+            elif value in {"retry", "waiting"}:
+                statuses.append("retry")
+            elif value == "error":
+                statuses.append("error")
+            elif value == "idle":
+                statuses.append("idle")
+        if not statuses:
+            return "idle"
+        if "error" in statuses:
+            return "error"
+        if "retry" in statuses:
+            return "retry"
+        if "active" in statuses:
+            return "active"
+        return "idle"
 
     @property
     def capabilities(self) -> Capabilities:

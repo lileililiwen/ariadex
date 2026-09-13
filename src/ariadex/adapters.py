@@ -123,10 +123,15 @@ class AgentAdapter(abc.ABC):
         """
         try:
             return self.driver.create_or_connect(
-                self.session_name, self.workdir, list(self.launch_command)
+                self.session_name,
+                self.workdir,
+                self.launch_command_for_provider(),
             )
         except terminal_mod.TerminalError as exc:
             raise StartupError(f"{self.provider_name} startup failed: {exc}") from exc
+
+    def launch_command_for_provider(self) -> list[str]:
+        return list(self.launch_command)
 
     def send(self, text: str) -> None:
         try:
@@ -224,6 +229,14 @@ class AgentAdapter(abc.ABC):
         return bool(self.ready_markers) and any(
             marker.lower() in lowered for marker in self.ready_markers
         )
+
+    def provider_state(self) -> str | None:
+        """Return provider lifecycle state when a machine status API exists."""
+        return None
+
+    @property
+    def provider_state_required(self) -> bool:
+        return False
 
     def recognize_permission(self, capture_tail: str):
         """Parse one permission request from a provider pane tail.
