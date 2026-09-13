@@ -2,6 +2,12 @@
 
 ## Current state
 
+- Follow-up lifecycle correction: new projects now initialize in `AUTO`, and
+  widget Play/Resume transitions `PAUSE` -> `AUTO` after resynchronization;
+  widget Pause transitions `AUTO` -> `PAUSE`, with Stop unchanged as graceful
+  shutdown. Internal `MANUAL` takeover semantics remain available only for
+  takeover/diagnostic paths. Verified with 898 tests, Ruff check/format, and
+  strict OpenSpec validation (no active changes).
 - Implemented, verified, and archived: all previously recorded changes plus `2026-09-13-managed-runtime-upsert-and-minimal-cli`. All 47 canonical purposes under `openspec/specs` are complete. `ariadex 0.1.0` is published on PyPI. The managed runtime now has one idempotent `start` owner per project: it reuses the daemon, provider session, supervisor, and healthy widget, and repairs only a missing or crashed widget on rerun. Normal help exposes `init`, `start`, and `admin`; lifecycle aliases remain hidden compatibility plumbing.
 - Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 894 tests OK, 0 failures (stdlib only; runtime requires PyYAML). Strict change and canonical-spec validation both pass. Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (no publishing).
 - Follow-up `simple-widget-workflow` is implemented and archived: `widget` checks Tkinter before daemon startup, supports explicit `--yes` prerequisite installation, and hides the historical `companion` command from normal help.
