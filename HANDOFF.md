@@ -2,12 +2,27 @@
 
 ## Current state
 
-- New planning queue: two related follow-up changes are active and must be
-  implemented in dependency order: `comprehensive-runtime-diagnostics`, then
-  `managed-widget-log-copy-and-context`. They cover comprehensive full-log
-  diagnostics and integrating rich copyable context into the normal
-  `ariadex start` widget. No production implementation has started for
-  these changes.
+- New planning queue: one follow-up change remains active and is next:
+  `managed-widget-log-copy-and-context` (integrates rich copyable context
+  into the normal `ariadex start` widget; depends on the diagnostics change
+  below). No production implementation has started for it.
+- Implemented, verified, and archived:
+  `2026-09-13-comprehensive-runtime-diagnostics` (commit `a846990`). New
+  `src/ariadex/diagnostics.py` (versioned schema-v1 JSONL stream under
+  `.ariadex/diagnostics/` with `O_APPEND` concurrent-writer safety,
+  secure permissions, retention/rotation, malformed-line tolerance, and a
+  local redacted bundle holding manifest, state, OpenSpec evidence,
+  diagnostics, and selected telemetry) plus `RobotWatcher` instrumentation
+  at every managed boundary (startup, selection, conversation recording,
+  prompt delivery, provider approval/quota/error, boundary decisions,
+  pause/resume, widget open, managed shutdown) and new `diagnostics` /
+  `export-diagnostics` admin commands (chronological text/JSON, category
+  and since filters, honest unavailable-state handling, bounded refusal).
+  Diagnostic failure never changes scheduling and raw provider captures
+  never enter the stream. Verified with 1001 tests (23 new in
+  `tests/test_diagnostics.py`), Ruff check/format, mypy, coverage 86%
+  (floors pass), and strict OpenSpec validation (47 canonical specs, 1
+  active change).
 - Implemented, verified, and archived:
   `2026-09-13-openspec-authoritative-current-spec-lifecycle` (commit
   `d0758e2`). Before every first, continuation, or confirmation prompt the
@@ -76,10 +91,10 @@
   takeover/diagnostic paths. Verified with 898 tests, Ruff check/format, and
   strict OpenSpec validation (no active changes).
 - Implemented, verified, and archived: all previously recorded changes plus `2026-09-13-managed-runtime-upsert-and-minimal-cli`. All 47 canonical purposes under `openspec/specs` are complete. `ariadex 0.1.0` is published on PyPI. The managed runtime now has one idempotent `start` owner per project: it reuses the daemon, provider session, supervisor, and healthy widget, and repairs only a missing or crashed widget on rerun. Normal help exposes `init`, `start`, and `admin`; lifecycle aliases remain hidden compatibility plumbing.
-- Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 978 tests OK, 0 failures (stdlib only; runtime requires PyYAML; OpenSpec CLI faked in-process so unit CI needs no Node). Strict change and canonical-spec validation both pass. Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (no publishing).
+- Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 1001 tests OK, 0 failures (stdlib only; runtime requires PyYAML; OpenSpec CLI faked in-process so unit CI needs no Node). Strict change and canonical-spec validation both pass. Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (no publishing).
 - Follow-up `simple-widget-workflow` is implemented and archived: `widget` checks Tkinter before daemon startup, supports explicit `--yes` prerequisite installation, and hides the historical `companion` command from normal help.
 - Added [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md), a detailed user/developer reference for the current daemon, widget controls, modes, durable files, cycle flow, and troubleshooting. It explicitly separates the implemented runtime from deferred arbitrary-agent observation behavior.
-- Quality gates: ruff check/format clean (S security family enforced with justified suppressions), mypy clean on `src/ariadex`, coverage 86% (gate 82 met) plus per-module floors via `scripts/check_coverage.py` (wired into CI quality job), `tests/test_workflows.py` pins or reviews every action reference; strict OpenSpec validation reports no active changes.
+- Quality gates: ruff check/format clean (S security family enforced with justified suppressions), mypy clean on `src/ariadex`, coverage 86% (gate 82 met) plus per-module floors via `scripts/check_coverage.py` (wired into CI quality job),   `tests/test_workflows.py` pins or reviews every action reference; strict OpenSpec validation reports the active queue (1 change).
 - Canonical identity: repository `https://github.com/lileililiwen/ariadex`, security contact via GitHub issues (`.../ariadex/issues`); `pyproject.toml`, `SECURITY.md`, README, CHANGELOG, and the release workflow identify Ariadex-owned resources. Release dry run: `python -m ariadex.release --tag ariadex-v<version>` (fail-closed, publishes nothing).
 - Environment: tmux absent on this host (use `--local-tmux` or `--tmux-bin` for live evidence); `pip-audit`/`build` installed only in CI or a dev venv. Canonical remote `origin` is `https://github.com/lileililiwen/ariadex.git`; releases publish from tags via the reviewer-gated `release` environment.
 - Release setup complete (maintainer-approved, applied 2026-09-12): `release` environment created with `lileililiwen` as required reviewer (protection rule `65340736`); PyPI pending publisher configured by the maintainer (project `ariadex`, workflow `release.yml`, environment `release`). Branch protection is solo-minimal at maintainer direction (no branches, direct pushes): force-push and deletion blocked, no required checks/PRs — required-check enforcement was tried and removed because GitHub rejects direct pushes while any check is required. CI still runs on every push as a backstop; publication itself stays gated by the tag workflow's own gates plus the environment reviewer.
@@ -166,10 +181,9 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Implement `comprehensive-runtime-diagnostics` next. Then implement
-`managed-widget-log-copy-and-context`. Only one active change may be
-implemented at a time; each must be verified and archived before the next is
-selected.
+Implement `managed-widget-log-copy-and-context` next. Only one active
+change may be implemented at a time; it must be verified and archived
+before any further change is selected.
 
 ## Latest verification evidence
 
