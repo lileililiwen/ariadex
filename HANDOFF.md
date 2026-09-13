@@ -1,5 +1,19 @@
 # Ariadex handoff
 
+- In progress: `provider-owned-input-readiness`. The current OpenCode TUI
+  composer is adapter-recognized; the watcher uses provider UI state first,
+  then OpenSpec queue/task evidence for the boundary. Do not infer completion
+  from model report text.
+- Implemented, verified, and archived:
+  `2026-09-13-provider-owned-input-readiness`. `AgentAdapter` now owns
+  input-ready detection; OpenCode 1.18.x recognizes its current blank
+  composer plus provider footer, while legacy markers remain supported.
+  The watcher uses this provider signal for initial and fresh-conversation
+  readiness, then uses OpenSpec evidence for boundary decisions. It never
+  uses assistant completion prose. Verified with 133 focused robot/adapter/
+  documentation tests, Ruff check/format, diff check, and strict validation
+  (50 canonical specs).
+
 ## Current state
 
 - The latest boundary fix is implemented, verified, and archived below.
