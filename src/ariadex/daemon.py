@@ -296,6 +296,83 @@ def send_request(
     return channel.send(build_request(request_type))
 
 
+#: Recent diagnostic events exposed to the start widget (IPC-bound sized).
+WIDGET_RECENT_EVENTS = 5
+
+#: Active OpenSpec changes exposed to the start widget (IPC-bound sized).
+WIDGET_QUEUE_CHANGES = 20
+
+
+def managed_diagnostic_context(project_dir: Path) -> dict:
+    """Bounded watcher/diagnostic projection for the normal start widget.
+
+    Reads only durable local files (conversation record, diagnostic
+    stream, OpenSpec JSON); never sends provider input, never schedules,
+    and never starts a watcher. Gaps are reported in `notes`, never
+    fabricated. Sized for the 64KB IPC bound: a few short recent events
+    and a bounded change list.
+    """
+    from . import diagnostics as diagnostics_mod
+    from . import openspec_evidence as evidence_mod
+
+    notes: list[str] = []
+    current_spec: str | None = None
+    try:
+        record = evidence_mod.read_conversation(project_dir)
+        if record is not None:
+            current_spec = record.current_spec or None
+    except Exception as exc:
+        notes.append(f"conversation record unreadable: {exc}")
+    queue: list[dict] = []
+    try:
+        changes = evidence_mod.query_changes(project_dir)
+        for name in changes.order[:WIDGET_QUEUE_CHANGES]:
+            progress = changes.entries.get(name)
+            if progress is None:
+                continue
+            queue.append(
+                {
+                    "name": name,
+                    "completed": progress.completed,
+                    "total": progress.total,
+                }
+            )
+    except evidence_mod.NotOpenSpecRoot:
+        notes.append("not an OpenSpec repository; queue unavailable")
+    except Exception as exc:
+        notes.append(f"openspec queue unavailable: {exc}")
+    try:
+        recent, info = diagnostics_mod.read_diagnostics(
+            project_dir, limit=WIDGET_RECENT_EVENTS
+        )
+    except Exception as exc:
+        recent, info = [], {"unavailable": str(exc)}
+    if info.get("unavailable"):
+        notes.append(str(info["unavailable"]))
+    events: list[dict] = []
+    for entry in recent:
+        if not isinstance(entry, dict):
+            continue
+        events.append(
+            {
+                "at": str(entry.get("at", "?")),
+                "category": str(entry.get("category", "?")),
+                "action": str(entry.get("action", ""))[:280],
+                "result": str(entry.get("result", ""))[:120],
+                "message": str(entry.get("message", ""))[:280],
+                "current_spec": entry.get("current_spec"),
+            }
+        )
+    latest = dict(events[-1]) if events else None
+    return {
+        "current_spec": current_spec,
+        "queue": queue,
+        "latest_event": latest,
+        "recent_events": events,
+        "notes": notes,
+    }
+
+
 def daemon_status_view(project_dir: Path) -> dict:
     """Bounded local status: daemon record, lease, mode, and next action."""
     from . import concurrency as concurrency_mod
@@ -328,8 +405,20 @@ def daemon_status_view(project_dir: Path) -> dict:
             next_action = f"{kind} {target}"
         open_count = sum(1 for i in handoff.unresolved if i.status == "OPEN")
         blocked_count = sum(1 for i in handoff.unresolved if i.status == "BLOCKED")
+        provider = cfg.agent_provider
     except Exception:
         next_action, open_count, blocked_count = "unknown", 0, 0
+        provider = "unknown"
+    try:
+        context = managed_diagnostic_context(project_dir)
+    except Exception as exc:
+        context = {
+            "current_spec": None,
+            "queue": [],
+            "latest_event": None,
+            "recent_events": [],
+            "notes": [f"diagnostic context unavailable: {exc}"],
+        }
     widget_record = widget_runtime_mod.read_record(project_dir)
     return {
         "daemon": record.to_dict() if record else None,
@@ -338,9 +427,11 @@ def daemon_status_view(project_dir: Path) -> dict:
         "lock": diagnosis.get("state"),
         "mode": mode,
         "session": session,
+        "provider": provider,
         "next_action": next_action,
         "open_count": open_count,
         "blocked_count": blocked_count,
+        "diagnostic_context": context,
         "widget": {
             "recorded": widget_record is not None,
             "healthy": widget_runtime_mod.is_healthy(project_dir, widget_record),

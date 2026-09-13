@@ -138,6 +138,20 @@ runtime state directly and does not inject keystrokes into an editor.
 - top-right `×`: requests daemon shutdown, then exits the widget process.
 - expanded controls: reconcile status, open the configured editor, and attach
   to the provider session.
+- expanded log: read-only chronological watcher diagnostics (current spec,
+  OpenSpec task progress, phase, latest event, recent boundary decisions).
+  OpenSpec task counts are labeled separately from HANDOFF unresolved counts.
+- `Copy log` / `Copy context`: place the bounded log or a redacted support
+  snapshot on the desktop clipboard via Tk's native clipboard (no extra
+  prerequisite). `Copy context` includes the project, provider/session,
+  current spec, OpenSpec queue snapshot, boundary decision, and recent
+  events. Success or failure is reported in the widget; copying never sends
+  provider input and never changes scheduling.
+
+Copy-for-support workflow: when a boundary stalls, expand the widget, read
+the log, then `Copy context` and paste it into the support report. The full
+history remains available through `ariadex admin diagnostics`, and a bounded
+redacted bundle through `ariadex admin export-diagnostics`.
 
 The widget’s Play/Pause/Stop controls are the normal lifecycle controls. The
 provider terminal’s Ctrl+C stops the managed provider; the daemon observes the

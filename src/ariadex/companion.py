@@ -533,6 +533,15 @@ def build_view_model(state: dict) -> dict:
         "stop": alive,
         "reconcile": alive,
     }
+    context_summary = ""
+    context_latest = ""
+    managed_context: dict | None = None
+    if isinstance(state.get("diagnostic_context"), dict):
+        managed_context = build_managed_context(state)
+        context_summary = str(managed_context.get("summary", ""))
+        context_latest = str(managed_context.get("latest_text", ""))
+        if context_summary:
+            work_label += f"\n{context_summary}"
     return {
         "indicator": indicator,
         "indicator_text": indicator.upper(),
@@ -542,6 +551,9 @@ def build_view_model(state: dict) -> dict:
         "actions": actions,
         "reconciliation_pending": indicator == "paused",
         "failure": None,
+        "context_summary": context_summary,
+        "context_latest": context_latest,
+        "managed_context": managed_context,
     }
 
 
@@ -561,6 +573,12 @@ def format_view_text(model: dict) -> str:
         f"companion: {model.get('indicator_text')} (mode {model.get('mode')})",
         f"work: {model.get('work_label')}",
     ]
+    context_summary = str(model.get("context_summary", "") or "")
+    if context_summary:
+        lines.append(f"context: {context_summary}")
+    latest = str(model.get("context_latest", "") or "")
+    if latest:
+        lines.append(f"latest: {latest}")
     actions = model.get("actions", {})
     enabled = sorted(name for name, on in actions.items() if on)
     lines.append(f"actions: {', '.join(enabled) if enabled else 'none available'}")
@@ -569,6 +587,212 @@ def format_view_text(model: dict) -> str:
     if model.get("failure"):
         lines.append(f"failure: {model['failure']}")
     return "\n".join(lines)
+
+
+#: Bounded event lines rendered in the managed widget log.
+MANAGED_LOG_VIEW_LINES = 20
+
+#: Per-field bound for displayed and copied context text.
+CONTEXT_FIELD_CHARS = 280
+
+
+def _context_field(value: object, limit: int = CONTEXT_FIELD_CHARS) -> str:
+    """Redacted, truncated display field (never raw secrets or unbounded)."""
+    from .logging import redact
+
+    text = redact(str(value or ""))
+    if len(text) > limit:
+        text = text[:limit] + f"... [truncated {len(text) - limit} chars]"
+    return text
+
+
+def build_managed_context(state: dict) -> dict:
+    """Project one IPC status response to managed diagnostic context.
+
+    Pure, no I/O: combines the watcher's durable current spec, OpenSpec
+    active-change/task summary, phase/next decision, latest event, and a
+    bounded chronological event list. HANDOFF unresolved counts stay
+    labeled independently from OpenSpec task counts. Missing pieces are
+    honest empty/unreachable notes, never fabricated values.
+    """
+    raw = state.get("diagnostic_context")
+    context = raw if isinstance(raw, dict) else {}
+    current_spec = context.get("current_spec")
+    current = str(current_spec) if current_spec else "(none recorded)"
+    queue_raw = context.get("queue")
+    queue: list[dict] = []
+    if isinstance(queue_raw, list):
+        for entry in queue_raw[:MANAGED_LOG_VIEW_LINES]:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                completed = int(entry.get("completed", 0) or 0)
+                total = int(entry.get("total", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            queue.append(
+                {
+                    "name": str(entry.get("name", "?")),
+                    "completed": completed,
+                    "total": total,
+                }
+            )
+    selected = next((item for item in queue if item["name"] == current), None)
+    if selected is not None:
+        task_summary = f"{selected['completed']}/{selected['total']} OpenSpec tasks"
+    elif queue:
+        task_summary = (
+            f"{len(queue)} active OpenSpec change(s); "
+            "recorded current spec not in queue"
+        )
+    else:
+        task_summary = "no active OpenSpec changes reported"
+    events_raw = context.get("recent_events")
+    events: list[dict] = []
+    if isinstance(events_raw, list):
+        for entry in events_raw[-MANAGED_LOG_VIEW_LINES:]:
+            if not isinstance(entry, dict):
+                continue
+            events.append(
+                {
+                    "at": _context_field(entry.get("at", "?"), 64),
+                    "category": _context_field(entry.get("category", "?"), 64),
+                    "action": _context_field(entry.get("action", "")),
+                    "result": _context_field(entry.get("result", ""), 120),
+                    "message": _context_field(entry.get("message", "")),
+                    "current_spec": _context_field(entry.get("current_spec") or ""),
+                }
+            )
+    latest_raw = context.get("latest_event")
+    latest: dict | None = None
+    if isinstance(latest_raw, dict):
+        latest = {
+            "category": _context_field(latest_raw.get("category", "?"), 64),
+            "message": _context_field(latest_raw.get("message", "")),
+        }
+    elif events:
+        last = events[-1]
+        latest = {"category": last["category"], "message": last["message"]}
+    latest_text = (
+        f"{latest['category']}: {latest['message']}" if latest else "no events yet"
+    )
+    notes_raw = context.get("notes")
+    notes = (
+        [_context_field(note) for note in notes_raw if note]
+        if isinstance(notes_raw, list)
+        else []
+    )
+    summary = f"{current} — {task_summary}"
+    next_decision = _context_field(state.get("next_action", ""), 200)
+    return {
+        "current_spec": current,
+        "queue": queue,
+        "task_summary": task_summary,
+        "summary": summary,
+        "next_decision": next_decision,
+        "latest_event": latest,
+        "latest_text": latest_text,
+        "events": events,
+        "notes": notes,
+    }
+
+
+def format_managed_log_text(projection: dict) -> str:
+    """Chronological read-only log text for the expanded widget and copy."""
+    lines = [
+        f"current spec: {projection.get('current_spec', '(none recorded)')}",
+        f"tasks: {projection.get('task_summary', 'unknown')}",
+    ]
+    for item in projection.get("queue", []):
+        lines.append(
+            f"- {item.get('name')}: "
+            f"{item.get('completed')}/{item.get('total')} OpenSpec tasks"
+        )
+    events = projection.get("events", [])
+    if events:
+        lines.append("events:")
+        for entry in events:
+            lines.append(
+                f"- {entry.get('at', '?')} [{entry.get('category', '?')}] "
+                f"{entry.get('action', '')}"
+                + (f" => {entry.get('result', '')}" if entry.get("result") else "")
+                + (f" :: {entry.get('message', '')}" if entry.get("message") else "")
+            )
+    else:
+        lines.append("events: (none yet)")
+    for note in projection.get("notes", []):
+        lines.append(f"note: {note}")
+    return "\n".join(lines)
+
+
+def format_context_snapshot(projection: dict, state: dict) -> str:
+    """Redacted copy-for-support snapshot: readable text, no secrets.
+
+    Carries the project label, provider/session, current spec, OpenSpec
+    queue snapshot, boundary decision, and recent events. Compatible with
+    the diagnostic export: same schema version, current spec, per-change
+    completed/total counts, and event categories.
+    """
+    from . import diagnostics as diagnostics_mod
+
+    lines = [
+        "ariadex diagnostic context "
+        f"(schema v{diagnostics_mod.DIAGNOSTIC_SCHEMA_VERSION})",
+        f"provider: {_context_field(state.get('provider', 'unknown'), 120)} @ "
+        f"{_context_field(state.get('session', 'unknown'), 120)}",
+        f"mode: {_context_field(state.get('mode', 'unknown'), 64)}",
+        f"current spec: {projection.get('current_spec', '(none recorded)')}",
+        f"tasks: {projection.get('task_summary', 'unknown')}",
+        f"next decision: {projection.get('next_decision', 'unknown')}",
+        "openspec queue:",
+    ]
+    queue = projection.get("queue", [])
+    if queue:
+        for item in queue:
+            lines.append(
+                f"- {item.get('name')}: "
+                f"{item.get('completed')}/{item.get('total')} tasks complete"
+            )
+    else:
+        lines.append("- (none reported)")
+    open_count = state.get("open_count", "?")
+    blocked_count = state.get("blocked_count", "?")
+    lines.append(
+        f"handoff unresolved (separate from OpenSpec tasks): "
+        f"{open_count} open, {blocked_count} blocked"
+    )
+    lines.append("recent events:")
+    events = projection.get("events", [])
+    if events:
+        for entry in events:
+            lines.append(
+                f"- {entry.get('at', '?')} [{entry.get('category', '?')}] "
+                f"{entry.get('action', '')}"
+                + (f" => {entry.get('result', '')}" if entry.get("result") else "")
+                + (f" :: {entry.get('message', '')}" if entry.get("message") else "")
+            )
+    else:
+        lines.append("- (none yet)")
+    for note in projection.get("notes", []):
+        lines.append(f"note: {note}")
+    return "\n".join(lines)
+
+
+def copy_to_clipboard(root: object, text: str) -> str | None:
+    """Copy text via Tk's native clipboard; return an error or None on ok.
+
+    Uses only Tk (`clipboard_clear`/`clipboard_append`); no `xclip`,
+    `xsel`, or other prerequisite is required. Never raises.
+    """
+    try:
+        root.clipboard_clear()  # type: ignore[attr-defined]
+        root.clipboard_append(text)  # type: ignore[attr-defined]
+        update = getattr(root, "update", None)
+        if callable(update):
+            update()
+    except Exception as exc:
+        return f"clipboard copy failed: {exc}"
+    return None
 
 
 def default_geometry(screen_width: int, screen_height: int) -> tuple[int, int]:
@@ -644,6 +868,7 @@ class CompanionWindow:
         self.editor = editor
         self.poll_interval_ms = max(1, int(poll_interval_s * 1000))
         self.model: dict = failure_view_model("starting")
+        self._state: dict = {}
         self.hotkey_active = False
         self.hotkey_error: str | None = None
         self.expanded = False
@@ -779,6 +1004,34 @@ class CompanionWindow:
         )
         self.status_text.configure(state="disabled")
         self.status_text.pack(fill="x", pady=(4, 0))
+        self.context_log = tk.Text(
+            self.details,
+            height=8,
+            width=34,
+            wrap="word",
+            takefocus=False,
+            name="context-log-text",
+        )
+        self.context_log.configure(state="disabled")
+        self.context_log.pack(fill="x", pady=(4, 0))
+        copy_row = tk.Frame(self.details)
+        copy_row.pack(fill="x", pady=(4, 0))
+        self.copy_log_button = tk.Button(
+            copy_row,
+            text="Copy log",
+            name="copy-log-button",
+            takefocus=False,
+            command=self._on_copy_log,
+        )
+        self.copy_log_button.pack(side="left", expand=True, fill="x")
+        self.copy_context_button = tk.Button(
+            copy_row,
+            text="Copy context",
+            name="copy-context-button",
+            takefocus=False,
+            command=self._on_copy_context,
+        )
+        self.copy_context_button.pack(side="left", expand=True, fill="x")
         hotkey_row = tk.Frame(self.details)
         hotkey_row.pack(fill="x")
         hotkey_label = tk.Label(hotkey_row, text="Hotkey:")
@@ -934,6 +1187,7 @@ class CompanionWindow:
         except CompanionError as exc:
             self.model = failure_view_model(str(exc))
         else:
+            self._state = state
             self.model = build_view_model(state)
         self._render()
 
@@ -974,6 +1228,42 @@ class CompanionWindow:
         else:
             self._notice(note)
 
+    def _managed_projection(self) -> dict | None:
+        projection = self.model.get("managed_context")
+        return projection if isinstance(projection, dict) else None
+
+    def _copy_text(self, text: str, label: str) -> None:
+        """Copy via Tk's native clipboard with visible feedback.
+
+        Read-only and local: no provider input, no scheduling change, no
+        focus change beyond the clicked button itself.
+        """
+        error = copy_to_clipboard(self.root, text)
+        if error is None:
+            self._notice(f"{label} copied to clipboard")
+        else:
+            self._notice(error)
+
+    def _on_copy_log(self) -> None:
+        projection = self._managed_projection()
+        if projection is None:
+            self._notice("no diagnostic context yet; nothing to copy")
+            return
+        self._copy_text(format_managed_log_text(projection), "log")
+
+    def _on_copy_context(self) -> None:
+        projection = self._managed_projection()
+        if projection is None:
+            self._notice("no diagnostic context yet; nothing to copy")
+            return
+        self._copy_text(
+            format_context_snapshot(projection, self._last_state()), "context"
+        )
+
+    def _last_state(self) -> dict:
+        state = getattr(self, "_state", None)
+        return dict(state) if isinstance(state, dict) else {}
+
     def _notice(self, text: str) -> None:
         model = dict(self.model)
         model["failure"] = text
@@ -992,6 +1282,19 @@ class CompanionWindow:
             self.root.geometry(  # type: ignore[attr-defined]
                 f"{WIDGET_WIDTH}x{WIDGET_COLLAPSED_HEIGHT}"
             )
+
+    def _render_context_log(self, model: dict) -> None:
+        """Write the read-only managed log; never raises into the poll loop."""
+        projection = model.get("managed_context")
+        if not isinstance(projection, dict):
+            lines = ["diagnostic context: (daemon unreachable or not started yet)"]
+        else:
+            lines = format_managed_log_text(projection).splitlines()
+        with contextlib.suppress(Exception):
+            self.context_log.configure(state="normal")
+            self.context_log.delete("1.0", "end")
+            self.context_log.insert("1.0", "\n".join(lines))
+            self.context_log.configure(state="disabled")
 
     def _hide(self) -> None:
         # Hidden, not stopped: the daemon keeps scheduling; the hotkey stays
@@ -1038,6 +1341,7 @@ class CompanionWindow:
                 model["failure"] = str(exc)
                 self.model = model
         else:
+            self._state = state
             self.model = build_view_model(state)
         self._render()
 
@@ -1077,6 +1381,7 @@ class CompanionWindow:
         self.status_text.delete("1.0", "end")
         self.status_text.insert("1.0", text)
         self.status_text.configure(state="disabled")
+        self._render_context_log(model)
 
 
 ROBOT_INDICATORS = (
