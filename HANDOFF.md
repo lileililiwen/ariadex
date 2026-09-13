@@ -2,10 +2,28 @@
 
 ## Current state
 
-- Planning queue contains one new change. Implement
-  `bounded-widget-screen-placement`; it is planning-only and must be
-  implemented one active change at a time. The widget placement change keeps
-  the borderless dialog fully visible and its close control reachable.
+- No active changes remain (`openspec list` is empty). The last spec
+  `bounded-widget-screen-placement` is implemented, verified, and archived
+  (see below); docs were updated at the final step per operator request.
+- Implemented, verified, and archived:
+  `2026-09-13-bounded-widget-screen-placement` (commit `bfde480`). New
+  pure helpers in `src/ariadex/companion.py` (stdlib only):
+  `virtual_screen_bounds` (Tk virtual-root bounds with negative-origin
+  multi-monitor support, fail-soft fallback), `clamp_widget_position`
+  (pure margin clamping with small-screen origin fallback preserving the
+  title bar/close control), and `clamp_to_screen` (fail-soft root
+  convenience). Clamping applies to managed-widget initial placement
+  (off-screen restored coordinates corrected before display and
+  re-persisted), saved restoration, title-bar drag motion, and
+  expanded/collapsed transitions, plus robot-widget initial placement and
+  log toggle. New `tests/test_widget_placement.py` (14 tests: pure clamp,
+  negative-origin, small-screen, vroot preference/fallback, fail-soft,
+  restore-correct-persist, drag clamp, expand reposition, persist clamp,
+  reachability, robot init/toggle). Docs gained the PROJECT-GUIDE bounded
+  placement paragraphs. Verified with 1152 tests OK, Ruff check/format
+  clean, mypy clean (34 files), coverage 86% (companion 92%, floors
+  pass), `git diff --check` clean, and strict validation (47 canonical
+  specs, no active changes).
 - Implemented, verified, and archived:
   `2026-09-13-safe-temporary-permission-policy` (commit `7560b27`). New
   `src/ariadex/permissions.py` (stdlib only): conservative pane-tail
@@ -307,7 +325,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Implement `bounded-widget-screen-placement`.
+No active changes remain. Select the next spec with `openspec list` when new
+work is planned.
 
 ## Latest verification evidence
 
