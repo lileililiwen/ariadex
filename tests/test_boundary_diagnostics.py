@@ -113,7 +113,8 @@ class NoAdvanceEvidenceTest(unittest.TestCase):
         self.assertEqual(record["classification"], "approval")
         self.assertEqual(record["decision"], "waiting")
         self.assertIn("approval", record["blocker"])
-        self.assertEqual(record["operation"], "observe")
+        self.assertEqual(record["operation"], "")
+        self.assertEqual(record["policy"], "prompt")
         self.assertIn("approval", record["next_action"])
 
     def test_quota_wait_names_operator_recovery(self) -> None:

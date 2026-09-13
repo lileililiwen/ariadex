@@ -268,6 +268,34 @@ Behavior:
   On Linux X11, `Ctrl+Esc` globally toggles Pause/Resume. `Ctrl+C` cleanly stops the watch
   process and closes the widget without a Python traceback.
 
+## Provider permission policy
+
+Provider file-permission prompts never stall silently and never receive a
+generic allow key. The default `permission_policy: prompt` leaves every
+approval waiting for an explicit human answer in the provider session.
+Opt in per project when unattended temporary-file work is safe:
+
+```yaml
+permission_policy: project-temp-auto   # or allowlist / deny / prompt
+permission_temp_root: .ariadex/tmp     # private, owner-only, project-scoped
+permission_actions: [read, write, create, delete]
+permission_allowlist: []               # explicit entries for `allowlist`
+```
+
+Under `project-temp-auto` the watcher approves only parsed
+read/write/create/delete requests whose symlink-resolved path is
+contained in the private temp root (created owner-only on demand);
+`allowlist` approves only requests contained in an explicit entry.
+Unknown or ambiguous prompts, shared `/tmp`, traversal, symlink escape,
+home-directory paths, execution, chmod/chown, sudo, and shell operators
+are never approved: privileged requests record `deny`, everything else
+records `waiting`, and both keep polling for a human answer. Approval
+input is the adapter-owned keystroke, sent at most once per distinct
+request. Every decision records provider, conversation, current spec,
+requested/normalized path, operation, policy, result, and reason in the
+diagnostic stream, the widget log, and the copied context — without raw
+provider output.
+
 ## Durable project files
 
 `ariadex init` creates or preserves these files:
@@ -381,6 +409,9 @@ Common interpretations:
   confirm the mode is `AUTO`; Play returns a paused project to `AUTO`.
 - package drift after an upgrade: the running code differs from the installed
   package; current work is unaffected and a restart applies the new code.
+- permission waiting/deny: the provider asked for file access outside the
+  policy; answer it in the provider session, or widen `permission_policy`,
+  `permission_actions`, or `permission_allowlist` deliberately.
 
 ## Developer map
 
@@ -402,6 +433,8 @@ The main runtime boundaries are:
 - `upgrade.py`: read-only index probe, installation provenance, and the
   confirmed owner-tool upgrade plan; `release.py` keeps the tag, artifact,
   and exact-PyPI-version release gates.
+- `permissions.py`: provider request parsing, private temp-root ownership,
+  and the fail-closed allow/waiting/deny evaluator consumed by `robot.py`.
 
 For implementation work, read `AGENTS.md`, inspect `openspec list`, change one
 OpenSpec package at a time, run the focused tests and strict validation, then

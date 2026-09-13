@@ -368,6 +368,9 @@ def managed_diagnostic_context(project_dir: Path) -> dict:
                 "operation": str(entry.get("operation", ""))[:64],
                 "next_action": str(entry.get("next_action", ""))[:280],
                 "evidence_source": str(entry.get("evidence_source", ""))[:64],
+                "requested_path": str(entry.get("requested_path", ""))[:280],
+                "normalized_path": str(entry.get("normalized_path", ""))[:280],
+                "policy": str(entry.get("policy", ""))[:64],
                 "open_tasks": entry.get("open_tasks", 0),
                 "active_queue": [str(name)[:120] for name in raw_queue]
                 if isinstance(raw_queue, list)

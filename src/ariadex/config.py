@@ -31,6 +31,20 @@ LEGACY_BLOCKER_POLICIES = {"record-and-stop": "stop-on-blocker"}
 SUPPORTED_PROVIDERS = supported_providers()
 SUPPORTED_TERMINAL_DRIVERS = ("tmux",)
 
+#: Provider permission policies for approval prompts. `prompt` (default)
+#: never sends automatic approval; `project-temp-auto` approves only
+#: parsed file requests contained in the private project temp root;
+#: `allowlist` approves only parsed requests contained in an explicit
+#: allowlist entry; `deny` refuses every automatic approval.
+PERMISSION_POLICIES = ("prompt", "project-temp-auto", "allowlist", "deny")
+
+#: File operations a permission policy may approve. Execution, permission
+#: changes, and privilege escalation are never approved.
+PERMISSION_ACTIONS = ("read", "write", "create", "delete")
+
+#: Default private project-scoped temporary root (project-relative).
+DEFAULT_PERMISSION_TEMP_ROOT = ".ariadex/tmp"
+
 #: Built-in default for the managed first-run prompts. The first prompt and
 #: the continuation prompt share one default: a fresh managed conversation
 #: starts by implementing the next durable spec, exactly like a continuation.
@@ -67,6 +81,12 @@ class Config:
     first_prompt: str = DEFAULT_MANAGED_PROMPT
     continuation_prompt: str = DEFAULT_MANAGED_PROMPT
     confirmation_prompt: str = DEFAULT_CONFIRMATION_PROMPT
+    permission_policy: str = "prompt"
+    permission_temp_root: str = DEFAULT_PERMISSION_TEMP_ROOT
+    permission_actions: list = dataclasses.field(
+        default_factory=lambda: ["read", "write", "create", "delete"]
+    )
+    permission_allowlist: list = dataclasses.field(default_factory=list)
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -134,6 +154,23 @@ notification_window_seconds: 3600
 first_prompt: Please read the HANDOFF.md, and implement the next spec.
 continuation_prompt: Please read the HANDOFF.md, and implement the next spec.
 confirmation_prompt: __CONFIRMATION_PROMPT__
+# Provider permission policy for approval prompts: prompt (default, never
+# auto-approves), project-temp-auto (approves only parsed file requests
+# inside the private project temp root), allowlist (approves only parsed
+# requests inside an explicit allowlist entry), or deny (refuses every
+# automatic approval). Shared `/tmp` is never auto-approved. Unknown or
+# ambiguous requests always wait for explicit human action.
+permission_policy: prompt
+# Private project-scoped temporary root for unattended file operations.
+# Must stay project-relative; it is created owner-only (0700) on demand.
+permission_temp_root: .ariadex/tmp
+# File operations the policy may approve (subset of read/write/create/delete).
+# Execution, chmod/chown, sudo, and shell operators are never approved.
+permission_actions: [read, write, create, delete]
+# Explicit allowlist entries (project-relative or absolute paths) for the
+# `allowlist` policy. Parsed requests contained in one of these entries may
+# be approved; everything else waits for explicit human action.
+permission_allowlist: []
 """
     return text.replace("__CONFIRMATION_PROMPT__", DEFAULT_CONFIRMATION_PROMPT)
 
@@ -174,6 +211,44 @@ def migrate_managed_prompt_keys(project_dir: Path) -> list[str]:
     }
     for name in missing:
         additions.append(f"{name}: {json.dumps(prompt_defaults[name])}")
+    path.write_text(
+        text.rstrip() + "\n" + "\n".join(additions) + "\n", encoding="utf-8"
+    )
+    return missing
+
+
+def migrate_permission_keys(project_dir: Path) -> list[str]:
+    """Add permission keys to configuration created by older Ariadex versions.
+
+    Missing keys receive the safe defaults (`prompt` policy: no automatic
+    approval). Existing values and all other configuration text are
+    preserved. This is a narrow compatibility migration, not a rewrite.
+    """
+    path = config_path(project_dir)
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8")
+    base = defaults()
+    wanted: dict[str, str] = {
+        "permission_policy": base.permission_policy,
+        "permission_temp_root": base.permission_temp_root,
+        "permission_actions": json.dumps(list(base.permission_actions)),
+        "permission_allowlist": json.dumps(list(base.permission_allowlist)),
+    }
+    missing = [
+        name
+        for name in wanted
+        if not re.search(rf"^\s*{re.escape(name)}\s*:", text, re.MULTILINE)
+    ]
+    if not missing:
+        return []
+    additions = [
+        "",
+        "# Provider permission policy. Edit these values to allow safe "
+        "unattended temporary-file operations (`prompt` never auto-approves).",
+    ]
+    for name in missing:
+        additions.append(f"{name}: {wanted[name]}")
     path.write_text(
         text.rstrip() + "\n" + "\n".join(additions) + "\n", encoding="utf-8"
     )
@@ -314,6 +389,42 @@ def validate(raw: dict, source: str = "configuration") -> Config:
             raise ConfigError(
                 f"invalid {name} in {source}: a non-empty prompt is required"
             )
+    permission_policy = get("permission_policy", base.permission_policy)
+    if permission_policy not in PERMISSION_POLICIES:
+        raise ConfigError(
+            f"invalid permission_policy `{permission_policy}` in {source}: "
+            f"expected one of {', '.join(PERMISSION_POLICIES)}"
+        )
+    permission_temp_root = get("permission_temp_root", base.permission_temp_root)
+    if not isinstance(permission_temp_root, str) or not permission_temp_root.strip():
+        raise ConfigError(
+            f"invalid permission_temp_root in {source}: "
+            "a non-empty project-relative directory is required"
+        )
+    permission_actions = get("permission_actions", base.permission_actions)
+    if not isinstance(permission_actions, list) or not all(
+        isinstance(item, str) for item in permission_actions
+    ):
+        raise ConfigError(
+            f"invalid permission_actions in {source}: "
+            "expected a list of read/write/create/delete strings"
+        )
+    unknown_actions = [
+        item for item in permission_actions if item not in PERMISSION_ACTIONS
+    ]
+    if unknown_actions:
+        raise ConfigError(
+            f"invalid permission_actions {unknown_actions} in {source}: "
+            f"expected a subset of {', '.join(PERMISSION_ACTIONS)}"
+        )
+    permission_allowlist = get("permission_allowlist", base.permission_allowlist)
+    if not isinstance(permission_allowlist, list) or not all(
+        isinstance(item, str) and item.strip() for item in permission_allowlist
+    ):
+        raise ConfigError(
+            f"invalid permission_allowlist in {source}: "
+            "expected a list of non-empty path strings"
+        )
     return Config(
         agent_provider=raw.get("agent_provider", base.agent_provider),
         terminal_driver=raw.get("terminal_driver", base.terminal_driver),
@@ -339,4 +450,8 @@ def validate(raw: dict, source: str = "configuration") -> Config:
         first_prompt=get("first_prompt", base.first_prompt),
         continuation_prompt=get("continuation_prompt", base.continuation_prompt),
         confirmation_prompt=get("confirmation_prompt", base.confirmation_prompt),
+        permission_policy=permission_policy,
+        permission_temp_root=permission_temp_root,
+        permission_actions=list(permission_actions),
+        permission_allowlist=list(permission_allowlist),
     )

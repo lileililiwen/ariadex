@@ -59,6 +59,9 @@ class SchemaTest(unittest.TestCase):
                     "blocker",
                     "operation",
                     "next_action",
+                    "requested_path",
+                    "normalized_path",
+                    "policy",
                 ]
             ),
         )

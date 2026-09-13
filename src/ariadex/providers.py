@@ -62,6 +62,9 @@ class OpenCodeAdapter(AgentAdapter):
     launch_command = ("opencode",)
     new_session_input = "/new"
     recoverable_error_markers = RECOVERABLE_TERMINAL_ERROR_MARKERS
+    # Standard TUI confirm keystroke; sent only after a parsed request is
+    # approved by the permission policy, never for unknown surfaces.
+    permission_approve_input = "y"
 
     @property
     def capabilities(self) -> Capabilities:
@@ -81,6 +84,9 @@ class CodexAdapter(AgentAdapter):
     launch_command = ("codex",)
     new_session_input = None
     recoverable_error_markers = RECOVERABLE_TERMINAL_ERROR_MARKERS
+    # Standard TUI confirm keystroke; sent only after a parsed request is
+    # approved by the permission policy, never for unknown surfaces.
+    permission_approve_input = "y"
 
     @property
     def capabilities(self) -> Capabilities:
@@ -100,6 +106,9 @@ class CodeBuddyAdapter(AgentAdapter):
     launch_command = ("codebuddy",)
     new_session_input = None
     recoverable_error_markers = RECOVERABLE_TERMINAL_ERROR_MARKERS
+    # Standard TUI confirm keystroke; sent only after a parsed request is
+    # approved by the permission policy, never for unknown surfaces.
+    permission_approve_input = "y"
 
     @property
     def capabilities(self) -> Capabilities:

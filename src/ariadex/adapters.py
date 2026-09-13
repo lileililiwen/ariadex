@@ -91,6 +91,11 @@ class AgentAdapter(abc.ABC):
     #: conversation boundary only when the same capture also contains a
     #: verified input-ready marker; otherwise it stays a generic error.
     recoverable_error_markers: tuple[str, ...] = ()
+    #: Provider-owned permission-response keystroke, sent only after a
+    #: parsed request is approved by the permission policy. None means the
+    #: provider surface is not understood: approvals always wait for a
+    #: human and the watcher never sends input for them.
+    permission_approve_input: str | None = None
 
     def __init__(
         self,
@@ -203,6 +208,21 @@ class AgentAdapter(abc.ABC):
             raise CaptureError(
                 f"failed to capture {self.provider_name} output: {exc}"
             ) from exc
+
+    def recognize_permission(self, capture_tail: str):
+        """Parse one permission request from a provider pane tail.
+
+        Adapter-owned recognition: returns a ParsedRequest with the
+        canonical file operation and single unambiguous path, or None
+        when the surface is unknown or ambiguous. Never raises for
+        provider text; unparsable surfaces stay waiting for a human.
+        """
+        from . import permissions as permissions_mod
+
+        try:
+            return permissions_mod.parse_permission_request(capture_tail)
+        except Exception:
+            return None
 
     def is_idle(self) -> bool:
         """Conservative default: never claim idle without evidence."""

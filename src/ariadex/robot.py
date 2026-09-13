@@ -30,6 +30,7 @@ from typing import Any
 from . import diagnostics as diagnostics_mod
 from . import handoff as handoff_mod
 from . import openspec_evidence as evidence_mod
+from . import permissions as permissions_mod
 from . import spec_graph as spec_graph_mod
 from .adapters import AgentAdapter, UnsupportedOperation
 from .config import DEFAULT_CONFIRMATION_PROMPT
@@ -824,6 +825,12 @@ class RobotWatcher:
         self.prompts_sent = 0
         self.confirmations_sent = 0
         self.last_classification = CLASS_UNKNOWN
+        #: Approved permission requests sent to the provider session.
+        self.permissions_granted = 0
+        #: Deduplication key of the last approved permission request
+        #: (provider/operation/normalized path). A repeated surface for the
+        #: same key waits instead of resending approval input.
+        self._last_permission_key = ""
         #: Recoverable boundary category driving the current debounce
         #: ("" for a clean finish, "max-steps"/"terminal-error" otherwise).
         #: Recorded in boundary diagnostics without raw provider captures.
@@ -873,6 +880,9 @@ class RobotWatcher:
         blocker: str = "",
         operation: str = "",
         next_action: str = "",
+        requested_path: str = "",
+        normalized_path: str = "",
+        policy: str = "",
     ) -> None:
         """Persist one durable diagnostic (best-effort, never raises).
 
@@ -918,6 +928,9 @@ class RobotWatcher:
                     blocker=blocker,
                     operation=operation,
                     next_action=next_action,
+                    requested_path=requested_path,
+                    normalized_path=normalized_path,
+                    policy=policy,
                 ),
             )
 
@@ -969,6 +982,161 @@ class RobotWatcher:
     def paused(self) -> bool:
         return self._paused
 
+    def _permission_settings(self) -> tuple[str, str, list[str], list[str]]:
+        """Configured (policy, temp root, actions, allowlist), fail-closed.
+
+        Missing or invalid project configuration falls back to the safe
+        `prompt` default: no automatic approval is ever sent.
+        """
+        from . import config as config_mod
+
+        try:
+            cfg = config_mod.load(self.project_dir)
+        except Exception:
+            return (
+                "prompt",
+                config_mod.DEFAULT_PERMISSION_TEMP_ROOT,
+                ["read", "write", "create", "delete"],
+                [],
+            )
+        if cfg.permission_policy not in permissions_mod.PERMISSION_POLICIES:
+            return (
+                "prompt",
+                cfg.permission_temp_root,
+                list(cfg.permission_actions),
+                list(cfg.permission_allowlist),
+            )
+        return (
+            cfg.permission_policy,
+            cfg.permission_temp_root,
+            list(cfg.permission_actions),
+            list(cfg.permission_allowlist),
+        )
+
+    def _handle_approval(self, capture: str) -> str:
+        """Evaluate one provider approval surface against the policy.
+
+        Returns the watcher phase (always WAITING for approvals). Sends
+        the adapter-owned keystroke only for a verified, contained request
+        under an auto policy, at most once per distinct request. Every
+        other surface waits for explicit human action with the exact
+        reason recorded; nothing is ever denied blindly or approved
+        without a parsed operation and contained path.
+        """
+        policy, temp_root_cfg, actions, allowlist_cfg = self._permission_settings()
+        parsed = self.adapter.recognize_permission(capture)
+        temp_root: Path | None = None
+        allow_roots: list[Path] = []
+        prep_error = ""
+        if policy in ("project-temp-auto", "allowlist"):
+            try:
+                allow_roots = permissions_mod.allowlist_roots(
+                    self.project_dir, allowlist_cfg
+                )
+            except Exception as exc:
+                prep_error = f"allowlist unreadable: {exc}"
+            if policy == "project-temp-auto":
+                try:
+                    temp_root = permissions_mod.ensure_temp_root(
+                        self.project_dir, temp_root_cfg
+                    )
+                except (ValueError, OSError) as exc:
+                    prep_error = f"temp root unavailable: {exc}"
+        if prep_error:
+            decision = permissions_mod.PermissionDecision(
+                self.adapter.provider_name,
+                "",
+                "",
+                "",
+                policy,
+                "waiting",
+                f"{prep_error}; answer the approval in the provider session",
+            )
+        else:
+            decision = permissions_mod.evaluate(
+                provider=self.adapter.provider_name,
+                parsed=parsed,
+                raw_tail=capture,
+                policy=policy,
+                temp_root=temp_root,
+                allowlist=allow_roots,
+                allowed_actions=actions,
+                approve_input=self.adapter.permission_approve_input or "",
+                project_dir=self.project_dir,
+            )
+        summary = permissions_mod.decision_summary(decision)
+        if decision.result == "allow" and decision.approve_input:
+            key = "|".join(
+                (decision.provider, decision.operation, decision.normalized_path)
+            )
+            if key and key == self._last_permission_key:
+                decision = permissions_mod.PermissionDecision(
+                    decision.provider,
+                    decision.operation,
+                    decision.requested_path,
+                    decision.normalized_path,
+                    decision.policy,
+                    "waiting",
+                    "already approved once; waiting for the provider to "
+                    "proceed instead of resending approval input",
+                )
+                summary = permissions_mod.decision_summary(decision)
+            else:
+                try:
+                    self._send(decision.approve_input)
+                except RobotError as exc:
+                    decision = permissions_mod.PermissionDecision(
+                        decision.provider,
+                        decision.operation,
+                        decision.requested_path,
+                        decision.normalized_path,
+                        decision.policy,
+                        "waiting",
+                        f"approval delivery failed ({exc}); answer the "
+                        "approval in the provider session",
+                    )
+                    summary = permissions_mod.decision_summary(decision)
+                else:
+                    self.permissions_granted += 1
+                    self._last_permission_key = key
+        elif decision.result == "allow":
+            decision = permissions_mod.PermissionDecision(
+                decision.provider,
+                decision.operation,
+                decision.requested_path,
+                decision.normalized_path,
+                decision.policy,
+                "waiting",
+                "provider surface is not understood (no safe response "
+                "declared); answer the approval in the provider session",
+            )
+            summary = permissions_mod.decision_summary(decision)
+        self.phase = WAITING
+        self.stable_polls = 0
+        self.block_reason = summary
+        self._record("waiting", summary)
+        recovery = (
+            "approved with the provider-owned keystroke; watching resumes"
+            if decision.result == "allow"
+            else "answer the approval in the provider session; "
+            "watching resumes afterwards"
+        )
+        self._diag(
+            "provider",
+            f"permission decision ({decision.result})",
+            result=decision.result,
+            message=summary,
+            classification=CLASS_APPROVAL,
+            decision=decision.result,
+            blocker="" if decision.result == "allow" else decision.reason,
+            operation=decision.operation,
+            next_action=recovery,
+            requested_path=decision.requested_path,
+            normalized_path=decision.normalized_path,
+            policy=decision.policy,
+        )
+        return self.phase
+
     def status_view(self) -> dict:
         """Widget-visible robot state (pure data, no I/O)."""
         visible = self._events[-MAX_ACTIVITY_VIEW:]
@@ -984,6 +1152,7 @@ class RobotWatcher:
             "latest_event": latest,
             "activity": [dict(event) for event in visible],
             "confirmations_sent": self.confirmations_sent,
+            "permissions_granted": self.permissions_granted,
         }
 
     def _capture(self) -> str:
@@ -1026,30 +1195,13 @@ class RobotWatcher:
         observed = classify_capture(self.adapter.provider_name, capture)
         self.last_classification = observed
         if observed == CLASS_APPROVAL:
-            # Approval/confirmation belongs to the provider conversation. The
-            # user may answer it later; it must not terminate the watcher or
-            # cause the initial prompt to be resent.
-            self.phase = WAITING
-            self.stable_polls = 0
-            self.block_reason = (
-                "provider waits for approval; watcher continues observing"
-            )
-            self._record(
-                "waiting", "provider waits for approval; watcher continues observing"
-            )
-            self._diag(
-                "provider",
-                "provider waits for approval",
-                result="waiting",
-                message="watcher continues observing",
-                classification=observed,
-                decision="waiting",
-                blocker=self.block_reason,
-                operation="observe",
-                next_action="answer the approval in the provider session; "
-                "watching resumes afterwards",
-            )
-            return self.phase
+            # Approval/confirmation belongs to the provider conversation.
+            # The permission policy decides: contained temp-root or
+            # allowlist requests under an auto policy are approved with the
+            # adapter-owned keystroke; every other surface waits for the
+            # human to answer inside the user-owned session. Waiting never
+            # terminates the watcher and never resends the initial prompt.
+            return self._handle_approval(capture)
         if observed == CLASS_QUOTA:
             self.phase = WAITING
             self.stable_polls = 0

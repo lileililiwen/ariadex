@@ -96,6 +96,9 @@ def build_diagnostic(
     blocker: str = "",
     operation: str = "",
     next_action: str = "",
+    requested_path: str = "",
+    normalized_path: str = "",
+    policy: str = "",
 ) -> dict:
     """Build one versioned, redacted diagnostic record with stable keys.
 
@@ -103,9 +106,11 @@ def build_diagnostic(
     `evidence_source`, `decision`, `blocker`, `operation`, `next_action`)
     explain every stop/no-advance path: what the provider surface was,
     which recorded spec and authoritative queue gated the boundary, what
-    was decided, why, and what the operator should do next. All free text
-    is redacted and bounded before persistence; raw provider captures
-    must never be passed in.
+    was decided, why, and what the operator should do next. The permission
+    fields (`requested_path`, `normalized_path`, `policy`) carry the
+    evaluated provider file request for allow/waiting/deny decisions. All
+    free text is redacted and bounded before persistence; raw provider
+    captures must never be passed in.
     """
     category = category if category in CATEGORIES else "error"
     clean_action, action_cuts = _redacted_field(action)
@@ -113,6 +118,9 @@ def build_diagnostic(
     clean_recovery, recovery_cuts = _redacted_field(recovery)
     clean_blocker, blocker_cuts = _redacted_field(blocker)
     clean_next, next_cuts = _redacted_field(next_action)
+    clean_requested, requested_cuts = _redacted_field(requested_path)
+    clean_normalized, normalized_cuts = _redacted_field(normalized_path)
+    clean_policy, policy_cuts = _redacted_field(policy)
     queue = [str(name) for name in (active_queue or ())]
     return {
         "schema_version": DIAGNOSTIC_SCHEMA_VERSION,
@@ -137,11 +145,17 @@ def build_diagnostic(
         "blocker": clean_blocker,
         "operation": operation,
         "next_action": clean_next,
+        "requested_path": clean_requested,
+        "normalized_path": clean_normalized,
+        "policy": clean_policy,
         "redactions": action_cuts
         + message_cuts
         + recovery_cuts
         + blocker_cuts
-        + next_cuts,
+        + next_cuts
+        + requested_cuts
+        + normalized_cuts
+        + policy_cuts,
     }
 
 

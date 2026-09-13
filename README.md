@@ -350,6 +350,13 @@ strict validation) advances to the next spec or stops. Missing tooling,
 malformed output, timeouts, or contradictory evidence block with the
 exact reason and send no prompt. Approval requests are a
 non-terminal waiting state: the watcher keeps polling and sends no input.
+Provider permission prompts additionally follow the configured
+`permission_policy` (`prompt` by default, never auto-approving):
+`project-temp-auto` approves only parsed read/write/create/delete requests
+inside the private owner-only `.ariadex/tmp` root, `allowlist` only inside
+explicit entries, and `deny` refuses every automatic approval. Shared
+`/tmp`, traversal, symlink escape, and privileged operations are never
+approved; every decision is recorded in diagnostics and the widget log.
 Provider errors pause with the exact reason instead of advancing, except
 for a recognized recoverable terminal error (interrupted stream, reset or
 failed connection, timeout, overloaded or unavailable service) shown

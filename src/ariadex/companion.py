@@ -681,6 +681,9 @@ def build_managed_context(state: dict) -> dict:
                     "evidence_source": _context_field(
                         entry.get("evidence_source", ""), 64
                     ),
+                    "requested_path": _context_field(entry.get("requested_path", "")),
+                    "normalized_path": _context_field(entry.get("normalized_path", "")),
+                    "policy": _context_field(entry.get("policy", ""), 64),
                     "open_tasks": event_open,
                     "active_queue": queue_names[:MANAGED_LOG_VIEW_LINES],
                 }
@@ -777,6 +780,16 @@ def format_managed_log_text(projection: dict) -> str:
                 lines.append(f"  blocker: {entry['blocker']}")
             if entry.get("operation"):
                 lines.append(f"  operation: {entry['operation']}")
+            permission_bits = []
+            if entry.get("policy"):
+                permission_bits.append(f"policy={entry['policy']}")
+            decided_path = entry.get("normalized_path") or entry.get("requested_path")
+            if decided_path:
+                permission_bits.append(f"path={decided_path}")
+            elif entry.get("requested_path"):
+                permission_bits.append(f"path={entry['requested_path']}")
+            if permission_bits:
+                lines.append(f"  permission: {'; '.join(permission_bits)}")
             if entry.get("next_action"):
                 lines.append(f"  next: {entry['next_action']}")
     else:
@@ -836,6 +849,14 @@ def format_context_snapshot(projection: dict, state: dict) -> str:
                 lines.append(f"  decision: {entry['decision']}")
             if entry.get("blocker"):
                 lines.append(f"  blocker: {entry['blocker']}")
+            permission_bits = []
+            if entry.get("policy"):
+                permission_bits.append(f"policy={entry['policy']}")
+            decided_path = entry.get("normalized_path") or entry.get("requested_path")
+            if decided_path:
+                permission_bits.append(f"path={decided_path}")
+            if permission_bits:
+                lines.append(f"  permission: {'; '.join(permission_bits)}")
             if entry.get("next_action"):
                 lines.append(f"  next: {entry['next_action']}")
     else:

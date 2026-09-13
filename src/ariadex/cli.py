@@ -914,6 +914,7 @@ def cmd_init(
     if is_initialized(project_dir):
         try:
             migrated = config_mod.migrate_managed_prompt_keys(project_dir)
+            migrated += config_mod.migrate_permission_keys(project_dir)
         except OSError as exc:
             print(f"error: configuration migration failed: {exc}", file=sys.stderr)
             return EXIT_ERROR
