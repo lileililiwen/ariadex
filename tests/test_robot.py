@@ -19,6 +19,7 @@ except ModuleNotFoundError:
     from tests import evidence_fakes  # type: ignore[no-redef]
 
 READY_OPENCODE = "Welcome back\nAsk anything · tab agents\n> "
+READY_OPENCODE_MODERN = "┃\n\n▣ Build · Muse Spark 1.3 Contributor · 3m 36s\n"
 READY_CODEX = "OpenAI Codex\nAsk Codex to do anything\n> "
 READY_CODEBUDDY = "CodeBuddy ready\ncodebuddy listening\n> "
 BUSY = "running tool `pytest` …\nesc to interrupt\n"
@@ -90,6 +91,40 @@ def make_watcher(
 
 
 class ClassifyTest(unittest.TestCase):
+    def test_opencode_current_composer_is_provider_ready(self) -> None:
+        adapter = providers_mod.OpenCodeAdapter(FakeDriver(), "agent", Path("."))
+        self.assertTrue(adapter.is_input_ready(READY_OPENCODE_MODERN))
+
+    def test_opencode_answer_text_is_not_provider_ready(self) -> None:
+        adapter = providers_mod.OpenCodeAdapter(FakeDriver(), "agent", Path("."))
+        self.assertFalse(adapter.is_input_ready("Evidence: all tasks complete\n"))
+
+    def test_modern_opencode_surface_reaches_continuation_boundary(self) -> None:
+        temporary = []
+        project = make_project(temporary)
+        self.addCleanup(temporary[0].cleanup)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": READY_OPENCODE_MODERN,
+            "workdir": "/t",
+        }
+        watcher = make_watcher(project, driver, debounce_polls=1)
+        real_check = robot_mod.check_boundary
+        robot_mod.check_boundary = lambda *args, **kwargs: robot_mod.BoundaryCheck(  # type: ignore[assignment]
+            ok=True, active=["next-change"], decision="complete"
+        )
+        try:
+            self.assertEqual(watcher.poll(), "continuing")
+            self.assertEqual(watcher.poll(), "continuing")
+        finally:
+            robot_mod.check_boundary = real_check  # type: ignore[assignment]
+        self.assertEqual(
+            driver.sent_inputs("agent"),
+            ["please start", "/new", robot_mod.DEFAULT_CONTINUATION_PROMPT],
+        )
+
     def test_opencode_ready_is_finished(self) -> None:
         self.assertEqual(
             robot_mod.classify_capture("opencode", READY_OPENCODE), "finished"

@@ -96,6 +96,9 @@ class AgentAdapter(abc.ABC):
     #: provider surface is not understood: approvals always wait for a
     #: human and the watcher never sends input for them.
     permission_approve_input: str | None = None
+    #: Provider-owned legacy terminal markers used by the adapter when no
+    #: richer provider status channel is available.
+    ready_markers: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -208,6 +211,19 @@ class AgentAdapter(abc.ABC):
             raise CaptureError(
                 f"failed to capture {self.provider_name} output: {exc}"
             ) from exc
+
+    def is_input_ready(self, capture: str) -> bool:
+        """Return whether this provider exposes an input-ready surface.
+
+        This is adapter state recognition, never interpretation of the
+        model's answer. Providers with a machine-readable status channel may
+        override this method; terminal-only providers may use their own
+        stable UI surface.
+        """
+        lowered = "\n".join((capture or "").splitlines()[-16:]).lower()
+        return bool(self.ready_markers) and any(
+            marker.lower() in lowered for marker in self.ready_markers
+        )
 
     def recognize_permission(self, capture_tail: str):
         """Parse one permission request from a provider pane tail.

@@ -65,6 +65,20 @@ class OpenCodeAdapter(AgentAdapter):
     # Standard TUI confirm keystroke; sent only after a parsed request is
     # approved by the permission policy, never for unknown surfaces.
     permission_approve_input = "y"
+    ready_markers = ("Ask anything", "tab agents")
+
+    def is_input_ready(self, capture: str) -> bool:
+        """Recognize OpenCode's current composer, independent of answer text.
+
+        OpenCode's TUI 1.18.x no longer renders the old ``Ask anything``
+        prompt. Its idle composer is rendered as a blank ``┃`` line followed
+        by the provider footer. This deliberately requires both UI-owned
+        structures and never examines the assistant's response prose.
+        """
+        lines = [line.rstrip() for line in (capture or "").splitlines()[-16:]]
+        has_composer = any(line.strip() == "┃" for line in lines)
+        has_footer = any("▣ Build ·" in line for line in lines)
+        return (has_composer and has_footer) or super().is_input_ready(capture)
 
     @property
     def capabilities(self) -> Capabilities:
@@ -87,6 +101,7 @@ class CodexAdapter(AgentAdapter):
     # Standard TUI confirm keystroke; sent only after a parsed request is
     # approved by the permission policy, never for unknown surfaces.
     permission_approve_input = "y"
+    ready_markers = ("OpenAI Codex", "Ask Codex to do anything")
 
     @property
     def capabilities(self) -> Capabilities:
@@ -109,6 +124,7 @@ class CodeBuddyAdapter(AgentAdapter):
     # Standard TUI confirm keystroke; sent only after a parsed request is
     # approved by the permission policy, never for unknown surfaces.
     permission_approve_input = "y"
+    ready_markers = ("CodeBuddy", "codebuddy")
 
     @property
     def capabilities(self) -> Capabilities:

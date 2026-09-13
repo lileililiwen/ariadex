@@ -221,8 +221,9 @@ Behavior:
   operator switches the model or credentials. Approval and confirmation
   requests are non-terminal waiting states; the watcher continues polling
   until the provider resumes or the user pauses/quits.
-- A finished conversation is recognized only when the provider-specific
-  input-ready signal is stable for `--debounce` polls (default 3) with no
+- A finished conversation is recognized only when the selected adapter's
+  provider-owned input-ready signal is stable for `--debounce` polls (default
+  3) with no
   approval, tool, quota/authentication, or generic error state present. A
   recognized recoverable terminal error shown with that ready surface, and
   the existing maximum-step-limit surface, are recoverable boundary
@@ -237,9 +238,8 @@ Behavior:
   a real blocker occurs. Neither prompt is sent before the fresh
   input-ready surface is observed.
 - Before each continuation, the robot checks the durable boundary:
-  handoff readability, task-marker completion for the current spec
-  (`--finished-change` overrides the handoff's current spec), Git status for
-  user source/handoff/OpenSpec work, and the active OpenSpec list. Ariadex's
+  task-marker completion for the current spec (`--finished-change` overrides
+  the recorded current spec) and the active OpenSpec list. Ariadex's
   own `.ariadex/` runtime records are excluded from the Git work check. The
   recorded current spec is matched with OpenSpec status and archival proof
   before the next active queue entry can start. Missing, malformed, or

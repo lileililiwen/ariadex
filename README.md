@@ -329,7 +329,7 @@ override; otherwise the change in `HANDOFF.md` is checked),
 `--widget`, and `--no-widget`
 (explicit fallback only).
 
-The robot waits for the provider's stable input-ready signal (debounced,
+The robot waits for the provider adapter's stable input-ready signal (debounced,
 default 3 polls), sends the initial prompt once, then verifies the
 durable boundary — Ariadex hidden state, task markers, and active OpenSpec
 list — before opening a new conversation. `HANDOFF.md` is ordinary

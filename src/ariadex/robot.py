@@ -227,7 +227,7 @@ class RobotError(Exception):
     """Typed robot failure: configuration, session, or boundary refusal."""
 
 
-def classify_capture(provider: str, text: str) -> str:
+def classify_capture(provider: str, text: str, input_ready: bool | None = None) -> str:
     """Classify one pane capture without sending input.
 
     Conservative order: approval, quota/authentication, and known
@@ -251,8 +251,10 @@ def classify_capture(provider: str, text: str) -> str:
         return CLASS_MAX_STEPS
     recoverable = RECOVERABLE_TERMINAL_ERROR_MARKERS.get(provider, ())
     markers = READY_MARKERS.get(provider)
-    ready_present = bool(
-        markers and any(marker.lower() in lowered for marker in markers)
+    ready_present = (
+        input_ready
+        if input_ready is not None
+        else bool(markers and any(marker.lower() in lowered for marker in markers))
     )
     if recoverable and any(marker in lowered for marker in recoverable):
         if ready_present:
@@ -1145,7 +1147,11 @@ class RobotWatcher:
             self.phase = PAUSED
             return self.phase
         capture = self._capture()
-        observed = classify_capture(self.adapter.provider_name, capture)
+        observed = classify_capture(
+            self.adapter.provider_name,
+            capture,
+            input_ready=self.adapter.is_input_ready(capture),
+        )
         self.last_classification = observed
         if observed == CLASS_APPROVAL:
             # Approval/confirmation belongs to the provider conversation.
@@ -1899,7 +1905,14 @@ class RobotWatcher:
         stable = 0
         for _ in range(bound):
             capture = self._capture()
-            if classify_capture(self.adapter.provider_name, capture) == CLASS_FINISHED:
+            if (
+                classify_capture(
+                    self.adapter.provider_name,
+                    capture,
+                    input_ready=self.adapter.is_input_ready(capture),
+                )
+                == CLASS_FINISHED
+            ):
                 stable += 1
                 if stable >= self.config.debounce_polls:
                     return True
