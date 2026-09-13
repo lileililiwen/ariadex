@@ -2,6 +2,12 @@
 
 ## Current state
 
+- Follow-up shutdown correction: closing the managed widget now signals the
+  watcher through daemon state; the owning `start` process terminates the
+  provider/tmux session, widget record, and daemon together. `start` also
+  resynchronizes legacy persisted `MANUAL` projects into `AUTO`; explicit
+  `PAUSE` remains respected. Verified with 901 tests, Ruff check/format, and
+  strict OpenSpec validation (no active changes).
 - Follow-up lifecycle correction: new projects now initialize in `AUTO`, and
   widget Play/Resume transitions `PAUSE` -> `AUTO` after resynchronization;
   widget Pause transitions `AUTO` -> `PAUSE`, with Stop unchanged as graceful
