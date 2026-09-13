@@ -19,7 +19,7 @@ except ModuleNotFoundError:
     from tests import evidence_fakes  # type: ignore[no-redef]
 
 READY_OPENCODE = "Welcome back\nAsk anything · tab agents\n> "
-READY_OPENCODE_MODERN = "┃\n\n▣ Build · Muse Spark 1.3 Contributor · 3m 36s\n"
+READY_OPENCODE_MODERN = "┃\n\n▣  Build · Muse Spark 1.3 Contributor · 3m 36s\n"
 READY_CODEX = "OpenAI Codex\nAsk Codex to do anything\n> "
 READY_CODEBUDDY = "CodeBuddy ready\ncodebuddy listening\n> "
 BUSY = "running tool `pytest` …\nesc to interrupt\n"
