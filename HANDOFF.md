@@ -1,6 +1,12 @@
 # Ariadex handoff
 
 - Implemented and archived:
+  `2026-09-13-opencode-composer-whitespace`. The provider-owned OpenCode
+  readiness matcher now handles the live `▣  Build` footer spacing. Verified
+  against the live pane: `ready=True`, `classification=finished`; 27 focused
+  tests and strict validation passed.
+
+- Implemented and archived:
   `2026-09-13-opencode-ready-state-precedence`. Explicit OpenCode provider
   readiness now reaches the OpenSpec boundary even when captured scrollback
   contains generic report words; provider-specific blockers retain priority.
