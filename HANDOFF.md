@@ -2,11 +2,22 @@
 
 ## Current state
 
-- New planning change: `task-aware-confirmation-and-widget-activity-log`.
-  It adds the configured `confirmation_prompt` for valid unfinished-task
-  recovery, restores task-aware completion decisions, and exposes a bounded
-  expandable Ariadex activity log in the widget. It is planning-only; no
-  implementation work has started.
+- Implemented, verified, and archived:
+  `2026-09-13-task-aware-confirmation-and-widget-activity-log` (commit
+  `e1d02ed`). The configured `confirmation_prompt` (new fourth prompt,
+  collected by `ariadex init`, migrated into existing configs, resolvable
+  per-run via `start`/`watch --confirmation-prompt`) recovers valid
+  unfinished tasks: the watcher opens a fresh provider conversation and
+  sends it only after the fresh input-ready surface, repeating bounded
+  attempts until tasks complete or a real blocker occurs. The boundary
+  decision now distinguishes complete/unfinished/empty/blocked; missing or
+  malformed task metadata stays blocked with no prompt. The robot widget
+  shows the latest activity event collapsed and a bounded redacted
+  read-only log expanded. Verified with 931 tests, Ruff check/format,
+  mypy, coverage 86% (floors pass), and strict OpenSpec validation (47
+  canonical specs, no active changes).
+- Superseded planning note: `task-aware-confirmation-and-widget-activity-log`
+  was planning-only; implementation is now complete and archived as above.
 - Follow-up continuation-boundary correction: an active spec's open tasks no
   longer block the next provider conversation. `0/14 tasks` is valid between
   conversations; `/new` now follows the durable handoff, git, and active-spec
@@ -133,9 +144,9 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Implement `task-aware-confirmation-and-widget-activity-log` next. It is the
-only active OpenSpec change and must be implemented, verified, and archived
-before another change is selected.
+No active OpenSpec changes remain (`openspec list` reports none). Select the
+next change with `openspec list` when new work is planned; only one active
+change may be implemented at a time.
 
 ## Latest verification evidence
 
