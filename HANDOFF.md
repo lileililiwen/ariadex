@@ -1,6 +1,12 @@
 # Ariadex handoff
 
 - Implemented and archived:
+  `2026-09-13-opencode-ready-state-precedence`. Explicit OpenCode provider
+  readiness now reaches the OpenSpec boundary even when captured scrollback
+  contains generic report words; provider-specific blockers retain priority.
+  Verified with 27 focused tests, Ruff, diff check, and strict validation.
+
+- Implemented and archived:
   `2026-09-13-stale-daemon-owner-recovery`. Dead daemon records and missing
   sockets no longer suppress `start`; live-owner reuse requires a responsive
   typed daemon endpoint. Verified with 3 focused recovery tests, Ruff, and
@@ -384,8 +390,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-`stale-daemon-owner-recovery` is active and is the next change to archive after
-verification.
+No active changes remain. Select the next spec with `openspec list` when new
+work is planned.
 
 ## Latest verification evidence
 
