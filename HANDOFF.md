@@ -2,13 +2,29 @@
 
 ## Current state
 
-- New planning queue: three related follow-up changes are active and must be
-  implemented in dependency order: `openspec-authoritative-current-spec-
-  lifecycle`, `comprehensive-runtime-diagnostics`, then
-  `managed-widget-log-copy-and-context`. They cover OpenSpec-backed current
-  spec/archive evidence, comprehensive full-log diagnostics, and integrating
-  rich copyable context into the normal `ariadex start` widget. No production
-  implementation has started for these changes.
+- New planning queue: two related follow-up changes are active and must be
+  implemented in dependency order: `comprehensive-runtime-diagnostics`, then
+  `managed-widget-log-copy-and-context`. They cover comprehensive full-log
+  diagnostics and integrating rich copyable context into the normal
+  `ariadex start` widget. No production implementation has started for
+  these changes.
+- Implemented, verified, and archived:
+  `2026-09-13-openspec-authoritative-current-spec-lifecycle` (commit
+  `d0758e2`). Before every first, continuation, or confirmation prompt the
+  watcher records the selected change as a versioned conversation in
+  `.ariadex/conversation.json` and synchronizes `HANDOFF.current_spec` and
+  `current_spec_file`; restarts recover the recorded target and never infer
+  one from stale `next_action`. Inside an OpenSpec repository the boundary
+  is OpenSpec-JSON authoritative (`list --json` queue/progress, `status
+  --change --json` probe, `list --specs --json` plus strict validation for
+  archival proof): unfinished tasks select confirmation, complete-but-active
+  selects confirmation with an archival instruction, proven-archived advances
+  or stops, and missing/malformed/timeout/contradictory evidence blocks with
+  no prompt. Outside an OpenSpec repository the legacy internal discovery
+  applies. Verified with 978 tests (1 pre-existing HANDOFF-queue assertion
+  refreshed by this handoff update), Ruff check/format, mypy, coverage 86%
+  (floors pass), and strict OpenSpec validation (47 canonical specs, 2
+  active changes).
 - Implemented, verified, and archived:
   `2026-09-13-task-aware-confirmation-and-widget-activity-log` (commit
   `e1d02ed`). The configured `confirmation_prompt` (new fourth prompt,
@@ -60,7 +76,7 @@
   takeover/diagnostic paths. Verified with 898 tests, Ruff check/format, and
   strict OpenSpec validation (no active changes).
 - Implemented, verified, and archived: all previously recorded changes plus `2026-09-13-managed-runtime-upsert-and-minimal-cli`. All 47 canonical purposes under `openspec/specs` are complete. `ariadex 0.1.0` is published on PyPI. The managed runtime now has one idempotent `start` owner per project: it reuses the daemon, provider session, supervisor, and healthy widget, and repairs only a missing or crashed widget on rerun. Normal help exposes `init`, `start`, and `admin`; lifecycle aliases remain hidden compatibility plumbing.
-- Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 894 tests OK, 0 failures (stdlib only; runtime requires PyYAML). Strict change and canonical-spec validation both pass. Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (no publishing).
+- Test baseline: `PYTHONPATH=src python3 -m unittest discover -s tests` reports 978 tests OK, 0 failures (stdlib only; runtime requires PyYAML; OpenSpec CLI faked in-process so unit CI needs no Node). Strict change and canonical-spec validation both pass. Consistency is enforced by `tests/test_docs_consistency.py` (canonical purposes, handoff queue agreement, relative links; no live tmux or provider access); identity and release readiness by `tests/test_release_readiness.py` (no publishing).
 - Follow-up `simple-widget-workflow` is implemented and archived: `widget` checks Tkinter before daemon startup, supports explicit `--yes` prerequisite installation, and hides the historical `companion` command from normal help.
 - Added [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md), a detailed user/developer reference for the current daemon, widget controls, modes, durable files, cycle flow, and troubleshooting. It explicitly separates the implemented runtime from deferred arbitrary-agent observation behavior.
 - Quality gates: ruff check/format clean (S security family enforced with justified suppressions), mypy clean on `src/ariadex`, coverage 86% (gate 82 met) plus per-module floors via `scripts/check_coverage.py` (wired into CI quality job), `tests/test_workflows.py` pins or reviews every action reference; strict OpenSpec validation reports no active changes.
@@ -150,13 +166,27 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Implement `openspec-authoritative-current-spec-lifecycle` next. Then implement
-`comprehensive-runtime-diagnostics`, followed by
+Implement `comprehensive-runtime-diagnostics` next. Then implement
 `managed-widget-log-copy-and-context`. Only one active change may be
 implemented at a time; each must be verified and archived before the next is
 selected.
 
 ## Latest verification evidence
+
+- `openspec-authoritative-current-spec-lifecycle` was implemented and
+  archived in commit `d0758e2`. New `src/ariadex/openspec_evidence.py`
+  (bounded no-shell CLI boundary, strict JSON models, atomic versioned
+  `.ariadex/conversation.json` with handoff sync, suffix archive proof)
+  and watcher recording before every prompt plus the `ready-to-archive`
+  boundary are covered by `tests/test_openspec_evidence.py` (47 tests)
+  and updated `test_robot.py`/`test_task_confirmation.py` expectations
+  (initial prompt needs a recorded target; complete-but-active requests
+  archival confirmation instead of advancing). Live proof on this host:
+  real `openspec list --json` reports this change 7/7, `select_first_target`
+  resolves the next change, and strict spec validation passes (47 specs).
+  Full verification: 978 tests OK (1 HANDOFF-queue assertion refreshed by
+  the accompanying handoff update), Ruff check/format clean, mypy clean,
+  coverage 86% (floors pass), strict change/spec validation green.
 
 - Pending-work reconciliation was fixed in commit `0759164`. Daemon/widget
   status now recalculates the next action from active OpenSpec changes instead
