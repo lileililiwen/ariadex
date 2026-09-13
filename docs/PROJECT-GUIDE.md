@@ -33,8 +33,8 @@ ariadex init
 ariadex start
 ```
 
-`ariadex init` asks for the provider and first/continuation/confirmation prompts
-(blank answers keep the built-in defaults) and creates missing `.ariadex/`
+`ariadex init` asks for the provider, managed prompts, and permission policy
+settings (blank answers keep the built-in defaults) and creates missing `.ariadex/`
 configuration, handoff, and state files without overwriting existing work.
 Plain `init` refuses when the project is already initialized; `init --force`
 confirms, then removes only `.ariadex/` and reinitializes.

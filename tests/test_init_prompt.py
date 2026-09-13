@@ -37,7 +37,10 @@ class FirstRunWizardTest(unittest.TestCase):
 
     def test_blank_answers_store_program_defaults(self):
         self.assertEqual(
-            cli.cmd_init(self.root, read_answer=scripted("", "", "", "")), 0
+            cli.cmd_init(
+                self.root, read_answer=scripted("", "", "", "", "", "", "", "")
+            ),
+            0,
         )
 
         cfg = config.load(self.root)
@@ -50,7 +53,12 @@ class FirstRunWizardTest(unittest.TestCase):
 
     def test_skip_words_select_defaults(self):
         self.assertEqual(
-            cli.cmd_init(self.root, read_answer=scripted("skip", "-", "SKIP", "skip")),
+            cli.cmd_init(
+                self.root,
+                read_answer=scripted(
+                    "skip", "-", "SKIP", "skip", "skip", "skip", "skip", "skip"
+                ),
+            ),
             0,
         )
         cfg = config.load(self.root)
@@ -65,6 +73,10 @@ class FirstRunWizardTest(unittest.TestCase):
                 "Implement the active spec.",
                 "Next, do this.",
                 "Finish the rest.",
+                "skip",
+                "skip",
+                "skip",
+                "skip",
             ),
         )
         self.assertEqual(code, 0)
@@ -74,10 +86,42 @@ class FirstRunWizardTest(unittest.TestCase):
         self.assertEqual(cfg.continuation_prompt, "Next, do this.")
         self.assertEqual(cfg.confirmation_prompt, "Finish the rest.")
 
+    def test_permission_answers_round_trip_including_tmp_allowlist(self):
+        code = cli.cmd_init(
+            self.root,
+            read_answer=scripted(
+                "opencode",
+                "first",
+                "continue",
+                "confirm",
+                "allowlist",
+                ".ariadex/tmp",
+                "read,write",
+                "/tmp",
+            ),
+        )
+        self.assertEqual(code, 0)
+        cfg = config.load(self.root)
+        self.assertEqual(cfg.permission_policy, "allowlist")
+        self.assertEqual(cfg.permission_temp_root, ".ariadex/tmp")
+        self.assertEqual(cfg.permission_actions, ["read", "write"])
+        self.assertEqual(cfg.permission_allowlist, ["/tmp"])
+
+    def test_invalid_permission_policy_reprompts_without_partial_init(self):
+        answers = iter(["opencode", "", "", "", "unsafe", "prompt", "", "", ""])
+        with redirect_stderr(io.StringIO()):
+            code = cli.cmd_init(self.root, read_answer=lambda prompt: next(answers))
+        self.assertEqual(code, 0)
+        self.assertEqual(config.load(self.root).permission_policy, "prompt")
+
     def test_prompt_with_yaml_special_chars_round_trips(self):
         tricky = "Do: the thing # now [brackets] 'quoted'"
         self.assertEqual(
-            cli.cmd_init(self.root, read_answer=scripted("", tricky, "", "")), 0
+            cli.cmd_init(
+                self.root,
+                read_answer=scripted("", tricky, "", "", "", "", "", ""),
+            ),
+            0,
         )
         cfg = config.load(self.root)
         self.assertEqual(cfg.first_prompt, tricky)
@@ -92,7 +136,8 @@ class FirstRunWizardTest(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             code = cli.cmd_init(
-                self.root, read_answer=scripted("wat", "codebuddy", "", "", "")
+                self.root,
+                read_answer=scripted("wat", "codebuddy", "", "", "", "", "", "", ""),
             )
         self.assertEqual(code, 0)
         self.assertIn("unsupported provider `wat`", err.getvalue())
@@ -110,7 +155,10 @@ class FirstRunWizardTest(unittest.TestCase):
         fake_stdin.isatty = lambda: True  # type: ignore[method-assign]
         with (
             mock.patch.object(sys, "stdin", fake_stdin),
-            mock.patch("builtins.input", side_effect=["codex", "", "", ""]),
+            mock.patch(
+                "builtins.input",
+                side_effect=["codex", "", "", "", "", "", "", ""],
+            ),
         ):
             self.assertEqual(cli.cmd_init(self.root), 0)
         cfg = config.load(self.root)
@@ -135,7 +183,10 @@ class FirstRunWizardTest(unittest.TestCase):
         handoff.write_text("human content\n", encoding="utf-8")
         self.assertFalse(cli.is_initialized(self.root))
         self.assertEqual(
-            cli.cmd_init(self.root, read_answer=scripted("", "", "", "")), 0
+            cli.cmd_init(
+                self.root, read_answer=scripted("", "", "", "", "", "", "", "")
+            ),
+            0,
         )
         text = cfg_path.read_text(encoding="utf-8")
         self.assertIn("agent_provider: codex", text)
@@ -149,7 +200,10 @@ class RepeatedInitTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.assertEqual(
-            cli.cmd_init(self.root, read_answer=scripted("", "", "", "")), 0
+            cli.cmd_init(
+                self.root, read_answer=scripted("", "", "", "", "", "", "", "")
+            ),
+            0,
         )
 
     def test_reinit_migrates_missing_prompt_keys(self):
@@ -217,7 +271,9 @@ class ForceResetTest(unittest.TestCase):
         self.assertEqual(
             cli.cmd_init(
                 self.root,
-                read_answer=scripted("codex", "first-one", "cont-one", "conf-one"),
+                read_answer=scripted(
+                    "codex", "first-one", "cont-one", "conf-one", "", "", "", ""
+                ),
             ),
             0,
         )
@@ -235,7 +291,7 @@ class ForceResetTest(unittest.TestCase):
             self.root,
             force=True,
             confirmed=True,
-            read_answer=scripted("opencode", "", "", ""),
+            read_answer=scripted("opencode", "", "", "", "", "", "", ""),
         )
         self.assertEqual(code, 0)
         cfg = config.load(self.root)
@@ -259,7 +315,7 @@ class ForceResetTest(unittest.TestCase):
                 self.root,
                 force=True,
                 confirmed=False,
-                read_answer=scripted("opencode", "", "", ""),
+                read_answer=scripted("opencode", "", "", "", "", "", "", ""),
             )
         self.assertNotEqual(code, 0)
         self.assertIn("--yes", err.getvalue())
@@ -279,7 +335,7 @@ class ForceResetTest(unittest.TestCase):
                 self.root,
                 force=True,
                 confirmed=False,
-                read_answer=scripted("opencode", "", "", ""),
+                read_answer=scripted("opencode", "", "", "", "", "", "", ""),
             )
         self.assertNotEqual(code, 0)
         self.assertTrue((self.root / ".ariadex" / "daemon.json").exists())
@@ -296,7 +352,7 @@ class ForceResetTest(unittest.TestCase):
                 self.root,
                 force=True,
                 confirmed=False,
-                read_answer=scripted("opencode", "", "", ""),
+                read_answer=scripted("opencode", "", "", "", "", "", "", ""),
             )
         self.assertEqual(code, 0)
         self.assertEqual(config.load(self.root).agent_provider, "opencode")
@@ -343,7 +399,10 @@ class StartGuardTest(unittest.TestCase):
 
     def test_start_passes_guard_once_initialized(self):
         self.assertEqual(
-            cli.cmd_init(self.root, read_answer=scripted("", "", "", "")), 0
+            cli.cmd_init(
+                self.root, read_answer=scripted("", "", "", "", "", "", "", "")
+            ),
+            0,
         )
         report = cli.prerequisites_mod.CoordinatorReport(
             results=[

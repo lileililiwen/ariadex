@@ -659,14 +659,17 @@ def _coerce_answer(raw: str, default: str) -> str:
 
 def _ask_init_answers(
     read_answer=None,
-) -> tuple[str, str, str, str]:
-    """Prompt for provider, first, continuation, and confirmation prompts.
+) -> tuple[str, str, str, str, str, str, list[str], list[str]]:
+    """Prompt for provider, managed prompts, and permission policy.
 
     `read_answer` maps a prompt string to the user's raw answer; the default
     reads interactively (defaults headless). Invalid providers are rejected
     and re-prompted without touching durable state. Returns validated
-    `(provider, first_prompt, continuation_prompt, confirmation_prompt)`
-    with non-empty values.
+    `(provider, first_prompt, continuation_prompt, confirmation_prompt,
+    permission_policy, permission_temp_root, permission_actions,
+    permission_allowlist)` with validated values. Shared paths such as
+    `/tmp` are configured through the explicit allowlist, never by changing
+    the private project temp root.
     """
     read = read_answer if read_answer is not None else _wizard_answer
     providers = providers_mod.supported_providers()
@@ -701,7 +704,69 @@ def _ask_init_answers(
         read("Confirmation prompt [blank keeps the built-in default]: "),
         default_confirmation,
     )
-    return provider, first_prompt, continuation_prompt, confirmation_prompt
+    defaults = config_mod.defaults()
+    while True:
+        permission_policy = _coerce_answer(
+            read(
+                "Permission policy [prompt] (prompt/project-temp-auto/allowlist/deny): "
+            ),
+            defaults.permission_policy,
+        )
+        if permission_policy in config_mod.PERMISSION_POLICIES:
+            break
+        print(
+            f"error: invalid permission policy `{permission_policy}`; "
+            f"choose one of {', '.join(config_mod.PERMISSION_POLICIES)}",
+            file=sys.stderr,
+        )
+    permission_temp_root = _coerce_answer(
+        read(
+            "Private temp root [.ariadex/tmp] "
+            "(project-relative; use allowlist for /tmp): "
+        ),
+        defaults.permission_temp_root,
+    )
+    if Path(permission_temp_root).is_absolute():
+        print(
+            "error: permission temp root must be project-relative; "
+            "configure /tmp under the allowlist instead",
+            file=sys.stderr,
+        )
+        permission_temp_root = defaults.permission_temp_root
+    raw_actions = _coerce_answer(
+        read("Automatically approved actions [read,write,create,delete]: "),
+        ",".join(defaults.permission_actions),
+    )
+    permission_actions = [
+        item.strip() for item in raw_actions.split(",") if item.strip()
+    ]
+    unknown_actions = [
+        item for item in permission_actions if item not in config_mod.PERMISSION_ACTIONS
+    ]
+    if unknown_actions:
+        print(
+            f"error: invalid permission actions {unknown_actions}; "
+            "using the safe default action list",
+            file=sys.stderr,
+        )
+        permission_actions = list(defaults.permission_actions)
+    raw_allowlist = _coerce_answer(
+        read("Allowlisted paths (comma-separated; blank means none): "),
+        "",
+    )
+    permission_allowlist = [
+        item.strip() for item in raw_allowlist.split(",") if item.strip()
+    ]
+    return (
+        provider,
+        first_prompt,
+        continuation_prompt,
+        confirmation_prompt,
+        permission_policy,
+        permission_temp_root,
+        permission_actions,
+        permission_allowlist,
+    )
 
 
 def _render_config_text(
@@ -709,6 +774,10 @@ def _render_config_text(
     first_prompt: str,
     continuation_prompt: str,
     confirmation_prompt: str | None = None,
+    permission_policy: str | None = None,
+    permission_temp_root: str | None = None,
+    permission_actions: list[str] | None = None,
+    permission_allowlist: list[str] | None = None,
 ) -> str:
     """Render the commented default config with the wizard answers applied.
 
@@ -719,6 +788,19 @@ def _render_config_text(
 
     if confirmation_prompt is None:
         confirmation_prompt = config_mod.DEFAULT_CONFIRMATION_PROMPT
+    defaults = config_mod.defaults()
+    permission_policy = permission_policy or defaults.permission_policy
+    permission_temp_root = permission_temp_root or defaults.permission_temp_root
+    permission_actions = (
+        list(permission_actions)
+        if permission_actions is not None
+        else list(defaults.permission_actions)
+    )
+    permission_allowlist = (
+        list(permission_allowlist)
+        if permission_allowlist is not None
+        else list(defaults.permission_allowlist)
+    )
     text = config_mod.default_config_text()
     text = text.replace(
         "\nagent_provider: opencode\n", f"\nagent_provider: {provider}\n", 1
@@ -745,6 +827,26 @@ def _render_config_text(
             text.rstrip()
             + f"\nconfirmation_prompt: {json_mod.dumps(confirmation_prompt)}\n"
         )
+    text = text.replace(
+        "\npermission_policy: prompt\n",
+        f"\npermission_policy: {permission_policy}\n",
+        1,
+    )
+    text = text.replace(
+        "\npermission_temp_root: .ariadex/tmp\n",
+        f"\npermission_temp_root: {json_mod.dumps(permission_temp_root)}\n",
+        1,
+    )
+    text = text.replace(
+        "\npermission_actions: [read, write, create, delete]\n",
+        f"\npermission_actions: {json_mod.dumps(permission_actions)}\n",
+        1,
+    )
+    text = text.replace(
+        "\npermission_allowlist: []\n",
+        f"\npermission_allowlist: {json_mod.dumps(permission_allowlist)}\n",
+        1,
+    )
     return text
 
 
@@ -754,6 +856,10 @@ def _create_missing_files(
     first_prompt: str,
     continuation_prompt: str,
     confirmation_prompt: str | None = None,
+    permission_policy: str | None = None,
+    permission_temp_root: str | None = None,
+    permission_actions: list[str] | None = None,
+    permission_allowlist: list[str] | None = None,
 ) -> tuple[list, list]:
     """Create absent .ariadex/config.yaml, handoff, and state files.
 
@@ -770,7 +876,14 @@ def _create_missing_files(
     else:
         cfg_path.write_text(
             _render_config_text(
-                provider, first_prompt, continuation_prompt, confirmation_prompt
+                provider,
+                first_prompt,
+                continuation_prompt,
+                confirmation_prompt,
+                permission_policy,
+                permission_temp_root,
+                permission_actions,
+                permission_allowlist,
             ),
             encoding="utf-8",
         )
@@ -822,9 +935,16 @@ def _cmd_init_force(
         return EXIT_ERROR
     # Same wizard as first initialization; nothing is removed or created
     # until every answer validates.
-    provider, first_prompt, continuation_prompt, confirmation_prompt = (
-        _ask_init_answers(read_answer)
-    )
+    (
+        provider,
+        first_prompt,
+        continuation_prompt,
+        confirmation_prompt,
+        permission_policy,
+        permission_temp_root,
+        permission_actions,
+        permission_allowlist,
+    ) = _ask_init_answers(read_answer)
     print(
         "init --force removes the complete .ariadex directory (configuration, "
         "state, daemon records, locks, logs, events). HANDOFF.md, openspec/, "
@@ -849,6 +969,10 @@ def _cmd_init_force(
             first_prompt,
             continuation_prompt,
             confirmation_prompt,
+            permission_policy,
+            permission_temp_root,
+            permission_actions,
+            permission_allowlist,
         )
     except OSError as exc:
         print(
@@ -929,9 +1053,16 @@ def cmd_init(
         return EXIT_ERROR
     # Atomic from the user's perspective: the directory and files are only
     # created after every answer validates; existing project files are kept.
-    provider, first_prompt, continuation_prompt, confirmation_prompt = (
-        _ask_init_answers(read_answer)
-    )
+    (
+        provider,
+        first_prompt,
+        continuation_prompt,
+        confirmation_prompt,
+        permission_policy,
+        permission_temp_root,
+        permission_actions,
+        permission_allowlist,
+    ) = _ask_init_answers(read_answer)
     try:
         created, preserved = _create_missing_files(
             project_dir,
@@ -939,6 +1070,10 @@ def cmd_init(
             first_prompt,
             continuation_prompt,
             confirmation_prompt,
+            permission_policy,
+            permission_temp_root,
+            permission_actions,
+            permission_allowlist,
         )
     except OSError as exc:
         print(f"error: initialization failed: {exc}", file=sys.stderr)

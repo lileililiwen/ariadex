@@ -189,7 +189,7 @@ controls, durable files, cycle flow, and troubleshooting, see
 
 ```bash
 git clone https://github.com/lileililiwen/ariadex.git && cd ariadex
-./ariadex init         # provider and first/continuation/confirmation prompts (blanks keep defaults)
+./ariadex init         # prompts plus permission policy (blanks keep defaults)
 ./ariadex start        # managed workflow: prerequisites, daemon, session, widget
 ```
 
@@ -201,7 +201,10 @@ continuation_prompt: "Continue with the next unresolved item from HANDOFF.md."
 confirmation_prompt: "Finish the remaining open tasks, then update the handoff."
 ```
 
-Edit those values directly. Existing projects receive missing prompt keys the
+During init, permission setup asks for the policy, private temp root, allowed
+file actions, and an explicit path allowlist. To permit a shared path such as
+`/tmp`, select `allowlist` and enter `/tmp`; it is never enabled by a blank
+answer. Edit these values directly later. Existing projects receive missing prompt keys the
 next time `ariadex init` runs, without replacing their other configuration.
 
 Run these from the project you want Ariadex to supervise (the current
@@ -421,8 +424,8 @@ commands.
 
 The normal lifecycle is:
 
-1. `ariadex init` asks for the provider and first/continuation/confirmation
-   prompts (blank answers keep the built-in defaults), then creates missing
+1. `ariadex init` asks for the provider, managed prompts, and permission
+   policy settings (blank answers keep the built-in defaults), then creates missing
    `.ariadex/` configuration, the configured handoff file (default
    `HANDOFF.md`), and state files without overwriting existing files.
    Plain `init` refuses when the project is already initialized;
@@ -566,6 +569,10 @@ notification_command: []      # argv receiving the redacted payload JSON on stdi
 notification_webhook: ""      # http(s) URL receiving the payload, or empty
 notification_rate_limit: 5    # max deliveries per attention key per window
 notification_window_seconds: 3600  # deduplication/rate-limit window
+permission_policy: prompt         # prompt | project-temp-auto | allowlist | deny
+permission_temp_root: .ariadex/tmp # private project-relative root
+permission_actions: [read, write, create, delete]
+permission_allowlist: []           # e.g. [/tmp] only with allowlist policy
 ```
 
 Add your test/build commands to `verification_commands`; the runner
