@@ -18,12 +18,11 @@
   canonical specs, no active changes).
 - Superseded planning note: `task-aware-confirmation-and-widget-activity-log`
   was planning-only; implementation is now complete and archived as above.
-- Follow-up continuation-boundary correction: an active spec's open tasks no
-  longer block the next provider conversation. `0/14 tasks` is valid between
-  conversations; `/new` now follows the durable handoff, git, and active-spec
-  checks, while verification and task completion still gate actual spec
-  completion. Verified with 906 tests, Ruff check/format, and strict OpenSpec
-  validation (no active changes).
+- Superseded continuation-boundary behavior: open tasks must not be treated as
+  completed work. The archived task-aware confirmation change now sends the
+  configured confirmation prompt in a fresh conversation when valid tasks
+  remain unfinished; it sends the normal continuation prompt only after task
+  completion and boundary verification.
 - Follow-up widget pause synchronization: the managed watcher now honors
   durable `PAUSE` before delivering the first or continuation prompt and
   resumes only after Play returns the daemon to `AUTO`. The widget keeps its

@@ -167,9 +167,10 @@ dependency order. All three items are implemented, tested, archived, and committ
    widget, supervision, queue completion, and clean shutdown, while retaining
    advanced internals for recovery. (Complete.)
 
-The managed-start track is complete. The next active change is
-`task-aware-confirmation-and-widget-activity-log`, which must be implemented
-in isolation before another change is selected.
+The managed-start track and the task-aware confirmation/widget-log follow-up
+are complete. The follow-up was implemented and archived as
+`2026-09-13-task-aware-confirmation-and-widget-activity-log`; `openspec list`
+currently has no active changes.
 
 With the foundations above archived, the deferred capabilities are:
 
