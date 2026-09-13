@@ -2,13 +2,35 @@
 
 ## Current state
 
-- Planning queue contains two new changes. Implement
-  `safe-temporary-permission-policy` first, then
-  `bounded-widget-screen-placement`; both are planning-only and must be
-  implemented one active change at a time. The permission
-  change covers the deferred private-temp approval policy; it does not grant
-  arbitrary shared `/tmp` access. The widget placement change keeps the
-  borderless dialog fully visible and its close control reachable.
+- Planning queue contains one new change. Implement
+  `bounded-widget-screen-placement`; it is planning-only and must be
+  implemented one active change at a time. The widget placement change keeps
+  the borderless dialog fully visible and its close control reachable.
+- Implemented, verified, and archived:
+  `2026-09-13-safe-temporary-permission-policy` (commit `7560b27`). New
+  `src/ariadex/permissions.py` (stdlib only): conservative pane-tail
+  request parsing (canonical read/write/create/delete plus the single
+  unambiguous path; unknown, ambiguous, privileged, and shell-metachar
+  surfaces stay unparsed), owner-only project temp-root creation
+  (`.ariadex/tmp`, 0700, project-relative, escape-refusing), and a
+  fail-closed evaluator (`prompt` default waits; `deny` denies;
+  `project-temp-auto`/`allowlist` approve only symlink-resolved contained
+  requests; traversal, symlink/`~` escape, shared `/tmp`, disabled
+  operations, and unparsable input wait or deny with the exact reason and
+  never send input). Adapters own recognition plus the `y` response
+  keystroke (OpenCode/Codex/CodeBuddy); the robot approval branch
+  evaluates every approval, sends the keystroke at most once per distinct
+  request, and records provider, conversation, current spec, requested and
+  normalized paths, operation, policy, result, and reason in bounded
+  redacted diagnostics (three new stable keys) carried through the daemon
+  context, widget log, and copied context. Configuration gains
+  `permission_policy`, `permission_temp_root`, `permission_actions`, and
+  `permission_allowlist` with validation, documented defaults, and safe
+  migration for existing projects. Verified with 1138 tests (45 new in
+  `tests/test_permissions.py`; stable-keys and approval-wait expectations
+  extended for the new fields), Ruff check/format, mypy (34 files),
+  coverage 86% (floors pass), `git diff --check`, and strict validation
+  (47 canonical specs, 1 active change).
 - Implemented, verified, and archived:
   `2026-09-13-version-aware-upgrade-management` (commit `d817274`). New
   `src/ariadex/upgrade.py` (stdlib only): bounded read-only index probe
@@ -285,8 +307,7 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Implement `safe-temporary-permission-policy`. After it is archived,
-implement `bounded-widget-screen-placement`.
+Implement `bounded-widget-screen-placement`.
 
 ## Latest verification evidence
 
