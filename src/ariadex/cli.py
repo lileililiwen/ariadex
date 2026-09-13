@@ -780,9 +780,16 @@ def cmd_init(
             project_dir, confirmed=confirmed, read_answer=read_answer
         )
     if is_initialized(project_dir):
+        try:
+            migrated = config_mod.migrate_managed_prompt_keys(project_dir)
+        except OSError as exc:
+            print(f"error: configuration migration failed: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        if migrated:
+            print(f"initialized: added {', '.join(migrated)} to .ariadex/config.yaml")
         print(
             "error: project is already initialized; "
-            "use `ariadex init --force` to reset it (no files changed)",
+            "use `ariadex init --force` to reset it",
             file=sys.stderr,
         )
         return EXIT_ERROR

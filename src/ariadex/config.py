@@ -7,6 +7,8 @@ and verification belong to later changes.
 from __future__ import annotations
 
 import dataclasses
+import json
+import re
 from pathlib import Path
 
 import yaml
@@ -127,6 +129,35 @@ def defaults() -> Config:
 
 def config_path(project_dir: Path) -> Path:
     return project_dir / CONFIG_REL_PATH
+
+
+def migrate_managed_prompt_keys(project_dir: Path) -> list[str]:
+    """Add prompt keys to configuration created by older Ariadex versions.
+
+    Existing values and all other configuration text are preserved. This is a
+    narrow compatibility migration, not a config rewrite.
+    """
+    path = config_path(project_dir)
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8")
+    missing = [
+        name
+        for name in ("first_prompt", "continuation_prompt")
+        if not re.search(rf"^\s*{re.escape(name)}\s*:", text, re.MULTILINE)
+    ]
+    if not missing:
+        return []
+    additions = [
+        "",
+        "# Managed startup prompts. Edit these values to control `ariadex start`.",
+    ]
+    for name in missing:
+        additions.append(f"{name}: {json.dumps(DEFAULT_MANAGED_PROMPT)}")
+    path.write_text(
+        text.rstrip() + "\n" + "\n".join(additions) + "\n", encoding="utf-8"
+    )
+    return missing
 
 
 def load(project_dir: Path) -> Config:

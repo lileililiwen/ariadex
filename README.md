@@ -193,6 +193,16 @@ git clone https://github.com/lileililiwen/ariadex.git && cd ariadex
 ./ariadex start        # managed workflow: prerequisites, daemon, session, widget
 ```
 
+The generated `.ariadex/config.yaml` contains the prompts used by `start`:
+
+```yaml
+first_prompt: "Implement the active spec from HANDOFF.md."
+continuation_prompt: "Continue with the next unresolved item from HANDOFF.md."
+```
+
+Edit those values directly. Existing projects receive missing prompt keys the
+next time `ariadex init` runs, without replacing their other configuration.
+
 Run these from the project you want Ariadex to supervise (the current
 directory is the project). `start` prepares prerequisites, launches the
 configured provider in a private tmux session, opens the independent widget

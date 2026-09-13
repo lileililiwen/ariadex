@@ -37,6 +37,7 @@ class FirstRunWizardTest(unittest.TestCase):
 
     def test_blank_answers_store_program_defaults(self):
         self.assertEqual(cli.cmd_init(self.root, read_answer=scripted("", "", "")), 0)
+
         cfg = config.load(self.root)
         self.assertEqual(cfg.agent_provider, "opencode")
         self.assertEqual(cfg.first_prompt, config.DEFAULT_MANAGED_PROMPT)
@@ -138,6 +139,25 @@ class RepeatedInitTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.assertEqual(cli.cmd_init(self.root, read_answer=scripted("", "", "")), 0)
+
+    def test_reinit_migrates_missing_prompt_keys(self):
+        path = self.root / config.CONFIG_REL_PATH
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            "\n".join(
+                line
+                for line in text.splitlines()
+                if not line.startswith(("first_prompt:", "continuation_prompt:"))
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        code, _, err = run_cli(self.root, "init")
+        self.assertNotEqual(code, 0)
+        self.assertIn("init --force", err)
+        migrated = path.read_text(encoding="utf-8")
+        self.assertIn("first_prompt:", migrated)
+        self.assertIn("continuation_prompt:", migrated)
 
     def test_plain_reinit_refuses_without_changing_state(self):
         before_cfg = (self.root / config.CONFIG_REL_PATH).read_text(encoding="utf-8")
