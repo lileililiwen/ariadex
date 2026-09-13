@@ -33,6 +33,11 @@ POLL_INTERVAL_S = 2.0
 WIDGET_WIDTH = 360
 WIDGET_COLLAPSED_HEIGHT = 116
 WIDGET_EXPANDED_HEIGHT = 320
+WIDGET_EXPANDED_WINDOW_HEIGHT = 340
+
+#: Safety margin in pixels keeping the floating widget inside the usable
+#: virtual-screen bounds (title bar and close control stay reachable).
+WIDGET_SCREEN_MARGIN = 8
 
 #: Bounded robot activity lines rendered in the expanded widget log.
 ROBOT_LOG_VIEW_LINES = 20
@@ -897,6 +902,123 @@ def default_geometry(screen_width: int, screen_height: int) -> tuple[int, int]:
     return x, y
 
 
+def virtual_screen_bounds(root: object) -> tuple[int, int, int, int]:
+    """Usable virtual-screen bounds as (origin_x, origin_y, width, height).
+
+    Uses Tk's virtual-root geometry so negative multi-monitor origins are
+    supported. Falls back to the primary screen size with a zero origin.
+    Never raises: geometry failures stay fail-soft for the caller.
+    """
+    try:
+        width_fn = getattr(root, "winfo_screenwidth", None)
+        height_fn = getattr(root, "winfo_screenheight", None)
+        width = int(width_fn()) if callable(width_fn) else 0
+        height = int(height_fn()) if callable(height_fn) else 0
+        origin_x = 0
+        origin_y = 0
+        for attr, fallback in (
+            ("winfo_vrootx", 0),
+            ("winfo_vrooty", 0),
+            ("winfo_vrootwidth", width),
+            ("winfo_vrootheight", height),
+        ):
+            getter = getattr(root, attr, None)
+            if not callable(getter):
+                if attr == "winfo_vrootwidth":
+                    width = int(width)
+                elif attr == "winfo_vrootheight":
+                    height = int(height)
+                continue
+            try:
+                value = int(getter())
+            except Exception:
+                value = int(fallback)
+            if attr == "winfo_vrootx":
+                origin_x = value
+            elif attr == "winfo_vrooty":
+                origin_y = value
+            elif attr == "winfo_vrootwidth":
+                width = value
+            else:
+                height = value
+        if width <= 0 or height <= 0:
+            raise ValueError("unusable screen bounds")
+        return origin_x, origin_y, width, height
+    except Exception:
+        try:
+            width = int(root.winfo_screenwidth())  # type: ignore[attr-defined]
+            height = int(root.winfo_screenheight())  # type: ignore[attr-defined]
+        except Exception:
+            width, height = 0, 0
+        return 0, 0, max(0, width), max(0, height)
+
+
+def clamp_widget_position(
+    x: int,
+    y: int,
+    widget_width: int,
+    widget_height: int,
+    origin_x: int,
+    origin_y: int,
+    screen_width: int,
+    screen_height: int,
+    margin: int = WIDGET_SCREEN_MARGIN,
+) -> tuple[int, int]:
+    """Clamp a widget top-left corner inside the usable screen rectangle.
+
+    Pure helper (no Tk access) covering negative origins and small screens.
+    When the screen is smaller than the widget plus margins, the position
+    clamps to the screen origin so the title bar and close control stay
+    reachable instead of stranding the dialog off-screen.
+    """
+    try:
+        x = int(x)
+    except (TypeError, ValueError):
+        x = int(origin_x)
+    try:
+        y = int(y)
+    except (TypeError, ValueError):
+        y = int(origin_y)
+    try:
+        margin = max(0, int(margin))
+    except (TypeError, ValueError):
+        margin = WIDGET_SCREEN_MARGIN
+    widget_width = max(1, int(widget_width))
+    widget_height = max(1, int(widget_height))
+    min_x = int(origin_x) + margin
+    min_y = int(origin_y) + margin
+    max_x = int(origin_x) + int(screen_width) - widget_width - margin
+    max_y = int(origin_y) + int(screen_height) - widget_height - margin
+    if max_x < min_x or max_y < min_y:
+        return int(origin_x), int(origin_y)
+    return max(min_x, min(max_x, x)), max(min_y, min(max_y, y))
+
+
+def clamp_to_screen(
+    root: object, x: int, y: int, widget_width: int, widget_height: int
+) -> tuple[int, int]:
+    """Clamp (x, y) to the root's virtual-screen bounds; fail-soft."""
+    try:
+        origin_x, origin_y, screen_width, screen_height = virtual_screen_bounds(root)
+        if screen_width <= 0 or screen_height <= 0:
+            return int(x), int(y)
+        return clamp_widget_position(
+            x,
+            y,
+            widget_width,
+            widget_height,
+            origin_x,
+            origin_y,
+            screen_width,
+            screen_height,
+        )
+    except Exception:
+        try:
+            return int(x), int(y)
+        except (TypeError, ValueError):
+            return 0, 0
+
+
 def open_editor(project_dir: Path, editor: str | None = None) -> str:
     """Open the configured editor on the project (no daemon involvement).
 
@@ -975,14 +1097,24 @@ class CompanionWindow:
         root.overrideredirect(True)
         root.attributes("-topmost", True)
         root.geometry(f"{WIDGET_WIDTH}x{WIDGET_COLLAPSED_HEIGHT}")
+        restored: tuple[int, int] | None
         try:
-            position = self._restored_geometry(root)
+            restored = self._restored_geometry(root)
         except Exception:
-            position = None
-        if position is None:
+            restored = None
+        if restored is None:
             position = default_geometry(
                 root.winfo_screenwidth(), root.winfo_screenheight()
             )
+        else:
+            position = restored
+        clamped = clamp_to_screen(
+            root, position[0], position[1], WIDGET_WIDTH, WIDGET_COLLAPSED_HEIGHT
+        )
+        if restored is not None and clamped != (int(restored[0]), int(restored[1])):
+            with contextlib.suppress(Exception):
+                save_user_config({"x": int(clamped[0]), "y": int(clamped[1])})
+        position = clamped
         root.geometry(f"+{position[0]}+{position[1]}")
 
         self.frame = tk.Frame(
@@ -1205,12 +1337,20 @@ class CompanionWindow:
         origin_y = self.root.winfo_y()  # type: ignore[attr-defined]
         self._drag_origin = (int(x) - int(origin_x), int(y) - int(origin_y))
 
+    def _active_window_height(self) -> int:
+        if self.expanded:
+            return WIDGET_EXPANDED_WINDOW_HEIGHT
+        return WIDGET_COLLAPSED_HEIGHT
+
     def _drag_move(self, event: object) -> None:
         if self._drag_origin is None:
             return
         x = int(getattr(event, "x_root", 0)) - self._drag_origin[0]
         y = int(getattr(event, "y_root", 0)) - self._drag_origin[1]
-        self.root.geometry(f"+{x}+{y}")  # type: ignore[attr-defined]
+        clamped = clamp_to_screen(
+            self.root, x, y, WIDGET_WIDTH, self._active_window_height()
+        )
+        self.root.geometry(f"+{clamped[0]}+{clamped[1]}")  # type: ignore[attr-defined]
 
     def _drag_stop(self, _event: object) -> None:
         self._drag_origin = None
@@ -1221,12 +1361,18 @@ class CompanionWindow:
 
     def _persist_geometry(self) -> None:
         self._save_after = None
-        save_user_config(
-            {
-                "x": int(self.root.winfo_x()),  # type: ignore[attr-defined]
-                "y": int(self.root.winfo_y()),  # type: ignore[attr-defined]
-            }
+        try:
+            raw_x = int(self.root.winfo_x())  # type: ignore[attr-defined]
+            raw_y = int(self.root.winfo_y())  # type: ignore[attr-defined]
+        except Exception:
+            return
+        clamped = clamp_to_screen(
+            self.root, raw_x, raw_y, WIDGET_WIDTH, self._active_window_height()
         )
+        if (clamped[0], clamped[1]) != (raw_x, raw_y):
+            with contextlib.suppress(Exception):
+                self.root.geometry(f"+{clamped[0]}+{clamped[1]}")  # type: ignore[attr-defined]
+        save_user_config({"x": int(clamped[0]), "y": int(clamped[1])})
 
     # -- hotkey --------------------------------------------------------
     def _register_hotkey(self) -> None:
@@ -1368,15 +1514,25 @@ class CompanionWindow:
 
     def _toggle_expanded(self) -> None:
         self.expanded = not self.expanded
+        height = (
+            WIDGET_EXPANDED_WINDOW_HEIGHT if self.expanded else WIDGET_COLLAPSED_HEIGHT
+        )
         if self.expanded:
             self.details.pack(fill="x")
             self.toggle_button.configure(text="▴")
-            self.root.geometry(f"{WIDGET_WIDTH}x340")  # type: ignore[attr-defined]
         else:
             self.details.pack_forget()
             self.toggle_button.configure(text="▾")
+        try:
+            raw_x = int(self.root.winfo_x())  # type: ignore[attr-defined]
+            raw_y = int(self.root.winfo_y())  # type: ignore[attr-defined]
+        except Exception:
+            self.root.geometry(f"{WIDGET_WIDTH}x{height}")  # type: ignore[attr-defined]
+            return
+        clamped = clamp_to_screen(self.root, raw_x, raw_y, WIDGET_WIDTH, height)
+        with contextlib.suppress(Exception):
             self.root.geometry(  # type: ignore[attr-defined]
-                f"{WIDGET_WIDTH}x{WIDGET_COLLAPSED_HEIGHT}"
+                f"{WIDGET_WIDTH}x{height}+{clamped[0]}+{clamped[1]}"
             )
 
     def _render_context_log(self, model: dict) -> None:
@@ -1634,6 +1790,9 @@ class RobotWindow:
         root.attributes("-topmost", True)
         root.geometry(f"{WIDGET_WIDTH}x{WIDGET_COLLAPSED_HEIGHT}")
         position = default_geometry(root.winfo_screenwidth(), root.winfo_screenheight())
+        position = clamp_to_screen(
+            root, position[0], position[1], WIDGET_WIDTH, WIDGET_COLLAPSED_HEIGHT
+        )
         root.geometry(f"+{position[0]}+{position[1]}")
 
         self.frame = tk.Frame(
@@ -1744,7 +1903,16 @@ class RobotWindow:
             height = (
                 WIDGET_EXPANDED_HEIGHT if self.expanded else WIDGET_COLLAPSED_HEIGHT
             )
-            self.root.geometry(f"{WIDGET_WIDTH}x{height}")  # type: ignore[attr-defined]
+            try:
+                raw_x = int(self.root.winfo_x())  # type: ignore[attr-defined]
+                raw_y = int(self.root.winfo_y())  # type: ignore[attr-defined]
+            except Exception:
+                self.root.geometry(f"{WIDGET_WIDTH}x{height}")  # type: ignore[attr-defined]
+            else:
+                clamped = clamp_to_screen(self.root, raw_x, raw_y, WIDGET_WIDTH, height)
+                self.root.geometry(  # type: ignore[attr-defined]
+                    f"{WIDGET_WIDTH}x{height}+{clamped[0]}+{clamped[1]}"
+                )
         self._render()
 
     def _on_pause(self) -> None:

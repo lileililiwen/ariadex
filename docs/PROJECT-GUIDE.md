@@ -166,6 +166,16 @@ The widget’s Play/Pause/Stop controls are the normal lifecycle controls. The
 provider terminal’s Ctrl+C stops the managed provider; the daemon observes the
 exit and reconciles the widget and durable state.
 
+Widget placement stays bounded and reachable: initial placement, restored
+coordinates, title-bar dragging, and expanded/collapsed size changes are
+clamped to the usable virtual-screen bounds with a small margin, using Tk's
+virtual-screen geometry so negative multi-monitor origins work. An off-screen
+saved position is corrected before display and the corrected coordinates are
+persisted. When the screen is smaller than the widget, the dialog clamps to
+the screen origin so the title bar and close control stay reachable.
+Geometry failures stay fail-soft and never stop daemon polling or provider
+supervision. Dragging remains available only from the title bar.
+
 ## Robot supervisor
 
 `ariadex start` is the normal path and owns the session, prompts, widget,
@@ -261,7 +271,10 @@ Behavior:
 - The robot widget is minimal: fixed middle-right, provider/session
   identity plus robot state and the latest Ariadex activity event, Pause
   (no new input, session keeps running), and Quit (watcher exits, session
-  left attachable). A Show log/Hide log toggle expands a bounded read-only
+  left attachable). Initial placement and log expand/collapse are clamped
+  to the usable virtual-screen bounds with the same small margin, so the
+  dialog and its controls stay reachable on multi-monitor and small
+  screens. A Show log/Hide log toggle expands a bounded read-only
   activity log (boundary decisions, prompt selection, readiness, waiting,
   pause, and error events; never raw provider transcripts or secrets)
   without moving the window or taking focus from the provider editor.
