@@ -2,15 +2,38 @@
 
 ## Current state
 
-- Planning queue contains three new changes. Implement
-  `version-aware-upgrade-management` first, then
-  `safe-temporary-permission-policy`, then
-  `bounded-widget-screen-placement`; all are planning-only and must be
-  implemented one active change at a time. The upgrade change addresses the
-  installed PyPI `0.1.0` lag and safe provenance-aware updates. The permission
+- Planning queue contains two new changes. Implement
+  `safe-temporary-permission-policy` first, then
+  `bounded-widget-screen-placement`; both are planning-only and must be
+  implemented one active change at a time. The permission
   change covers the deferred private-temp approval policy; it does not grant
   arbitrary shared `/tmp` access. The widget placement change keeps the
   borderless dialog fully visible and its close control reachable.
+- Implemented, verified, and archived:
+  `2026-09-13-version-aware-upgrade-management` (commit `d817274`). New
+  `src/ariadex/upgrade.py` (stdlib only): bounded read-only index probe
+  (`current`/`update-available`/`ahead`/`unavailable`/`invalid`; installed
+  package never touched on probe failure), installation-provenance
+  detection (`pipx`/`pip`/`editable`/`source`/`unknown` via direct_url
+  metadata and path markers), owner-tool plans from fixed argv only
+  (`pipx upgrade ariadex`, exact `pip install --upgrade ariadex==<version>`;
+  never shell text from metadata), explicit confirmation before mutation,
+  and running-versus-installed drift snapshots. `cli.py` gains `ariadex
+  upgrade [--check] [--yes] [--index-url] [--timeout] [--json]` (hidden
+  from the normal help surface like other advanced commands, reachable via
+  `admin upgrade`; `--check` changes nothing; `--yes` confirms
+  non-interactively; editable/source checkouts are refused with the
+  checkout path and explicit update action). Status and diagnostics carry
+  the drift: `status.py` package lines, daemon view plus
+  `format_status_text`, `status --json` keys, and a non-required offline
+  `upgrade` doctor check. Docs gained the PROJECT-GUIDE "Upgrading
+  Ariadex" section. Verified with 1093 tests (39 new in
+  `tests/test_upgrade.py`: probe states, provenance matrix, safe plans,
+  confirmation gating, daemon non-interruption, drift rendering, index-URL
+  release alignment), Ruff check/format, mypy (33 files), coverage 86%
+  (floors pass), `git diff --check`, strict validation (47 canonical
+  specs, 2 active changes), and a live `upgrade --check` against the real
+  PyPI index reporting `current` for installed `0.1.0`.
 - Implemented, verified, and archived:
   `2026-09-13-boundary-diagnostic-evidence` (commit `96dc8fe`). Every
   provider stop, boundary evaluation, failed new-conversation operation,
@@ -262,9 +285,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Implement `version-aware-upgrade-management` first. After it is archived,
-implement `safe-temporary-permission-policy`, then
-`bounded-widget-screen-placement`.
+Implement `safe-temporary-permission-policy`. After it is archived,
+implement `bounded-widget-screen-placement`.
 
 ## Latest verification evidence
 
