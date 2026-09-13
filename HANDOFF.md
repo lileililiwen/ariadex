@@ -5,6 +5,17 @@
 - Planning queue is empty: both diagnostics follow-ups are implemented,
   verified, and archived. No active changes remain.
 - Implemented, verified, and archived:
+  `2026-09-13-allow-dirty-task-recovery` (commit `7f6a78e`). A conversation
+  with valid unfinished tasks can now recover even when the agent has
+  uncommitted files; Ariadex evaluates OpenSpec first and sends the
+  confirmation prompt instead of dead-blocking at the Git cleanliness gate.
+  Completion and next-spec advancement still require a clean tree. The
+  managed widget retains the latest 20 diagnostic events and boundary events
+  now include the decision, recorded current spec, authoritative active queue,
+  OpenSpec task count, evidence source, and exact next action. Verified with
+  1026 tests, Ruff check/format, mypy, `git diff --check`, and strict
+  validation of all 47 canonical specs.
+- Implemented, verified, and archived:
   `2026-09-13-max-step-recovery-and-visible-copy-control` (commit `2a4bcd5`).
   The managed widget now exposes `Copy log` in its always-visible collapsed
   controls, so a stalled run can be copied without navigating the expanded
