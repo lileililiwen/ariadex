@@ -1610,7 +1610,19 @@ def _build_managed_watcher(project_dir, cfg, driver, adapter, session, resolved)
             handoff_file=cfg.handoff_file,
         )
     )
-    return robot_mod.RobotWatcher(project_dir, robot_config, driver, adapter)
+    return robot_mod.RobotWatcher(
+        project_dir,
+        robot_config,
+        driver,
+        adapter,
+        shutdown_requested=lambda: _managed_shutdown_requested(project_dir),
+    )
+
+
+def _managed_shutdown_requested(project_dir: Path) -> bool:
+    """Return whether the widget/admin requested managed teardown."""
+    record = daemon_mod.read_record(project_dir)
+    return record is not None and record.status in ("stopping", "stopped")
 
 
 def _shutdown_managed_session(
@@ -1768,6 +1780,17 @@ def run_managed_start(
             watcher.request_quit()
         supervisor.join(timeout=30)
     finished = outcome.get("report")
+    if (
+        finished is not None
+        and finished.outcome == robot_mod.STOPPED
+        and not interrupted
+        and _managed_shutdown_requested(project_dir)
+    ):
+        print("shutdown requested: stopping managed provider workflow")
+        _shutdown_managed_session(
+            project_dir, adapter, session, widget_proc, "operator shutdown"
+        )
+        return EXIT_OK
     if finished is not None and finished.outcome == "done":
         print("complete: no active specs remain; stopping managed workflow")
         _shutdown_managed_session(
@@ -1829,6 +1852,21 @@ def cmd_start(
     if resolved is None:
         return EXIT_ERROR
     provider, first, continuation = resolved
+    if st.mode == "MANUAL":
+        try:
+            _, report = resync_mod.resync(project_dir, cfg)
+            st.mode = control_mod.transition(st.mode, "AUTO", via="auto")
+            state_mod.write(project_dir, st)
+        except (
+            handoff_mod.HandoffError,
+            control_mod.TransitionError,
+            state_mod.StateError,
+        ) as exc:
+            print(f"error: start resynchronization refused: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        if not as_json:
+            print(f"resync: next action: {report.next_action}")
+            print("mode: AUTO (start resumed scheduling)")
     if _live_owner(project_dir, as_json):
         return _repair_live_runtime(project_dir, cfg, st, as_json)
     try:

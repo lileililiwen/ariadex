@@ -321,11 +321,13 @@ class RobotWatcher:
         config: RobotConfig,
         driver: TerminalDriver,
         adapter: AgentAdapter,
+        shutdown_requested: Callable[[], bool] | None = None,
     ) -> None:
         self.project_dir = project_dir
         self.config = validate_config(config)
         self.driver = driver
         self.adapter = adapter
+        self.shutdown_requested = shutdown_requested
         self.phase = ATTACHED
         self.stable_polls = 0
         # Empty initial prompt means attach to the current conversation and
@@ -515,6 +517,10 @@ class RobotWatcher:
                     ),
                     prompts_sent=self.prompts_sent,
                 )
+            if self.shutdown_requested is not None and self.shutdown_requested():
+                self.request_quit()
+                self.block_reason = "managed shutdown requested"
+                continue
             if self.phase in (DONE, BLOCKED):
                 outcome = "done" if self.phase == DONE else BLOCKED
                 detail = self.block_reason or self._done_detail()

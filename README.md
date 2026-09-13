@@ -240,8 +240,9 @@ Pause workflow: press the global hotkey (default `Ctrl+Esc`) while the agent
 works — the daemon enters `PAUSE` at the safe cancellation boundary. Edit
 freely, then press Play: the daemon resynchronizes handoff, git, specs, queue,
 lease, and session state, returns to `AUTO`, and continues provider work.
-The top-right close button stops the daemon and exits Ariadex. The Stop action
-in the expanded controls remains separately confirmation-gated.
+The top-right close button requests a full managed shutdown: the provider
+session, daemon, and widget exit together while durable work is preserved. The
+Stop action in the expanded controls remains separately confirmation-gated.
 
 Configuration is per user in `$XDG_CONFIG_HOME/ariadex/companion.json`
 (`~/.config/ariadex/companion.json` by default): `hotkey` (e.g. `Alt+F9`)

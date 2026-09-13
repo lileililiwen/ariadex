@@ -89,9 +89,10 @@ bounded runner cycle. That cycle may connect to or start the configured tmux
 session, send provider input, capture the result, run verification commands,
 and persist the outcome. The daemon itself remains provider-neutral.
 
-The daemon exits cleanly after the widget close button or a
-terminal stop request. Stop is graceful: an already-running bounded cycle is
-allowed to reach its safe cancellation boundary before the daemon exits.
+The managed workflow exits cleanly after the widget close button or a terminal
+stop request. Stop is graceful: an already-running bounded cycle is allowed to
+reach its safe cancellation boundary, then Ariadex terminates the managed
+provider session, widget, and daemon together. Durable work is preserved.
 
 The normal lifecycle is intentionally small:
 

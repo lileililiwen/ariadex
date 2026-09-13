@@ -373,6 +373,27 @@ class ReconcileTest(unittest.TestCase):
         self.assertIn("adapter.terminate", harness.calls)
         self.assertIn("widget.terminate", harness.calls)
 
+    def test_daemon_stop_request_tears_down_managed_provider(self):
+        harness = Harness(self.root, watcher_outcome="stopped")
+        record = cli.daemon_mod.DaemonRecord(
+            pid=123,
+            started_at="now",
+            status="stopping",
+            session_id=state.read(self.root).session_id,
+        )
+        out = io.StringIO()
+        with (
+            redirect_stdout(out),
+            mock.patch.object(cli.daemon_mod, "read_record", return_value=record),
+            mock.patch.object(
+                cli.daemon_mod, "send_request", return_value={"ok": True}
+            ),
+        ):
+            code = harness.run()
+        self.assertEqual(code, 0)
+        self.assertIn("adapter.terminate", harness.calls)
+        self.assertIn("widget.terminate", harness.calls)
+
     def test_detach_leaves_workflow_running(self):
         harness = Harness(self.root, watcher_outcome="max-polls")
         out = io.StringIO()

@@ -56,9 +56,16 @@ def make_watcher(
         "debounce_polls": 2,
         "poll_interval_s": 0.01,
     }
+    shutdown_requested = overrides.pop("shutdown_requested", None)
     params.update(overrides)
     config = robot_mod.RobotConfig(**params)
-    return robot_mod.RobotWatcher(project, config, driver, adapter)
+    return robot_mod.RobotWatcher(
+        project,
+        config,
+        driver,
+        adapter,
+        shutdown_requested=shutdown_requested,
+    )
 
 
 class ClassifyTest(unittest.TestCase):
@@ -413,6 +420,27 @@ class WatcherStateTest(unittest.TestCase):
         self.assertEqual(report.outcome, "stopped")
         self.assertEqual(driver.terminated(), [])
         self.assertIn("agent", driver.sessions)
+
+    def test_managed_shutdown_callback_stops_watcher(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": BUSY,
+            "workdir": "/t",
+        }
+        watcher = make_watcher(
+            project,
+            driver,
+            debounce_polls=1,
+            shutdown_requested=lambda: True,
+        )
+
+        report = watcher.run(sleep=lambda _: None)
+
+        self.assertEqual(report.outcome, robot_mod.STOPPED)
+        self.assertIn("shutdown", report.detail)
+        self.assertEqual(driver.sent_inputs("agent"), [])
 
     def test_status_view_reports_robot_state(self) -> None:
         project = make_project(self._tmp)

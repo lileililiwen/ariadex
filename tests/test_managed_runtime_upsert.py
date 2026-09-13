@@ -112,3 +112,15 @@ class ManagedStartRepairTests(unittest.TestCase):
             self.assertNotIn(f"  {command}", text)
         self.assertIn("  init", text)
         self.assertIn("  start", text)
+
+    def test_start_normalizes_legacy_manual_mode_to_auto(self):
+        st = state.read(self.root)
+        st.mode = "MANUAL"
+        state.write(self.root, st)
+        with (
+            mock.patch.object(cli, "_repair_live_runtime", return_value=cli.EXIT_OK),
+            mock.patch.object(cli, "_live_owner", return_value=True),
+        ):
+            code = cli.cmd_start(self.root)
+        self.assertEqual(code, cli.EXIT_OK)
+        self.assertEqual(state.read(self.root).mode, "AUTO")
