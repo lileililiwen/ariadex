@@ -235,6 +235,20 @@ class PromptSelectionTest(unittest.TestCase):
             any("confirmation" in entry["message"] for entry in view["activity"])
         )
 
+    def test_dirty_partial_work_still_sends_confirmation(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open it\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        watcher = make_watcher(project, driver)
+        with unittest.mock.patch.object(
+            robot_mod, "_git_tree_clean", return_value=(False, "uncommitted changes")
+        ):
+            watcher.poll()  # initial prompt
+            self.assertEqual(watcher.poll(), "continuing")
+        self.assertEqual(driver.sent_inputs("agent")[-1], "please finish the rest")
+        self.assertEqual(watcher.confirmations_sent, 1)
+
     def test_complete_but_active_tasks_request_archival_confirmation(self) -> None:
         project = make_project(self._tmp)
         make_change(project, "demo", "# Tasks\n\n- [x] Done\n")

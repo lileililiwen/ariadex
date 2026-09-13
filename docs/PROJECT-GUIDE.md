@@ -146,7 +146,9 @@ runtime state directly and does not inject keystrokes into an editor.
   redacted support snapshot on the desktop clipboard via Tk's native
   clipboard (no extra prerequisite). `Copy context` includes the project, provider/session,
   current spec, OpenSpec queue snapshot, boundary decision, and recent
-  events. Success or failure is reported in the widget; copying never sends
+  events. The widget retains the latest bounded diagnostic events so provider
+  waits, boundary decisions, failed new-conversation attempts, and shutdown
+  reasons remain visible. Success or failure is reported in the widget; copying never sends
   provider input and never changes scheduling.
 
 Copy-for-support workflow: when a boundary stalls, expand the widget, read

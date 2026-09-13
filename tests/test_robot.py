@@ -415,10 +415,15 @@ class WatcherStateTest(unittest.TestCase):
         self.assertEqual(watcher.poll(), robot_mod.CONTINUING)
         self.assertEqual(driver.sent_inputs("agent"), ["please start"])
         self.assertTrue(watcher.initial_sent)
-        # The echoed prompt keeps the surface ready; the boundary check
-        # runs (git fails in the fixture) instead of resending.
+        # The echoed prompt keeps the surface ready. Dirty partial work is
+        # now recoverable, so the boundary opens confirmation rather than
+        # dead-blocking on the Git gate.
         watcher.poll()
-        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+        self.assertIn("/new", driver.sent_inputs("agent"))
+        self.assertIn(
+            robot_mod.DEFAULT_ROBOT_CONFIRMATION_PROMPT,
+            driver.sent_inputs("agent"),
+        )
 
     def test_approval_waits_without_input(self) -> None:
         project = make_project(self._tmp)

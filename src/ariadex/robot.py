@@ -628,15 +628,14 @@ def check_boundary(
             decision="blocked",
         )
     clean, reason = _git_tree_clean(project_dir)
-    if not clean:
-        return BoundaryCheck(
-            ok=False,
-            reason=reason,
-            active=sorted(graph),
-            decision="blocked",
-        )
     try:
-        return _openspec_boundary(project_dir, config, handoff, runner)
+        check = _openspec_boundary(project_dir, config, handoff, runner)
+        # Dirty work is expected while an agent is still completing tasks.
+        # Let the confirmation/archival prompt recover that conversation;
+        # retain the clean-tree gate for completion and advancement.
+        if clean or check.decision == "unfinished":
+            return check
+        return dataclasses.replace(check, ok=False, reason=reason)
     except evidence_mod.NotOpenSpecRoot:
         pass
     except evidence_mod.EvidenceBlocked as exc:
@@ -656,7 +655,10 @@ def check_boundary(
     active, _ = spec_graph_mod.discover_active_changes(project_dir / config.spec_dir)
     ordered = sorted(active)
     if not ordered:
-        return BoundaryCheck(ok=True, reason="", active=[], decision="empty")
+        check = BoundaryCheck(ok=True, reason="", active=[], decision="empty")
+        if clean:
+            return check
+        return dataclasses.replace(check, ok=False, reason=reason)
     target = _boundary_target(project_dir, config, handoff)
     task_decision, open_count, task_detail = _task_decision(project_dir, config, target)
     if task_decision == "blocked":
@@ -679,13 +681,16 @@ def check_boundary(
             open_tasks=open_count,
             task_detail=task_detail,
         )
-    return BoundaryCheck(
+    check = BoundaryCheck(
         ok=True,
         reason="",
         active=ordered,
         decision="complete",
         current_spec=target,
     )
+    if clean:
+        return check
+    return dataclasses.replace(check, ok=False, reason=reason)
 
 
 @dataclasses.dataclass
@@ -788,6 +793,8 @@ class RobotWatcher:
                 record = evidence_mod.read_conversation(self.project_dir)
                 if record is not None:
                     conversation_id = record.conversation_id
+                    if current_spec is None:
+                        current_spec = record.current_spec or None
         except Exception:
             conversation_id = ""
         with contextlib.suppress(Exception):
@@ -1175,15 +1182,24 @@ class RobotWatcher:
             return self._send_initial()
         self.phase = VERIFIED_BOUNDARY
         check = check_boundary(self.project_dir, self.config, self.evidence_runner)
+        evidence_detail = (
+            f"decision={check.decision}; current_spec="
+            f"{check.current_spec or '(none)'}; active="
+            f"{','.join(check.active) or '(none)'}; open_tasks={check.open_tasks}; "
+            f"evidence={check.evidence_source}"
+        )
         if not check.ok:
             self.phase = BLOCKED
             self.block_reason = check.reason
-            self._record("boundary", f"blocked: {check.reason}")
+            self._record(
+                "boundary",
+                f"blocked: {check.reason}; {evidence_detail}; next=operator recovery",
+            )
             self._diag(
                 "boundary",
                 "boundary evaluation blocked",
                 result="blocked",
-                message=check.reason,
+                message=f"{check.reason}; {evidence_detail}",
                 current_spec=check.current_spec or None,
                 open_tasks=check.open_tasks,
                 command_role=check.evidence_source,
@@ -1191,7 +1207,10 @@ class RobotWatcher:
             return self.phase
         if not check.active:
             self.phase = DONE
-            self._record("boundary", "no active OpenSpec work remains; stopping")
+            self._record(
+                "boundary",
+                f"{evidence_detail}; next=stop managed workflow",
+            )
             self._diag(
                 "boundary",
                 "no active OpenSpec work remains",
@@ -1201,7 +1220,11 @@ class RobotWatcher:
             )
             return self.phase
         if check.decision == "unfinished":
-            self._record("boundary", check.task_detail or "unfinished tasks remain")
+            self._record(
+                "boundary",
+                f"{check.task_detail or 'unfinished tasks remain'}; "
+                f"{evidence_detail}; next=confirmation conversation",
+            )
             self._diag(
                 "boundary",
                 "unfinished tasks remain; confirmation recovery",
@@ -1215,7 +1238,8 @@ class RobotWatcher:
         if check.decision == "ready-to-archive":
             self._record(
                 "boundary",
-                check.task_detail or "tasks complete; archival needed",
+                f"{check.task_detail or 'tasks complete; archival needed'}; "
+                f"{evidence_detail}; next=archival confirmation",
             )
             self._diag(
                 "boundary",
@@ -1230,7 +1254,7 @@ class RobotWatcher:
         self._record(
             "boundary",
             f"verified boundary for `{check.current_spec or check.active[0]}`; "
-            "opening a new conversation",
+            f"{evidence_detail}; next=continuation conversation",
         )
         self._diag(
             "boundary",

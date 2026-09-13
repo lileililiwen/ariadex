@@ -297,7 +297,7 @@ def send_request(
 
 
 #: Recent diagnostic events exposed to the start widget (IPC-bound sized).
-WIDGET_RECENT_EVENTS = 5
+WIDGET_RECENT_EVENTS = 20
 
 #: Active OpenSpec changes exposed to the start widget (IPC-bound sized).
 WIDGET_QUEUE_CHANGES = 20
