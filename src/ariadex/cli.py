@@ -11,7 +11,9 @@ import argparse
 import contextlib
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from . import companion as companion_mod
 from . import concurrency as concurrency_mod
@@ -2369,6 +2371,7 @@ def cmd_watch(
     create: bool = False,
     widget: bool = False,
     auto_install: bool = True,
+    evidence_runner: Callable[..., Any] | None = None,
 ) -> int:
     """Supervise an existing provider session and continue durable work.
 
@@ -2495,7 +2498,9 @@ def cmd_watch(
     except robot_mod.RobotError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
-    watcher = robot_mod.RobotWatcher(project_dir, robot_config, driver, adapter)
+    watcher = robot_mod.RobotWatcher(
+        project_dir, robot_config, driver, adapter, evidence_runner=evidence_runner
+    )
     print(
         f"watching: {resolved_provider} @ {session} "
         f"(debounce {debounce}, interval {poll_interval}s)"

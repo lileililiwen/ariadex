@@ -1,18 +1,18 @@
 # Tasks
 
-- [ ] Add a bounded no-shell OpenSpec command boundary and JSON models for
+- [x] Add a bounded no-shell OpenSpec command boundary and JSON models for
       `list --json`, `status --change --json`, `spec list --json`, and strict
       spec validation, including missing/timeout/malformed/non-zero results.
-- [ ] Add atomic versioned conversation metadata under `.ariadex/` and
+- [x] Add atomic versioned conversation metadata under `.ariadex/` and
       synchronize the durable current spec before every provider prompt.
-- [ ] Implement OpenSpec-backed queue selection and recorded-spec boundary
+- [x] Implement OpenSpec-backed queue selection and recorded-spec boundary
       decisions for unfinished, complete-active, archived, renamed/deleted,
       empty, and invalid states.
-- [ ] Route first, continuation, and confirmation prompts through the recorded
+- [x] Route first, continuation, and confirmation prompts through the recorded
       conversation target; never infer completion from stale `next_action`.
-- [ ] Add recovery behavior for interrupted boundaries and preserve evidence
+- [x] Add recovery behavior for interrupted boundaries and preserve evidence
       without sending duplicate or unverified provider input.
-- [ ] Add focused tests for command execution, JSON validation, atomic state,
+- [x] Add focused tests for command execution, JSON validation, atomic state,
       current-spec synchronization, archival proof, and all failure branches.
-- [ ] Update lifecycle specs, README, PROJECT-GUIDE, and HANDOFF with the
+- [x] Update lifecycle specs, README, PROJECT-GUIDE, and HANDOFF with the
       OpenSpec evidence contract and run all relevant quality gates.

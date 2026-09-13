@@ -324,7 +324,17 @@ tasks from HANDOFF.md and the active spec's tasks.md, then update the
 handoff.`; override with `--confirmation-prompt`) and repeats bounded
 confirmation attempts until the tasks complete or a real blocker occurs.
 Missing or malformed task metadata stays blocked with the exact reason
-and sends no prompt. Approval requests are a
+and sends no prompt. Before every first, continuation, or confirmation
+prompt, Ariadex records the selected change as a versioned conversation
+in `.ariadex/conversation.json` and synchronizes `HANDOFF.current_spec`,
+so a restart recovers the recorded target instead of inferring one from
+a stale field. Inside an OpenSpec repository the queue and task progress
+come from `openspec list --json`; a recorded change with complete tasks
+that is still active requests archival work instead of advancing, and
+only a change proven archived (archive record, canonical spec presence,
+strict validation) advances to the next spec or stops. Missing tooling,
+malformed output, timeouts, or contradictory evidence block with the
+exact reason and send no prompt. Approval requests are a
 non-terminal waiting state: the watcher keeps polling and sends no input.
 Provider errors pause with the exact reason instead of advancing. When
 no active OpenSpec work remains, the robot stops and reports completion
@@ -467,6 +477,9 @@ durable state:
   `.ariadex/config.yaml`.
 - `.ariadex/state.json` — mode (`AUTO`/`MANUAL`/`PAUSE`), session,
   unresolved count.
+- `.ariadex/conversation.json` — versioned record of the conversation a
+  provider prompt was sent into (conversation id, role, current spec,
+  queue snapshot); written before every prompt, read back on recovery.
 - `.ariadex/runs/` and `.ariadex/metrics.jsonl` — per-cycle logs and
   metrics. Unavailable token usage is recorded as `usage: unavailable`,
   never estimated.

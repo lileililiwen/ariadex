@@ -24,8 +24,10 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from . import handoff as handoff_mod
+from . import openspec_evidence as evidence_mod
 from . import spec_graph as spec_graph_mod
 from .adapters import AgentAdapter, UnsupportedOperation
 from .config import DEFAULT_CONFIRMATION_PROMPT
@@ -281,10 +283,14 @@ class BoundaryCheck:
     `decision` distinguishes the task-aware result without changing the
     historical `ok` contract: `complete` (tasks done, work remains),
     `unfinished` (valid open tasks, recoverable via confirmation),
+    `ready-to-archive` (all tasks complete but the recorded change is
+    still active: archive and validate instead of advancing),
     `empty` (no active specs remain), and `blocked` (hard failure, no
     prompt). `current_spec` names the task target; `open_tasks` counts
     its unchecked markers; `task_detail` carries the operator-readable
-    unfinished/invalid task description.
+    unfinished/invalid task description. `evidence_source` names the
+    queue authority (`openspec` for OpenSpec JSON, `internal` for the
+    legacy discovery fallback outside an OpenSpec repository).
     """
 
     ok: bool = False
@@ -294,6 +300,7 @@ class BoundaryCheck:
     current_spec: str = ""
     open_tasks: int = 0
     task_detail: str = ""
+    evidence_source: str = "internal"
 
 
 def _boundary_target(
@@ -349,17 +356,230 @@ def _task_decision(
     )
 
 
+def _read_recorded_conversation(
+    project_dir: Path,
+) -> evidence_mod.ConversationRecord | None:
+    """Crash-recovery read of the conversation record.
+
+    Raises ``EvidenceBlocked`` when the record exists but is malformed;
+    the boundary then stays blocked instead of silently falling back to
+    a stale handoff field.
+    """
+    try:
+        return evidence_mod.read_conversation(project_dir)
+    except evidence_mod.ConversationError as exc:
+        raise evidence_mod.EvidenceBlocked(
+            f"conversation record unreadable: {exc}; "
+            "verify `.ariadex/conversation.json` before continuing"
+        ) from exc
+
+
+def _recorded_target(
+    project_dir: Path, config: RobotConfig, handoff: handoff_mod.Handoff
+) -> str:
+    """Resolve the recorded change without inferring from `next_action`.
+
+    Preference is the explicit `--finished-change` override, then the
+    durable conversation record, then `HANDOFF.current_spec`. A stale
+    `next_action` is never a target: it describes intent, not evidence.
+    """
+    override = (config.finished_change or "").strip()
+    if override:
+        return override
+    record = _read_recorded_conversation(project_dir)
+    if record is not None and record.current_spec.strip():
+        return record.current_spec.strip()
+    return (handoff.current_spec or "").strip()
+
+
+def _preferred_target(candidates: list[str], handoff_target: str) -> str:
+    """First prompt target: keep the durable target when still eligible."""
+    if handoff_target and handoff_target in candidates:
+        return handoff_target
+    return candidates[0]
+
+
+def select_first_target(
+    project_dir: Path,
+    config: RobotConfig,
+    handoff: handoff_mod.Handoff,
+    runner: Callable[..., object] | None = None,
+) -> tuple[str, list[str]]:
+    """Select the first-conversation target from authoritative evidence.
+
+    Returns `(target, queue)`. An empty queue returns `("", [])` so the
+    caller stops without a prompt. Raises ``EvidenceBlocked`` when
+    OpenSpec evidence is unavailable or contradictory and
+    ``NotOpenSpecRoot`` outside an OpenSpec repository (caller falls
+    back to internal discovery).
+    """
+    override = (config.finished_change or "").strip()
+    changes = evidence_mod.query_changes(project_dir, runner=runner)
+    if not changes.order:
+        return "", []
+    if override:
+        if override not in changes.entries:
+            raise evidence_mod.EvidenceBlocked(
+                f"requested change `{override}` is not in the active "
+                "OpenSpec queue; verify the change name before continuing"
+            )
+        return override, changes.order
+    handoff_target = (handoff.current_spec or "").strip()
+    record = _read_recorded_conversation(project_dir)
+    recorded = record.current_spec.strip() if record is not None else ""
+    preferred = recorded or handoff_target
+    if preferred and preferred in changes.entries:
+        return preferred, changes.order
+    return changes.order[0], changes.order
+
+
+def _openspec_boundary(
+    project_dir: Path,
+    config: RobotConfig,
+    handoff: handoff_mod.Handoff,
+    runner: Callable[..., object] | None = None,
+) -> BoundaryCheck:
+    """Evaluate the recorded change against OpenSpec JSON evidence.
+
+    Raises ``NotOpenSpecRoot`` outside an OpenSpec repository so the
+    caller keeps the legacy internal discovery. Every other evidence
+    failure raises ``EvidenceBlocked`` with the exact reason.
+    """
+    changes = evidence_mod.query_changes(project_dir, runner=runner)
+    ordered = changes.order
+    target = _recorded_target(project_dir, config, handoff)
+    if not ordered:
+        if not target:
+            return BoundaryCheck(
+                ok=True,
+                reason="",
+                active=[],
+                decision="empty",
+                evidence_source="openspec",
+            )
+        spec_ids = evidence_mod.query_spec_ids(project_dir, runner=runner)
+        evidence_mod.check_specs_valid(project_dir, runner=runner)
+        detail = evidence_mod.check_archive_proof(
+            project_dir, config.spec_dir, target, spec_ids
+        )
+        return BoundaryCheck(
+            ok=True,
+            reason="",
+            active=[],
+            decision="empty",
+            current_spec=target,
+            task_detail=detail,
+            evidence_source="openspec",
+        )
+    if not target:
+        return BoundaryCheck(
+            ok=True,
+            reason="",
+            active=ordered,
+            decision="complete",
+            current_spec="",
+            evidence_source="openspec",
+        )
+    progress = changes.entries.get(target)
+    if progress is None:
+        status = evidence_mod.query_change_status(project_dir, target, runner=runner)
+        if status.found:
+            raise evidence_mod.EvidenceBlocked(
+                f"recorded change `{target}` is reported present but is "
+                "absent from the active OpenSpec queue; evidence is "
+                "contradictory — no completion claimed"
+            )
+        spec_ids = evidence_mod.query_spec_ids(project_dir, runner=runner)
+        evidence_mod.check_specs_valid(project_dir, runner=runner)
+        detail = evidence_mod.check_archive_proof(
+            project_dir, config.spec_dir, target, spec_ids
+        )
+        return BoundaryCheck(
+            ok=True,
+            reason="",
+            active=ordered,
+            decision="complete",
+            current_spec="",
+            task_detail=detail,
+            evidence_source="openspec",
+        )
+    task_decision, open_count, task_detail = _task_decision(project_dir, config, target)
+    if progress.open_tasks:
+        if task_decision == "complete":
+            raise evidence_mod.EvidenceBlocked(
+                f"recorded change `{target}` reports "
+                f"{progress.open_tasks} open task(s) in OpenSpec JSON but "
+                "its tasks.md shows none; evidence is contradictory — "
+                "no completion claimed"
+            )
+        if task_decision == "blocked":
+            return BoundaryCheck(
+                ok=False,
+                reason=task_detail,
+                active=ordered,
+                decision="blocked",
+                current_spec=target,
+                open_tasks=progress.open_tasks,
+                task_detail=task_detail,
+                evidence_source="openspec",
+            )
+        return BoundaryCheck(
+            ok=True,
+            reason="",
+            active=ordered,
+            decision="unfinished",
+            current_spec=target,
+            open_tasks=open_count,
+            task_detail=task_detail,
+            evidence_source="openspec",
+        )
+    if task_decision != "complete":
+        detail = task_detail or (
+            f"`{target}` reports complete tasks in OpenSpec JSON but "
+            "its tasks.md disagrees; evidence is contradictory"
+        )
+        return BoundaryCheck(
+            ok=False,
+            reason=detail,
+            active=ordered,
+            decision="blocked",
+            current_spec=target,
+            open_tasks=0,
+            task_detail=detail,
+            evidence_source="openspec",
+        )
+    return BoundaryCheck(
+        ok=True,
+        reason="",
+        active=ordered,
+        decision="ready-to-archive",
+        current_spec=target,
+        task_detail=(
+            f"`{target}` has all {progress.total} task(s) complete but is "
+            "still active; archive the change and run strict validation "
+            "before advancing"
+        ),
+        evidence_source="openspec",
+    )
+
+
 def check_boundary(
     project_dir: Path,
     config: RobotConfig,
+    runner: Callable[..., object] | None = None,
 ) -> BoundaryCheck:
     """Inspect HANDOFF.md, git, tasks, and the active OpenSpec list.
 
+    OpenSpec JSON evidence controls the decision inside an OpenSpec
+    repository; outside one the legacy internal discovery applies.
     Returns ok only when the previous conversation's work is represented
     durably. An empty active list is ok with no remaining work: the
     caller stops instead of sending a continuation prompt. Valid open
     tasks stay ok but carry the `unfinished` decision so the caller sends
-    the confirmation prompt instead of claiming completion.
+    the confirmation prompt instead of claiming completion. A recorded
+    change with complete tasks that is still active carries the
+    `ready-to-archive` decision so the caller requests archival work
+    instead of advancing.
     """
     handoff_path = project_dir / config.handoff_file
     if not handoff_path.is_file():
@@ -397,6 +617,24 @@ def check_boundary(
             reason=reason,
             active=sorted(graph),
             decision="blocked",
+        )
+    try:
+        return _openspec_boundary(project_dir, config, handoff, runner)
+    except evidence_mod.NotOpenSpecRoot:
+        pass
+    except evidence_mod.EvidenceBlocked as exc:
+        try:
+            blocked_target = _recorded_target(project_dir, config, handoff)
+        except evidence_mod.EvidenceBlocked:
+            blocked_target = ""
+        return BoundaryCheck(
+            ok=False,
+            reason=str(exc),
+            active=sorted(graph),
+            decision="blocked",
+            current_spec=blocked_target,
+            task_detail=str(exc),
+            evidence_source="openspec",
         )
     active, _ = spec_graph_mod.discover_active_changes(project_dir / config.spec_dir)
     ordered = sorted(active)
@@ -464,6 +702,7 @@ class RobotWatcher:
         adapter: AgentAdapter,
         shutdown_requested: Callable[[], bool] | None = None,
         mode_requested: Callable[[], str] | None = None,
+        evidence_runner: Callable[..., Any] | None = None,
     ) -> None:
         self.project_dir = project_dir
         self.config = validate_config(config)
@@ -471,6 +710,7 @@ class RobotWatcher:
         self.adapter = adapter
         self.shutdown_requested = shutdown_requested
         self.mode_requested = mode_requested
+        self.evidence_runner = evidence_runner
         self.phase = ATTACHED
         self.stable_polls = 0
         # Empty initial prompt means attach to the current conversation and
@@ -484,6 +724,7 @@ class RobotWatcher:
         self._quit = False
         self._events: list[dict] = []
         self._event_seq = 0
+        self._recovery_logged = False
 
     def _record(self, category: str, message: str) -> dict:
         """Append one bounded, redacted activity event (informational only)."""
@@ -621,17 +862,150 @@ class RobotWatcher:
             return self.phase
         return self._on_stable_finished()
 
-    def _on_stable_finished(self) -> str:
-        if not self.initial_sent:
-            self._send(self.config.initial_prompt)
-            self.initial_sent = True
-            self.prompts_sent += 1
-            self.stable_polls = 0
-            self.phase = CONTINUING
-            self._record("prompt", "sent initial prompt to the ready conversation")
+    def _log_recovery_once(self) -> str:
+        """Surface interrupted-conversation recovery evidence once.
+
+        A surviving conversation record names the change that gates the
+        next boundary instead of inferring it from a stale `next_action`.
+        Returns "" when recovery state is usable, else the blocking
+        reason. Never raises: an unreadable record blocks the boundary
+        and a missing record simply means nothing to recover.
+        """
+        if self._recovery_logged:
+            return ""
+        self._recovery_logged = True
+        try:
+            record = evidence_mod.read_conversation(self.project_dir)
+        except evidence_mod.ConversationError as exc:
+            return (
+                f"conversation record unreadable: {exc}; verify "
+                "`.ariadex/conversation.json` before continuing"
+            )
+        if record is None:
+            return ""
+        self._record(
+            "recovery",
+            f"recovered conversation {record.conversation_id} for "
+            f"`{record.current_spec}` (role {record.role}); "
+            "the recorded change gates the boundary",
+        )
+        return ""
+
+    def _record_before_prompt(self, role: str, target: str, queue: list[str]) -> bool:
+        """Persist the conversation target before any provider input.
+
+        Returns True when recorded (the caller may send the prompt).
+        On any failure the watcher enters BLOCKED and sends nothing, so
+        an unverified prompt is never delivered and the evidence gap is
+        preserved for the operator.
+        """
+        try:
+            record = evidence_mod.record_conversation(
+                self.project_dir,
+                role,
+                target,
+                self.config.spec_dir,
+                queue,
+                self.config.handoff_file,
+            )
+        except (
+            evidence_mod.ConversationError,
+            handoff_mod.HandoffError,
+            OSError,
+        ) as exc:
+            self.phase = BLOCKED
+            self.block_reason = (
+                f"conversation target `{target}` could not be recorded: "
+                f"{exc}; no prompt was sent"
+            )
+            self._record("error", self.block_reason)
+            return False
+        self._record(
+            "prompt",
+            f"recorded conversation {record.conversation_id} for "
+            f"`{target}` (role {role})",
+        )
+        return True
+
+    def _legacy_first_target(
+        self, handoff: handoff_mod.Handoff
+    ) -> tuple[str, list[str]]:
+        """First-conversation target from internal discovery (fallback).
+
+        Used only outside an OpenSpec repository. Returns `("", [])`
+        when no active specs remain so the caller stops without a
+        prompt; raises ``EvidenceBlocked`` for an unusable override.
+        """
+        active, _ = spec_graph_mod.discover_active_changes(
+            self.project_dir / self.config.spec_dir
+        )
+        ordered = sorted(active)
+        if not ordered:
+            return "", []
+        override = (self.config.finished_change or "").strip()
+        if override:
+            if override not in ordered:
+                raise evidence_mod.EvidenceBlocked(
+                    f"requested change `{override}` is not in the active "
+                    "spec list; verify the change name before continuing"
+                )
+            return override, ordered
+        handoff_target = (handoff.current_spec or "").strip()
+        return _preferred_target(ordered, handoff_target), ordered
+
+    def _send_initial(self) -> str:
+        """Record the first-conversation target, then send the prompt once."""
+        try:
+            handoff = handoff_mod.read_handoff(
+                self.project_dir / self.config.handoff_file
+            )
+        except (handoff_mod.HandoffError, OSError) as exc:
+            self.phase = BLOCKED
+            self.block_reason = f"handoff unreadable: {exc}"
+            self._record("boundary", f"blocked: {self.block_reason}")
             return self.phase
+        try:
+            target, queue = select_first_target(
+                self.project_dir, self.config, handoff, self.evidence_runner
+            )
+        except evidence_mod.NotOpenSpecRoot:
+            try:
+                target, queue = self._legacy_first_target(handoff)
+            except evidence_mod.EvidenceBlocked as exc:
+                self.phase = BLOCKED
+                self.block_reason = str(exc)
+                self._record("boundary", f"blocked: {self.block_reason}")
+                return self.phase
+        except evidence_mod.EvidenceBlocked as exc:
+            self.phase = BLOCKED
+            self.block_reason = str(exc)
+            self._record("boundary", f"blocked: {self.block_reason}")
+            return self.phase
+        if not target:
+            self.phase = DONE
+            self._record("boundary", "no active OpenSpec work remains; stopping")
+            return self.phase
+        if not self._record_before_prompt("first", target, queue):
+            return self.phase
+        self._send(self.config.initial_prompt)
+        self.initial_sent = True
+        self.prompts_sent += 1
+        self.stable_polls = 0
+        self.phase = CONTINUING
+        self._record("prompt", "sent initial prompt to the ready conversation")
+        return self.phase
+
+    def _on_stable_finished(self) -> str:
+        recovery = self._log_recovery_once()
+        if recovery:
+            self.phase = BLOCKED
+            self.block_reason = recovery
+            self._record("boundary", f"blocked: {recovery}")
+            return self.phase
+        if not self.initial_sent:
+            return self._send_initial()
         self.phase = VERIFIED_BOUNDARY
-        check = check_boundary(self.project_dir, self.config)
+        check = check_boundary(self.project_dir, self.config, self.evidence_runner)
         if not check.ok:
             self.phase = BLOCKED
             self.block_reason = check.reason
@@ -644,23 +1018,42 @@ class RobotWatcher:
         if check.decision == "unfinished":
             self._record("boundary", check.task_detail or "unfinished tasks remain")
             return self._open_confirmation(check)
+        if check.decision == "ready-to-archive":
+            self._record(
+                "boundary",
+                check.task_detail or "tasks complete; archival needed",
+            )
+            return self._open_confirmation(check, check.task_detail)
         self._record(
             "boundary",
             f"verified boundary for `{check.current_spec or check.active[0]}`; "
             "opening a new conversation",
         )
-        return self._open_continuation()
+        return self._open_continuation(check)
 
-    def _open_continuation(self) -> str:
+    def _open_continuation(self, check: BoundaryCheck) -> str:
         """Open the next conversation via the adapter contract only.
 
-        Provider commands, restart details, and input-delivery rules stay
-        inside the adapter (`new_conversation`); this method never branches
-        on provider identity or command strings. Any failure enters
-        `BLOCKED` with the provider, operation, and recovery reason, and no
-        continuation prompt is sent until the fresh input surface is
+        The next target is recorded before any provider input so the
+        boundary never advances on a stale assumption. Provider
+        commands, restart details, and input-delivery rules stay inside
+        the adapter (`new_conversation`); this method never branches on
+        provider identity or command strings. Any failure enters
+        `BLOCKED` with the provider, operation, and recovery reason, and
+        no continuation prompt is sent until the fresh input surface is
         observed.
         """
+        next_target = check.current_spec.strip() or (
+            check.active[0] if check.active else ""
+        )
+        if not next_target:
+            self.phase = DONE
+            self._record("boundary", "no active OpenSpec work remains; stopping")
+            return self.phase
+        if not self._record_before_prompt(
+            "continuation", next_target, list(check.active)
+        ):
+            return self.phase
         self.phase = NEW_CONVERSATION
         try:
             self.adapter.new_conversation()
@@ -697,19 +1090,36 @@ class RobotWatcher:
         self._record("prompt", "sent continuation prompt in a fresh conversation")
         return self.phase
 
-    def _open_confirmation(self, check: BoundaryCheck) -> str:
+    def _open_confirmation(self, check: BoundaryCheck, instruction: str = "") -> str:
         """Recover unfinished tasks via the adapter contract only.
 
-        Provider commands, restart details, and input-delivery rules stay
-        inside the adapter (`new_conversation`); this method never branches
-        on provider identity or command strings. The confirmation prompt
-        is sent only after the fresh input-ready surface is observed, so a
-        repeated unfinished boundary simply opens another bounded attempt.
+        The confirmation target is recorded before any provider input.
+        A `ready-to-archive` boundary carries the archival instruction so
+        the recovery conversation archives and validates instead of
+        advancing. Provider commands, restart details, and
+        input-delivery rules stay inside the adapter
+        (`new_conversation`); this method never branches on provider
+        identity or command strings. The confirmation prompt is sent only
+        after the fresh input-ready surface is observed, so a repeated
+        unfinished boundary simply opens another bounded attempt.
         """
+        target = check.current_spec.strip()
+        if not target:
+            self.phase = BLOCKED
+            self.block_reason = (
+                "confirmation has no recorded change to recover; "
+                "verify the conversation record before continuing"
+            )
+            self._record("error", self.block_reason)
+            return self.phase
+        if not self._record_before_prompt("confirmation", target, list(check.active)):
+            return self.phase
         self.phase = NEW_CONVERSATION
         detail = check.task_detail or (
             f"`{check.current_spec}` has {check.open_tasks} open task(s)"
         )
+        if instruction and instruction != detail:
+            detail = f"{detail}; recovery instruction: {instruction}"
         self._record("prompt", f"confirmation recovery selected: {detail}")
         try:
             self.adapter.new_conversation()

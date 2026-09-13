@@ -204,6 +204,21 @@ Behavior:
   An empty active list stops the watcher with a completion report and no
   further prompt. `--max-polls` bounds a run (0 means
   unbounded); `--poll-interval` sets the seconds between pane polls.
+- Before any first, continuation, or confirmation prompt is sent, the
+  selected active change is recorded as a versioned conversation in
+  `.ariadex/conversation.json` and `HANDOFF.current_spec` /
+  `current_spec_file` are synchronized without touching completed or
+  unresolved history. A restart recovers that recorded target; a stale
+  `next_action` is never treated as evidence. Inside an OpenSpec
+  repository, `openspec list --json` is the authoritative queue and task
+  progress source, `openspec status --change --json` probes the recorded
+  change, and archival is proven by active-list absence plus the archive
+  record, canonical spec presence (`openspec list --specs --json`), and
+  strict spec validation. Complete-but-still-active selects the
+  confirmation prompt with an archival instruction; renamed, deleted,
+  contradictory, or unavailable evidence blocks with the exact reason and
+  sends no prompt. Outside an OpenSpec repository the watcher keeps the
+  internal discovery fallback.
 - Providers continue automatically once the durable boundary is verified:
   OpenCode opens a fresh conversation with its verified in-session
   operation; Codex and CodeBuddy restart the provider inside the selected

@@ -13,6 +13,11 @@ from ariadex import robot as robot_mod
 from ariadex import terminal as terminal_mod
 from ariadex.adapters import UnsupportedOperation
 
+try:
+    import evidence_fakes
+except ModuleNotFoundError:
+    from tests import evidence_fakes  # type: ignore[no-redef]
+
 READY_OPENCODE = "Welcome back\nAsk anything · tab agents\n> "
 READY_CODEX = "OpenAI Codex\nAsk Codex to do anything\n> "
 READY_CODEBUDDY = "CodeBuddy ready\ncodebuddy listening\n> "
@@ -42,6 +47,15 @@ def make_project(monkey_state=None) -> Path:
     return root
 
 
+def make_change(root: Path, name: str, tasks: str) -> None:
+    change = root / "openspec" / "changes" / name
+    change.mkdir(parents=True, exist_ok=True)
+    (change / "tasks.md").write_text(tasks, encoding="utf-8")
+    handoff = handoff_mod.read_handoff(root / "HANDOFF.md")
+    handoff.current_spec = name
+    handoff_mod.write_handoff(root / "HANDOFF.md", handoff)
+
+
 def make_watcher(
     project: Path,
     driver: FakeDriver,
@@ -58,8 +72,11 @@ def make_watcher(
     }
     shutdown_requested = overrides.pop("shutdown_requested", None)
     mode_requested = overrides.pop("mode_requested", None)
+    evidence_runner = overrides.pop("evidence_runner", None)
     params.update(overrides)
     config = robot_mod.RobotConfig(**params)
+    if evidence_runner is None:
+        evidence_runner = evidence_fakes.make_runner(project)
     return robot_mod.RobotWatcher(
         project,
         config,
@@ -67,6 +84,7 @@ def make_watcher(
         adapter,
         shutdown_requested=shutdown_requested,
         mode_requested=mode_requested,
+        evidence_runner=evidence_runner,
     )
 
 
@@ -337,6 +355,7 @@ class WatcherStateTest(unittest.TestCase):
 
     def test_initial_prompt_sent_once_when_ready(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -349,6 +368,7 @@ class WatcherStateTest(unittest.TestCase):
 
     def test_quota_failure_does_not_trigger_another_prompt(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -367,6 +387,7 @@ class WatcherStateTest(unittest.TestCase):
 
     def test_paused_managed_mode_blocks_first_prompt_until_auto(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -518,13 +539,14 @@ class ContinuationTest(unittest.TestCase):
             tmp.cleanup()
 
     def _ok_boundary(self, active: list[str]):
-        def check(project_dir, config):
+        def check(project_dir, config, runner=None):
             return robot_mod.BoundaryCheck(ok=True, reason="", active=list(active))
 
         return check
 
     def test_verified_boundary_continues_opencode(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -548,6 +570,7 @@ class ContinuationTest(unittest.TestCase):
 
     def test_custom_continuation_prompt_used(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -575,19 +598,17 @@ class ContinuationTest(unittest.TestCase):
             "workdir": "/t",
         }
         watcher = make_watcher(project, driver, debounce_polls=1)
-        real_check = robot_mod.check_boundary
-        robot_mod.check_boundary = self._ok_boundary([])  # type: ignore[assignment]
-        try:
-            watcher.poll()  # initial prompt
-            self.assertEqual(watcher.poll(), "done")
-            report = watcher.run(sleep=lambda _: None)
-        finally:
-            robot_mod.check_boundary = real_check  # type: ignore[assignment]
+        # An empty queue records no conversation target, so the watcher
+        # stops at the first ready surface without sending any prompt.
+        self.assertEqual(watcher.poll(), "done")
+        report = watcher.run(sleep=lambda _: None)
         self.assertEqual(report.outcome, "done")
-        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+        self.assertEqual(driver.sent_inputs("agent"), [])
+        self.assertEqual(report.prompts_sent, 0)
 
     def test_unfinished_work_blocks_with_reason(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -596,7 +617,7 @@ class ContinuationTest(unittest.TestCase):
         }
         watcher = make_watcher(project, driver, debounce_polls=1)
 
-        def blocked(project_dir, config):
+        def blocked(project_dir, config, runner=None):
             return robot_mod.BoundaryCheck(
                 ok=False, reason="uncommitted changes present", active=["x"]
             )
@@ -615,6 +636,7 @@ class ContinuationTest(unittest.TestCase):
 
     def test_codex_continues_via_automatic_restart(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -645,6 +667,7 @@ class ContinuationTest(unittest.TestCase):
 
     def test_codebuddy_continues_via_automatic_restart(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -674,6 +697,7 @@ class ContinuationTest(unittest.TestCase):
 
     def test_unavailable_operation_blocks_as_capability(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -702,6 +726,7 @@ class ContinuationTest(unittest.TestCase):
 
     def test_failed_restart_blocks_with_provider_and_operation(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -738,6 +763,7 @@ class ContinuationTest(unittest.TestCase):
 
     def test_failed_new_session_blocks_without_prompt(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -757,6 +783,7 @@ class ContinuationTest(unittest.TestCase):
 
     def test_new_surface_never_ready_blocks(self) -> None:
         project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {
             "command": [],
@@ -794,10 +821,17 @@ class BoundaryTest(unittest.TestCase):
         params.update(overrides)
         return robot_mod.RobotConfig(**params)
 
+    def _check(
+        self, project: Path, config: robot_mod.RobotConfig
+    ) -> robot_mod.BoundaryCheck:
+        return robot_mod.check_boundary(
+            project, config, evidence_fakes.make_runner(project)
+        )
+
     def test_missing_handoff_blocks(self) -> None:
         project = make_project(self._tmp)
         (project / "HANDOFF.md").unlink()
-        check = robot_mod.check_boundary(project, self._config())
+        check = self._check(project, self._config())
         self.assertFalse(check.ok)
         self.assertIn("handoff", check.reason)
 
@@ -808,7 +842,7 @@ class BoundaryTest(unittest.TestCase):
         (change / ".openspec.yaml").write_text(
             "depends_on: not-a-list\n", encoding="utf-8"
         )
-        check = robot_mod.check_boundary(project, self._config())
+        check = self._check(project, self._config())
         self.assertFalse(check.ok)
         self.assertIn("broken", check.reason)
 
@@ -822,9 +856,7 @@ class BoundaryTest(unittest.TestCase):
         with unittest.mock.patch.object(
             robot_mod, "_git_tree_clean", return_value=(True, "")
         ):
-            check = robot_mod.check_boundary(
-                project, self._config(finished_change="demo")
-            )
+            check = self._check(project, self._config(finished_change="demo"))
         self.assertTrue(check.ok, check.reason)
         self.assertEqual(check.active, ["demo"])
 
@@ -834,9 +866,7 @@ class BoundaryTest(unittest.TestCase):
         with unittest.mock.patch.object(
             robot_mod, "_git_tree_clean", return_value=(True, "")
         ):
-            check = robot_mod.check_boundary(
-                project, self._config(finished_change="demo")
-            )
+            check = self._check(project, self._config(finished_change="demo"))
         self.assertFalse(check.ok)
         self.assertEqual(check.decision, "blocked")
         self.assertIn("tasks.md", check.reason)
@@ -853,7 +883,7 @@ class BoundaryTest(unittest.TestCase):
         change.mkdir(parents=True)
         (change / "tasks.md").write_text("# Tasks\n\n- [x] Done\n", encoding="utf-8")
         # The fixture is not a git checkout, so the git gate blocks next.
-        check = robot_mod.check_boundary(project, self._config(finished_change="demo"))
+        check = self._check(project, self._config(finished_change="demo"))
         self.assertFalse(check.ok)
         self.assertTrue(
             "git" in check.reason or "uncommitted" in check.reason,
@@ -874,7 +904,7 @@ class BoundaryTest(unittest.TestCase):
         with unittest.mock.patch.object(
             robot_mod, "_git_tree_clean", return_value=(True, "")
         ):
-            check = robot_mod.check_boundary(project, self._config())
+            check = self._check(project, self._config())
 
         self.assertTrue(check.ok, check.reason)
         self.assertEqual(check.active, ["demo"])
@@ -894,7 +924,7 @@ class BoundaryTest(unittest.TestCase):
         with unittest.mock.patch.object(
             robot_mod, "_git_tree_clean", return_value=(True, "")
         ):
-            check = robot_mod.check_boundary(project, self._config())
+            check = self._check(project, self._config())
 
         self.assertTrue(check.ok, check.reason)
         self.assertEqual(check.active, ["demo"])
@@ -1288,9 +1318,11 @@ class WatchCliTest(unittest.TestCase):
             "output": READY_OPENCODE,
             "workdir": "/t",
         }
+        project = self._project()
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         real_check = robot_mod.check_boundary
         robot_mod.check_boundary = (  # type: ignore[assignment]
-            lambda project_dir, config: robot_mod.BoundaryCheck(
+            lambda project_dir, config, runner=None: robot_mod.BoundaryCheck(
                 ok=True, reason="", active=[]
             )
         )
@@ -1298,13 +1330,14 @@ class WatchCliTest(unittest.TestCase):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 code = self.cli.cmd_watch(
-                    self._project(),
+                    project,
                     session="agent",
                     initial_prompt="go",
                     provider="opencode",
                     debounce=1,
                     poll_interval=0.01,
                     max_polls=10,
+                    evidence_runner=evidence_fakes.make_runner(project),
                 )
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
@@ -1321,9 +1354,11 @@ class WatchCliTest(unittest.TestCase):
             "output": READY_OPENCODE,
             "workdir": "/t",
         }
+        project = self._project()
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         real_check = robot_mod.check_boundary
         robot_mod.check_boundary = (  # type: ignore[assignment]
-            lambda project_dir, config: robot_mod.BoundaryCheck(
+            lambda project_dir, config, runner=None: robot_mod.BoundaryCheck(
                 ok=False, reason="uncommitted changes present", active=["x"]
             )
         )
@@ -1331,12 +1366,13 @@ class WatchCliTest(unittest.TestCase):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 code = self.cli.cmd_watch(
-                    self._project(),
+                    project,
                     session="agent",
                     initial_prompt="go",
                     provider="opencode",
                     debounce=1,
                     poll_interval=0.01,
+                    evidence_runner=evidence_fakes.make_runner(project),
                 )
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]

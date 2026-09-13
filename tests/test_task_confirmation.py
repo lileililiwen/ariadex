@@ -20,6 +20,11 @@ from ariadex import providers as providers_mod
 from ariadex import robot as robot_mod
 from ariadex import terminal as terminal_mod
 
+try:
+    import evidence_fakes
+except ModuleNotFoundError:
+    from tests import evidence_fakes  # type: ignore[no-redef]
+
 READY = "Welcome back\nAsk anything · tab agents\n> "
 BUSY = "running tool `pytest` …\nesc to interrupt\n"
 QUOTA = "Ask anything · tab agents\nModel quota expired. Switch model.\n> "
@@ -67,8 +72,15 @@ def make_watcher(
         "poll_interval_s": 0.01,
     }
     params.update(overrides)
+    evidence_runner = params.pop("evidence_runner", None)
+    if evidence_runner is None:
+        evidence_runner = evidence_fakes.make_runner(project)
     return robot_mod.RobotWatcher(
-        project, robot_mod.RobotConfig(**params), driver, adapter
+        project,
+        robot_mod.RobotConfig(**params),
+        driver,
+        adapter,
+        evidence_runner=evidence_runner,
     )
 
 
@@ -141,30 +153,38 @@ class BoundaryDecisionTest(unittest.TestCase):
         params.update(overrides)
         return robot_mod.RobotConfig(**params)
 
+    def _check(self, project, config):
+        return robot_mod.check_boundary(
+            project, config, evidence_fakes.make_runner(project)
+        )
+
     def test_unfinished_tasks_are_ok_but_marked_unfinished(self) -> None:
         project = make_project(self._tmp)
         make_change(project, "demo", "# Tasks\n\n- [x] Done\n- [ ] Open it\n")
         with clean_git(self):
-            check = robot_mod.check_boundary(project, self._config())
+            check = self._check(project, self._config())
         self.assertTrue(check.ok)
         self.assertEqual(check.decision, "unfinished")
         self.assertEqual(check.current_spec, "demo")
         self.assertEqual(check.open_tasks, 1)
         self.assertIn("Open it", check.task_detail)
 
-    def test_completed_tasks_are_marked_complete(self) -> None:
+    def test_completed_tasks_request_archival_not_advancement(self) -> None:
         project = make_project(self._tmp)
         make_change(project, "demo", "# Tasks\n\n- [x] Done\n")
         with clean_git(self):
-            check = robot_mod.check_boundary(project, self._config())
+            check = self._check(project, self._config())
         self.assertTrue(check.ok)
-        self.assertEqual(check.decision, "complete")
+        self.assertEqual(check.decision, "ready-to-archive")
+        self.assertEqual(check.current_spec, "demo")
         self.assertEqual(check.open_tasks, 0)
+        self.assertIn("archive", check.task_detail)
+        self.assertEqual(check.evidence_source, "openspec")
 
     def test_empty_queue_is_marked_empty(self) -> None:
         project = make_project(self._tmp)
         with clean_git(self):
-            check = robot_mod.check_boundary(project, self._config())
+            check = self._check(project, self._config())
         self.assertTrue(check.ok)
         self.assertEqual(check.decision, "empty")
         self.assertEqual(check.active, [])
@@ -174,7 +194,7 @@ class BoundaryDecisionTest(unittest.TestCase):
         make_change(project, "demo", "# Tasks\n\n- [x] Done\n")
         (project / "openspec" / "changes" / "demo" / "tasks.md").unlink()
         with clean_git(self):
-            check = robot_mod.check_boundary(project, self._config())
+            check = self._check(project, self._config())
         self.assertFalse(check.ok)
         self.assertEqual(check.decision, "blocked")
         self.assertIn("tasks.md", check.reason)
@@ -184,9 +204,7 @@ class BoundaryDecisionTest(unittest.TestCase):
         make_change(project, "other", "# Tasks\n\n- [ ] Other work\n", current=False)
         make_change(project, "demo", "# Tasks\n\n- [x] Done\n")
         with clean_git(self):
-            check = robot_mod.check_boundary(
-                project, self._config(finished_change="other")
-            )
+            check = self._check(project, self._config(finished_change="other"))
         self.assertTrue(check.ok)
         self.assertEqual(check.decision, "unfinished")
         self.assertEqual(check.current_spec, "other")
@@ -216,7 +234,7 @@ class PromptSelectionTest(unittest.TestCase):
             any("confirmation" in entry["message"] for entry in view["activity"])
         )
 
-    def test_completed_tasks_send_continuation_not_confirmation(self) -> None:
+    def test_complete_but_active_tasks_request_archival_confirmation(self) -> None:
         project = make_project(self._tmp)
         make_change(project, "demo", "# Tasks\n\n- [x] Done\n")
         driver = FakeDriver()
@@ -226,20 +244,29 @@ class PromptSelectionTest(unittest.TestCase):
             watcher.poll()
             self.assertEqual(watcher.poll(), "continuing")
         sent = driver.sent_inputs("agent")
-        self.assertEqual(sent[-1], "please continue")
-        self.assertEqual(watcher.confirmations_sent, 0)
+        self.assertEqual(sent[0], "please start")
+        self.assertIn("/new", sent)
+        # Tasks are complete but the change is still active: the watcher
+        # must not advance. It recovers with the confirmation prompt and
+        # an archival instruction instead.
+        self.assertEqual(sent[-1], "please finish the rest")
+        self.assertEqual(watcher.confirmations_sent, 1)
+        view = watcher.status_view()
+        self.assertTrue(
+            any("archive" in entry["message"] for entry in view["activity"])
+        )
 
-    def test_empty_queue_stops_without_new_conversation(self) -> None:
+    def test_empty_queue_stops_without_any_prompt(self) -> None:
         project = make_project(self._tmp)
         driver = FakeDriver()
         driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
         watcher = make_watcher(project, driver)
         with clean_git(self):
-            watcher.poll()
             self.assertEqual(watcher.poll(), "done")
-        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+        self.assertEqual(driver.sent_inputs("agent"), [])
+        self.assertEqual(watcher.prompts_sent, 0)
 
-    def test_repeated_confirmation_until_tasks_complete(self) -> None:
+    def test_repeated_confirmation_then_archival_recovery(self) -> None:
         project = make_project(self._tmp)
         tasks = project / "openspec" / "changes" / "demo" / "tasks.md"
         make_change(project, "demo", "# Tasks\n\n- [ ] One\n- [ ] Two\n")
@@ -259,8 +286,15 @@ class PromptSelectionTest(unittest.TestCase):
             watcher.stable_polls = 0
             self.assertEqual(watcher.poll(), "continuing")
         sent = driver.sent_inputs("agent")
-        self.assertEqual(sent.count("please finish the rest"), 2)
-        self.assertEqual(sent[-1], "please continue")
+        # Two task-recovery confirmations plus the archival follow-up: a
+        # complete-but-active change must not advance to continuation.
+        self.assertEqual(sent.count("please finish the rest"), 3)
+        self.assertEqual(sent[-1], "please finish the rest")
+        self.assertEqual(watcher.confirmations_sent, 3)
+        view = watcher.status_view()
+        self.assertTrue(
+            any("archive" in entry["message"] for entry in view["activity"])
+        )
 
     def test_quota_approval_error_never_trigger_confirmation(self) -> None:
         for surface, phase in (
