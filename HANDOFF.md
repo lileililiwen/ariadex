@@ -2,6 +2,11 @@
 
 ## Current state
 
+- New planning change: `task-aware-confirmation-and-widget-activity-log`.
+  It adds the configured `confirmation_prompt` for valid unfinished-task
+  recovery, restores task-aware completion decisions, and exposes a bounded
+  expandable Ariadex activity log in the widget. It is planning-only; no
+  implementation work has started.
 - Follow-up continuation-boundary correction: an active spec's open tasks no
   longer block the next provider conversation. `0/14 tasks` is valid between
   conversations; `/new` now follows the durable handoff, git, and active-spec
@@ -128,8 +133,9 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active change remains. The next feature must be proposed as a new OpenSpec
-change before implementation.
+Implement `task-aware-confirmation-and-widget-activity-log` next. It is the
+only active OpenSpec change and must be implemented, verified, and archived
+before another change is selected.
 
 ## Latest verification evidence
 
