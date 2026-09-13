@@ -220,7 +220,10 @@ second daemon, session, supervisor, or prompt.
 During an interactive install, package-manager output is shown directly in
 the terminal, including apt progress and errors.
 
-The daemon owns scheduling, persistence, and local control requests. The
+The daemon owns persistence, lease, status, cancellation, and local control
+requests. In the managed `start` lifecycle, only its single foreground
+watcher sends provider prompts; the daemon does not inject a second scheduler
+prompt. The
 normal user does not need lifecycle commands: Ctrl+C in the provider or the
 widget buttons control the run. Administrative diagnosis remains available
 through `ariadex admin doctor`, `ariadex admin status`, and

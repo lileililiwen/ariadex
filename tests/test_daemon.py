@@ -142,6 +142,17 @@ class HandleRequestTest(unittest.TestCase):
         runs = self.root / ".ariadex" / "runs"
         return len(list(runs.iterdir())) if runs.is_dir() else 0
 
+    def test_managed_daemon_never_injects_runner_prompt(self):
+        with (
+            mock.patch("ariadex.runner.Runner.run_once") as run_once,
+        ):
+            (self.root / daemon.MANAGED_RUNTIME_REL_PATH).parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            (self.root / daemon.MANAGED_RUNTIME_REL_PATH).touch()
+            daemon._scheduler_poll(self.root)
+        run_once.assert_not_called()
+
     def test_status_and_wake_are_read_only(self):
         before = self.runs_count()
         for name in ("status", "wake"):

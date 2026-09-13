@@ -84,10 +84,12 @@ The managed startup sequence is:
    terminal, and supervise until queue-empty completion, provider exit,
    or terminal detach.
 
-Each AUTO scheduler poll creates the configured provider adapter and runs one
-bounded runner cycle. That cycle may connect to or start the configured tmux
-session, send provider input, capture the result, run verification commands,
-and persist the outcome. The daemon itself remains provider-neutral.
+In the managed `start` lifecycle, the daemon is intentionally input-silent:
+the foreground managed watcher is the only component allowed to send provider
+prompts. The daemon remains the single lease, IPC, status, and cancellation
+authority. Its `.ariadex/managed-runtime` marker prevents a second scheduler
+from racing the watcher. Standalone lower-level scheduler paths retain their
+existing behavior.
 
 The managed workflow exits cleanly after the widget close button or a terminal
 stop request. Stop is graceful: an already-running bounded cycle is allowed to
@@ -217,6 +219,7 @@ Behavior:
 | `HANDOFF.md` | durable context: current spec, completed work, unresolved work, blockers, and next action; configurable via `handoff_file` |
 | `.ariadex/state.json` | mode, session ID, current spec, unresolved count, and update time |
 | `.ariadex/daemon.json` | daemon PID, socket endpoint, lease/runtime status |
+| `.ariadex/managed-runtime` | marks the project as using the managed watcher; daemon scheduler input is disabled |
 | `.ariadex/daemon.sock` | local typed control IPC while the daemon is alive |
 | `.ariadex/runs/` | bounded per-cycle run logs |
 | `.ariadex/metrics.jsonl` | bounded cycle metrics |

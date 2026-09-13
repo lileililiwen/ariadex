@@ -27,6 +27,7 @@ from typing import Protocol
 
 DAEMON_REL_PATH = Path(".ariadex") / "daemon.json"
 SOCKET_REL_PATH = Path(".ariadex") / "daemon.sock"
+MANAGED_RUNTIME_REL_PATH = Path(".ariadex") / "managed-runtime"
 DAEMON_VERSION = 1
 
 REQUEST_TYPES = ("status", "pause", "resume", "stop", "wake")
@@ -511,6 +512,14 @@ def _scheduler_poll(project_dir: Path) -> None:
     from . import state as state_mod
     from . import terminal as terminal_mod
 
+    if (
+        os.environ.get("ARIADEX_MANAGED_RUNTIME") == "1"
+        or (project_dir / MANAGED_RUNTIME_REL_PATH).exists()
+    ):
+        # `ariadex start` owns provider input through RobotWatcher. The
+        # resident daemon remains the single lease/IPC/status authority but
+        # must not race the managed watcher by sending Runner prompts.
+        return
     try:
         cfg = config_mod.load(project_dir)
         stored = state_mod.read(project_dir)

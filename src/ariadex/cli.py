@@ -1852,6 +1852,11 @@ def cmd_start(
     if resolved is None:
         return EXIT_ERROR
     provider, first, continuation = resolved
+    try:
+        (project_dir / daemon_mod.MANAGED_RUNTIME_REL_PATH).touch(exist_ok=True)
+    except OSError as exc:
+        print(f"error: cannot prepare managed runtime: {exc}", file=sys.stderr)
+        return EXIT_ERROR
     if st.mode == "MANUAL":
         try:
             _, report = resync_mod.resync(project_dir, cfg)
