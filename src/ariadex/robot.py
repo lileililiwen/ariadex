@@ -329,10 +329,23 @@ def list_sessions(driver: TerminalDriver) -> list[str]:
 
 
 def _git_tree_clean(project_dir: Path) -> tuple[bool, str]:
-    """Check `git status --porcelain`; failures block, never pass."""
+    """Check user work with Git while excluding Ariadex runtime state.
+
+    `.ariadex/` is Ariadex-owned durable runtime state, not provider work.
+    It must not prevent an OpenSpec-proven archived change from advancing;
+    source, handoff, and OpenSpec changes remain visible to this gate.
+    """
     try:
         proc = subprocess.run(
-            ["git", "status", "--porcelain"],
+            [
+                "git",
+                "status",
+                "--porcelain",
+                "--untracked-files=all",
+                "--",
+                ".",
+                ":(exclude).ariadex/**",
+            ],
             cwd=str(project_dir),
             capture_output=True,
             text=True,

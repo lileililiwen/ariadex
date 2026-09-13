@@ -692,6 +692,43 @@ class RecordedBoundaryTest(unittest.TestCase):
         self.assertEqual(check.active, ["next"])
         self.assertIn("archived", check.task_detail)
 
+    def test_archived_record_advances_with_ariadex_runtime_state_dirty(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "next", "# Tasks\n\n- [ ] Work\n", current=False)
+        handoff = handoff_mod.read_handoff(project / "HANDOFF.md")
+        handoff.current_spec = "done"
+        handoff_mod.write_handoff(project / "HANDOFF.md", handoff)
+        archive = project / "openspec" / "changes" / "archive" / "2026-09-13-done"
+        (archive / "specs" / "widget").mkdir(parents=True)
+        (archive / "specs" / "widget" / "spec.md").write_text(
+            "# Spec\n", encoding="utf-8"
+        )
+        evidence_mod.record_conversation(
+            project, "first", "done", "openspec/changes", ["done", "next"]
+        )
+        runner = evidence_fakes.make_runner(project, spec_ids=("widget",))
+        subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+        subprocess.run(["git", "add", "."], cwd=project, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Ariadex test",
+                "-c",
+                "user.email=ariadex-test@example.invalid",
+                "commit",
+                "-qm",
+                "fixture",
+            ],
+            cwd=project,
+            check=True,
+        )
+        (project / ".ariadex" / "runtime.json").write_text("{}\n", encoding="utf-8")
+        check = robot_mod.check_boundary(project, make_config(), runner)
+        self.assertTrue(check.ok, check.reason)
+        self.assertEqual(check.decision, "complete")
+        self.assertEqual(check.active, ["next"])
+
     def test_archived_record_with_empty_queue_stops(self) -> None:
         project = make_project(self._tmp)
         (project / "openspec" / "changes" / "archive" / "2026-09-13-done").mkdir(

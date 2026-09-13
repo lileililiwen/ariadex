@@ -238,10 +238,14 @@ Behavior:
   input-ready surface is observed.
 - Before each continuation, the robot checks the durable boundary:
   handoff readability, task-marker completion for the current spec
-  (`--finished-change` overrides the handoff's current spec), a clean git
-  tree, and the active OpenSpec list. Missing or malformed task metadata
-  stays blocked with the exact reason and sends no prompt; configured
-  verification and task completion gate actual spec completion.
+  (`--finished-change` overrides the handoff's current spec), Git status for
+  user source/handoff/OpenSpec work, and the active OpenSpec list. Ariadex's
+  own `.ariadex/` runtime records are excluded from the Git work check. The
+  recorded current spec is matched with OpenSpec status and archival proof
+  before the next active queue entry can start. Missing, malformed, or
+  contradictory metadata stays blocked with the exact reason and sends no
+  prompt; configured verification and task completion gate actual spec
+  completion.
   An empty active list stops the watcher with a completion report and no
   further prompt. `--max-polls` bounds a run (0 means
   unbounded); `--poll-interval` sets the seconds between pane polls.
