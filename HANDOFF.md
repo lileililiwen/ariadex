@@ -2,13 +2,15 @@
 
 ## Current state
 
-- Planning queue contains two new changes. Implement
+- Planning queue contains three new changes. Implement
   `version-aware-upgrade-management` first, then
-  `safe-temporary-permission-policy`; both are planning-only and must be
+  `safe-temporary-permission-policy`, then
+  `bounded-widget-screen-placement`; all are planning-only and must be
   implemented one active change at a time. The upgrade change addresses the
   installed PyPI `0.1.0` lag and safe provenance-aware updates. The permission
   change covers the deferred private-temp approval policy; it does not grant
-  arbitrary shared `/tmp` access.
+  arbitrary shared `/tmp` access. The widget placement change keeps the
+  borderless dialog fully visible and its close control reachable.
 - Implemented, verified, and archived:
   `2026-09-13-boundary-diagnostic-evidence` (commit `96dc8fe`). Every
   provider stop, boundary evaluation, failed new-conversation operation,
@@ -261,7 +263,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 ## Next change
 
 Implement `version-aware-upgrade-management` first. After it is archived,
-implement `safe-temporary-permission-policy`.
+implement `safe-temporary-permission-policy`, then
+`bounded-widget-screen-placement`.
 
 ## Latest verification evidence
 
