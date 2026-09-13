@@ -2,6 +2,11 @@
 
 ## Current state
 
+- Follow-up quota-safety correction: quota/rate-limit output now overrides a
+  retained provider ready marker and enters a recoverable waiting state. No
+  additional prompt is sent while the operator switches model or credentials;
+  watching resumes after a usable ready surface returns. Verified with 903
+  tests, Ruff check/format, and strict OpenSpec validation (no active changes).
 - Follow-up shutdown correction: closing the managed widget now signals the
   watcher through daemon state; the owning `start` process terminates the
   provider/tmux session, widget record, and daemon together. `start` also
