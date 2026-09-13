@@ -2,6 +2,12 @@
 
 ## Current state
 
+- Follow-up continuation-boundary correction: an active spec's open tasks no
+  longer block the next provider conversation. `0/14 tasks` is valid between
+  conversations; `/new` now follows the durable handoff, git, and active-spec
+  checks, while verification and task completion still gate actual spec
+  completion. Verified with 906 tests, Ruff check/format, and strict OpenSpec
+  validation (no active changes).
 - Follow-up widget pause synchronization: the managed watcher now honors
   durable `PAUSE` before delivering the first or continuation prompt and
   resumes only after Play returns the daemon to `AUTO`. The widget keeps its
