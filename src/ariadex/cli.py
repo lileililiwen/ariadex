@@ -787,6 +787,7 @@ def cmd_init(
             return EXIT_ERROR
         if migrated:
             print(f"initialized: added {', '.join(migrated)} to .ariadex/config.yaml")
+            return EXIT_OK
         print(
             "error: project is already initialized; "
             "use `ariadex init --force` to reset it",

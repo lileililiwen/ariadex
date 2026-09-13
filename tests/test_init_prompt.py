@@ -153,8 +153,8 @@ class RepeatedInitTest(unittest.TestCase):
             encoding="utf-8",
         )
         code, _, err = run_cli(self.root, "init")
-        self.assertNotEqual(code, 0)
-        self.assertIn("init --force", err)
+        self.assertEqual(code, 0)
+        self.assertNotIn("init --force", err)
         migrated = path.read_text(encoding="utf-8")
         self.assertIn("first_prompt:", migrated)
         self.assertIn("continuation_prompt:", migrated)
