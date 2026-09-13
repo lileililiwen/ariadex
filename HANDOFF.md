@@ -98,6 +98,12 @@ change before implementation.
 
 ## Latest verification evidence
 
+- Pending-work reconciliation was fixed in commit `0759164`. Daemon/widget
+  status now recalculates the next action from active OpenSpec changes instead
+  of trusting stale `HANDOFF.md.next_action`, so eligible specs remain visible
+  after a conversation boundary. Focused daemon, watcher, and widget tests
+  pass (70 tests, 1 expected display skip).
+
 - Prompt configuration migration was added in commit `0398f7e`. Rerunning
   `ariadex init` on an older initialized project now adds missing
   `first_prompt` and `continuation_prompt` keys without replacing other
