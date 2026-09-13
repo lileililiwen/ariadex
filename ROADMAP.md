@@ -170,7 +170,23 @@ dependency order. All three items are implemented, tested, archived, and committ
 The managed-start track and the task-aware confirmation/widget-log follow-up
 are complete. The follow-up was implemented and archived as
 `2026-09-13-task-aware-confirmation-and-widget-activity-log`; `openspec list`
-currently has no active changes.
+currently has no active changes in Ariadex itself.
+
+## Planned: OpenSpec lifecycle and diagnostics follow-ups
+
+The next work is split into three dependency-ordered changes:
+
+1. `openspec-authoritative-current-spec-lifecycle` — record the current spec
+   before every provider conversation and verify task progress and true
+   archival with OpenSpec JSON commands.
+2. `comprehensive-runtime-diagnostics` — record key lifecycle decisions and
+   provide bounded full-log retrieval/export for later research.
+3. `managed-widget-log-copy-and-context` — connect those diagnostics to the
+   normal `ariadex start` widget, show accurate OpenSpec task state, and copy a
+   redacted debugging context to the desktop clipboard.
+
+Only one change is implemented at a time. These folders are planning-only
+until implementation begins.
 
 With the foundations above archived, the deferred capabilities are:
 

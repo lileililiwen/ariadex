@@ -2,6 +2,13 @@
 
 ## Current state
 
+- New planning queue: three related follow-up changes are active and must be
+  implemented in dependency order: `openspec-authoritative-current-spec-
+  lifecycle`, `comprehensive-runtime-diagnostics`, then
+  `managed-widget-log-copy-and-context`. They cover OpenSpec-backed current
+  spec/archive evidence, comprehensive full-log diagnostics, and integrating
+  rich copyable context into the normal `ariadex start` widget. No production
+  implementation has started for these changes.
 - Implemented, verified, and archived:
   `2026-09-13-task-aware-confirmation-and-widget-activity-log` (commit
   `e1d02ed`). The configured `confirmation_prompt` (new fourth prompt,
@@ -143,9 +150,11 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active OpenSpec changes remain (`openspec list` reports none). Select the
-next change with `openspec list` when new work is planned; only one active
-change may be implemented at a time.
+Implement `openspec-authoritative-current-spec-lifecycle` next. Then implement
+`comprehensive-runtime-diagnostics`, followed by
+`managed-widget-log-copy-and-context`. Only one active change may be
+implemented at a time; each must be verified and archived before the next is
+selected.
 
 ## Latest verification evidence
 
