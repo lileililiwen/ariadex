@@ -112,6 +112,13 @@ class ClassifyTest(unittest.TestCase):
     def test_auth_failure_blocks(self) -> None:
         self.assertEqual(robot_mod.classify_capture("codex", "please log in"), "error")
 
+    def test_model_quota_failure_waits_even_with_ready_marker(self) -> None:
+        capture = (
+            "Ask anything · tab agents\n"
+            "Model quota expired. Switch model to continue.\n> "
+        )
+        self.assertEqual(robot_mod.classify_capture("opencode", capture), "waiting")
+
     def test_unknown_provider_never_finishes(self) -> None:
         self.assertEqual(robot_mod.classify_capture("wat", READY_OPENCODE), "unknown")
 
@@ -336,6 +343,24 @@ class WatcherStateTest(unittest.TestCase):
         }
         watcher = make_watcher(project, driver, debounce_polls=1, max_polls=6)
         watcher.poll()
+        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+
+    def test_quota_failure_does_not_trigger_another_prompt(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": self._ready(),
+            "workdir": "/t",
+        }
+        watcher = make_watcher(project, driver, debounce_polls=1)
+        watcher.poll()
+        driver.sessions["agent"]["output"] = (
+            "Ask anything · tab agents\n"
+            "Model quota expired. Switch model to continue.\n> "
+        )
+
+        self.assertEqual(watcher.poll(), robot_mod.WAITING)
         self.assertEqual(driver.sent_inputs("agent"), ["please start"])
         self.assertTrue(watcher.initial_sent)
         # The echoed prompt keeps the surface ready; the boundary check

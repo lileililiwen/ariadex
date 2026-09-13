@@ -175,7 +175,9 @@ conversation and continues after a verified completion boundary.
 Behavior:
 
 - While the provider shows active output, a running tool, an approval
-  request, or an error, the robot sends nothing. Approval and confirmation
+  request, or an error, the robot sends nothing. Quota/rate-limit responses
+  are also non-terminal waiting states: no further prompt is sent while the
+  operator switches the model or credentials. Approval and confirmation
   requests are non-terminal waiting states; the watcher continues polling
   until the provider resumes or the user pauses/quits.
 - A finished conversation is recognized only when the provider-specific

@@ -401,6 +401,11 @@ The normal lifecycle is:
    needs human attention, the cycle limit is reached, or the operator
    changes the mode.
 
+Quota and rate-limit responses are recoverable waiting states. Ariadex sends
+no further prompt while the provider reports the limit, giving the operator
+time to switch the model or credentials; watching resumes when a usable ready
+surface returns.
+
 `AUTO` means Ariadex may schedule and send provider input through its
 configured agent adapter and tmux session. Provider text alone never proves
 completion; configured verification must pass. `MANUAL` means Ariadex keeps

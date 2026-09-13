@@ -73,6 +73,21 @@ ERROR_MARKERS = (
     "no api key",
 )
 
+# Recoverable provider limits require operator action (switch model, account,
+# or credentials), but should not end supervision. The watcher waits on the
+# same conversation and resumes once the provider presents a usable surface.
+QUOTA_MARKERS = (
+    "quota",
+    "rate limit",
+    "rate-limit",
+    "usage limit",
+    "exceeded your limit",
+    "you've hit your limit",
+    "out of credits",
+    "credits exhausted",
+    "insufficient credits",
+)
+
 # Fresh activity proves the agent is still working, even beside a stale
 # ready prompt further up the scrollback.
 BUSY_MARKERS = (
@@ -102,6 +117,7 @@ CLASS_WORKING = "working"
 CLASS_FINISHED = "finished"
 CLASS_APPROVAL = "approval"
 CLASS_ERROR = "error"
+CLASS_QUOTA = "waiting"
 CLASS_UNKNOWN = "unknown"
 CLASSIFICATION_TAIL_LINES = 16
 
@@ -113,7 +129,7 @@ class RobotError(Exception):
 def classify_capture(provider: str, text: str) -> str:
     """Classify one pane capture without sending input.
 
-    Conservative order: approval and error states win over a ready
+    Conservative order: approval, quota, and error states win over a ready
     marker, and busy markers win over a stale ready prompt. Unknown
     surfaces (including unknown providers) never classify as finished.
     """
@@ -123,6 +139,8 @@ def classify_capture(provider: str, text: str) -> str:
     lowered = "\n".join((text or "").splitlines()[-CLASSIFICATION_TAIL_LINES:]).lower()
     if any(marker in lowered for marker in APPROVAL_MARKERS):
         return CLASS_APPROVAL
+    if any(marker in lowered for marker in QUOTA_MARKERS):
+        return CLASS_QUOTA
     if any(marker in lowered for marker in ERROR_MARKERS):
         return CLASS_ERROR
     if any(marker in lowered for marker in BUSY_MARKERS):
@@ -406,6 +424,14 @@ class RobotWatcher:
             self.stable_polls = 0
             self.block_reason = (
                 "provider waits for approval; watcher continues observing"
+            )
+            return self.phase
+        if observed == CLASS_QUOTA:
+            self.phase = WAITING
+            self.stable_polls = 0
+            self.block_reason = (
+                "provider quota or rate limit reached; switch the model or "
+                "credentials, then watcher will resume"
             )
             return self.phase
         if observed == CLASS_ERROR:
