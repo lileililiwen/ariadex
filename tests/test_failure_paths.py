@@ -439,7 +439,7 @@ class ConcurrencyFailureTest(unittest.TestCase):
         with mock.patch.object(
             concurrency_mod.os, "kill", side_effect=PermissionError("denied")
         ):
-            self.assertTrue(concurrency_mod.pid_alive(1234))
+            self.assertFalse(concurrency_mod.pid_alive(1234))
 
     def test_heartbeat_and_release_ownership(self):
         root = self._project()

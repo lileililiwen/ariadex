@@ -179,6 +179,15 @@ def read_lock(project_dir: Path) -> LockInfo | None:
 
 
 def pid_alive(pid: int) -> bool:
+    # On Linux, inspectability is stronger than kill(2)'s permission result.
+    # Sandboxed supervisors can return EPERM for a PID that is not visible in
+    # this process namespace; treating that as live strands stale ownership.
+    if (
+        os.name == "posix"
+        and Path("/proc").is_dir()
+        and not (Path("/proc") / str(pid)).exists()
+    ):
+        return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

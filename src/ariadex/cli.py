@@ -1714,9 +1714,13 @@ def _report_live_owner(project_dir: Path, record, as_json: bool) -> None:
 def _live_owner(project_dir: Path, as_json: bool) -> bool:
     """True when a live daemon owns the project (reported, untouched)."""
     record = daemon_mod.read_record(project_dir)
-    if daemon_mod.daemon_alive(record) and record is not None:
-        # Duplicate start: confirm the endpoint answers, but never create
-        # a second scheduler or provider session either way.
+    if (
+        daemon_mod.daemon_alive(record)
+        and record is not None
+        and _daemon_ipc_or_none(project_dir, "status") is not None
+    ):
+        # Duplicate start: the typed endpoint has answered, so never create
+        # a second scheduler or provider session.
         assert record is not None
         _report_live_owner(project_dir, record, as_json)
         return True
