@@ -1,5 +1,13 @@
 # Ariadex handoff
 
+- Implemented and archived:
+  `2026-09-13-widget-close-stops-managed-workflow`. Managed widget close now
+  exits only after typed daemon stop succeeds; failed stop IPC keeps the
+  widget visible with the failure, while unexpected widget death remains
+  repairable by `start`. Verified with the close-failure, close-success, and
+  widget-crash-repair lifecycle tests, Ruff, diff check, and strict validation
+  (51 canonical specs).
+
 - In progress: `provider-owned-input-readiness`. The current OpenCode TUI
   composer is adapter-recognized; the watcher uses provider UI state first,
   then OpenSpec queue/task evidence for the boundary. Do not infer completion
