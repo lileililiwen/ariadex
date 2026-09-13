@@ -99,6 +99,13 @@ class ClassifyTest(unittest.TestCase):
         adapter = providers_mod.OpenCodeAdapter(FakeDriver(), "agent", Path("."))
         self.assertFalse(adapter.is_input_ready("Evidence: all tasks complete\n"))
 
+    def test_ready_opencode_state_overrides_generic_scrollback_words(self) -> None:
+        capture = "failed earlier tool; error was recovered\n" + READY_OPENCODE_MODERN
+        self.assertEqual(
+            robot_mod.classify_capture("opencode", capture, input_ready=True),
+            "finished",
+        )
+
     def test_modern_opencode_surface_reaches_continuation_boundary(self) -> None:
         temporary = []
         project = make_project(temporary)

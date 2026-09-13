@@ -260,7 +260,12 @@ def classify_capture(provider: str, text: str, input_ready: bool | None = None) 
         if ready_present:
             return CLASS_TERMINAL_ERROR
         return CLASS_ERROR
-    if any(marker in lowered for marker in ERROR_MARKERS):
+    # Generic words belong to captured scrollback, not provider state. Once
+    # the OpenCode adapter has explicitly reported its live ready surface,
+    # they must not override that state or prevent the OpenSpec boundary.
+    if any(marker in lowered for marker in ERROR_MARKERS) and not (
+        provider == "opencode" and input_ready is True
+    ):
         return CLASS_ERROR
     if any(marker in lowered for marker in BUSY_MARKERS):
         return CLASS_WORKING
