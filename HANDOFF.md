@@ -2,13 +2,31 @@
 
 ## Current state
 
-- Planning queue now contains two unimplemented follow-ups:
-  `provider-terminal-error-recovery` (provider terminal errors must reach the
-  task-aware new-conversation flow) and `boundary-diagnostic-evidence` (every
-  stop/no-advance decision must be precise, bounded, redacted, retained, and
-  copyable in the widget). The `/tmp` permission policy remains deferred and
-  is intentionally not included. No implementation is authorized by these
-  planning artifacts; implement one active change at a time.
+- Planning queue now contains one unimplemented follow-up:
+  `boundary-diagnostic-evidence` (every stop/no-advance decision must be
+  precise, bounded, redacted, retained, and copyable in the widget). The
+  `/tmp` permission policy remains deferred and is intentionally not
+  included. No implementation is authorized by these planning artifacts;
+  implement one active change at a time.
+- Implemented, verified, and archived:
+  `2026-09-13-provider-terminal-error-recovery` (commit `bfb698c`).
+  Recognized provider terminal-error surfaces (interrupted stream, reset
+  or failed connection, timeout, overloaded/unavailable service) with a
+  usable input-ready marker now classify as `terminal-error` and reach
+  the existing task-aware OpenSpec boundary instead of dead-blocking as
+  a generic error. Precedence is approval, quota/authentication, known
+  recoverable (max-steps, terminal-error), generic error, busy, ready,
+  unknown; terminal-error without a ready surface stays blocked. Each
+  adapter declares its markers (`providers.
+  RECOVERABLE_TERMINAL_ERROR_MARKERS`, mirrored in
+  `robot.RECOVERABLE_TERMINAL_ERROR_MARKERS`); fresh prompts still
+  require a clean input-ready surface via the adapter-owned
+  `new_conversation` operation. Boundary activity/diagnostics record
+  `error_category` (terminal-error/max-steps/clean-finish) and the
+  selected prompt with no raw captures. Verified with 1041 tests (15 new
+  in `tests/test_terminal_error_recovery.py`), Ruff check/format, mypy,
+  coverage 86% (floors pass), `git diff --check`, and strict validation
+  (47 canonical specs, 1 active change).
 - Implemented, verified, and archived:
   `2026-09-13-allow-dirty-task-recovery` (commit `7f6a78e`). A conversation
   with valid unfinished tasks can now recover even when the agent has
@@ -222,9 +240,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Implement `provider-terminal-error-recovery` first. Then implement
-`boundary-diagnostic-evidence`. Both are planning-only and must be delivered
-one active change at a time.
+Implement `boundary-diagnostic-evidence` next. It is planning-only and must
+be delivered one active change at a time.
 
 ## Latest verification evidence
 
