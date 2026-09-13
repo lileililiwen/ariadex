@@ -2,9 +2,19 @@
 
 ## Current state
 
-- No active changes remain (`openspec list` is empty). The last spec
-  `bounded-widget-screen-placement` is implemented, verified, and archived
-  (see below); docs were updated at the final step per operator request.
+- No active changes remain (`openspec list` is empty). The latest boundary
+  fix is implemented, verified, and archived below.
+- Implemented, verified, and archived:
+  `2026-09-13-scoped-git-boundary-evidence` (commit pending). Git status at
+  the conversation boundary still judges unresolved user source, handoff,
+  and OpenSpec work, but excludes Ariadex-owned `.ariadex/` runtime state.
+  OpenSpec remains authoritative: the recorded current spec is matched
+  against `openspec list --json`, `status --change --json`, canonical spec
+  listing, strict validation, and archive proof before the next active
+  change is selected. A real temporary Git/OpenSpec regression proves an
+  archived current spec advances to the next active spec with dirty runtime
+  state. Verified with 259 focused tests, 39 real Unix-socket daemon tests
+  outside the sandbox, Ruff, mypy, diff check, and strict validation.
 - Implemented, verified, and archived:
   `2026-09-13-bounded-widget-screen-placement` (commit `bfde480`). New
   pure helpers in `src/ariadex/companion.py` (stdlib only):
