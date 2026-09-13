@@ -101,8 +101,9 @@ change before implementation.
 - Prompt configuration migration was added in commit `0398f7e`. Rerunning
   `ariadex init` on an older initialized project now adds missing
   `first_prompt` and `continuation_prompt` keys without replacing other
-  configuration. README shows the exact YAML form. Focused init, docs, and
-  managed-start verification passed (59 tests).
+  configuration and exits successfully after the migration (`a93fb4f`). README
+  shows the exact YAML form. Focused init, docs, and managed-start verification
+  passed (59 tests).
 
 - Managed widget child startup was corrected in commit `03649a3`: when the
   parent has already started the project daemon, the child now reuses that
