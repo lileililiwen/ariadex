@@ -653,6 +653,16 @@ def build_managed_context(state: dict) -> dict:
         for entry in events_raw[-MANAGED_LOG_VIEW_LINES:]:
             if not isinstance(entry, dict):
                 continue
+            queue_raw = entry.get("active_queue")
+            queue_names = (
+                [str(name) for name in queue_raw if name]
+                if isinstance(queue_raw, list)
+                else []
+            )
+            try:
+                event_open = int(entry.get("open_tasks", 0) or 0)
+            except (TypeError, ValueError):
+                event_open = 0
             events.append(
                 {
                     "at": _context_field(entry.get("at", "?"), 64),
@@ -661,6 +671,18 @@ def build_managed_context(state: dict) -> dict:
                     "result": _context_field(entry.get("result", ""), 120),
                     "message": _context_field(entry.get("message", "")),
                     "current_spec": _context_field(entry.get("current_spec") or ""),
+                    "classification": _context_field(
+                        entry.get("classification", ""), 64
+                    ),
+                    "decision": _context_field(entry.get("decision", ""), 64),
+                    "blocker": _context_field(entry.get("blocker", "")),
+                    "operation": _context_field(entry.get("operation", ""), 64),
+                    "next_action": _context_field(entry.get("next_action", "")),
+                    "evidence_source": _context_field(
+                        entry.get("evidence_source", ""), 64
+                    ),
+                    "open_tasks": event_open,
+                    "active_queue": queue_names[:MANAGED_LOG_VIEW_LINES],
                 }
             )
     latest_raw = context.get("latest_event")
@@ -669,13 +691,31 @@ def build_managed_context(state: dict) -> dict:
         latest = {
             "category": _context_field(latest_raw.get("category", "?"), 64),
             "message": _context_field(latest_raw.get("message", "")),
+            "decision": _context_field(latest_raw.get("decision", ""), 64),
+            "blocker": _context_field(latest_raw.get("blocker", "")),
+            "operation": _context_field(latest_raw.get("operation", ""), 64),
+            "next_action": _context_field(latest_raw.get("next_action", "")),
         }
     elif events:
         last = events[-1]
-        latest = {"category": last["category"], "message": last["message"]}
-    latest_text = (
-        f"{latest['category']}: {latest['message']}" if latest else "no events yet"
-    )
+        latest = {
+            "category": last["category"],
+            "message": last["message"],
+            "decision": last.get("decision", ""),
+            "blocker": last.get("blocker", ""),
+            "operation": last.get("operation", ""),
+            "next_action": last.get("next_action", ""),
+        }
+    if latest:
+        latest_text = f"{latest['category']}: {latest['message']}"
+        if latest.get("decision"):
+            latest_text += f" [decision={latest['decision']}]"
+        if latest.get("blocker"):
+            latest_text += f" [blocker={latest['blocker']}]"
+        if latest.get("next_action"):
+            latest_text += f" [next={latest['next_action']}]"
+    else:
+        latest_text = "no events yet"
     notes_raw = context.get("notes")
     notes = (
         [_context_field(note) for note in notes_raw if note]
@@ -718,6 +758,27 @@ def format_managed_log_text(projection: dict) -> str:
                 + (f" => {entry.get('result', '')}" if entry.get("result") else "")
                 + (f" :: {entry.get('message', '')}" if entry.get("message") else "")
             )
+            details: list[str] = []
+            if entry.get("classification"):
+                details.append(f"classification={entry['classification']}")
+            if entry.get("decision"):
+                details.append(f"decision={entry['decision']}")
+            if entry.get("current_spec"):
+                details.append(f"spec={entry['current_spec']}")
+            if entry.get("evidence_source"):
+                details.append(f"evidence={entry['evidence_source']}")
+            queue_names = entry.get("active_queue", [])
+            if queue_names:
+                names = ", ".join(str(name) for name in queue_names)
+                details.append(f"queue=[{names}]")
+            if details:
+                lines.append(f"  {'; '.join(details)}")
+            if entry.get("blocker"):
+                lines.append(f"  blocker: {entry['blocker']}")
+            if entry.get("operation"):
+                lines.append(f"  operation: {entry['operation']}")
+            if entry.get("next_action"):
+                lines.append(f"  next: {entry['next_action']}")
     else:
         lines.append("events: (none yet)")
     for note in projection.get("notes", []):
@@ -771,10 +832,23 @@ def format_context_snapshot(projection: dict, state: dict) -> str:
                 + (f" => {entry.get('result', '')}" if entry.get("result") else "")
                 + (f" :: {entry.get('message', '')}" if entry.get("message") else "")
             )
+            if entry.get("decision"):
+                lines.append(f"  decision: {entry['decision']}")
+            if entry.get("blocker"):
+                lines.append(f"  blocker: {entry['blocker']}")
+            if entry.get("next_action"):
+                lines.append(f"  next: {entry['next_action']}")
     else:
         lines.append("- (none yet)")
     for note in projection.get("notes", []):
         lines.append(f"note: {note}")
+    latest = projection.get("latest_event") or {}
+    if isinstance(latest, dict) and latest.get("decision"):
+        lines.append(f"latest decision: {latest.get('decision', '')}")
+    if isinstance(latest, dict) and latest.get("blocker"):
+        lines.append(f"latest blocker: {latest.get('blocker', '')}")
+    if isinstance(latest, dict) and latest.get("next_action"):
+        lines.append(f"latest next action: {latest.get('next_action', '')}")
     return "\n".join(lines)
 
 

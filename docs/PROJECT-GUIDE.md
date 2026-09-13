@@ -145,11 +145,17 @@ runtime state directly and does not inject keystrokes into an editor.
   context` is available after expansion. They place the bounded log or a
   redacted support snapshot on the desktop clipboard via Tk's native
   clipboard (no extra prerequisite). `Copy context` includes the project, provider/session,
-  current spec, OpenSpec queue snapshot, boundary decision, and recent
-  events. The widget retains the latest bounded diagnostic events so provider
-  waits, boundary decisions, failed new-conversation attempts, and shutdown
-  reasons remain visible. Success or failure is reported in the widget; copying never sends
-  provider input and never changes scheduling.
+  current spec, OpenSpec queue snapshot, boundary decision, exact blocker,
+  next action, and recent events. Every provider stop, boundary evaluation,
+  failed new-conversation operation, blocked transition, and shutdown
+  records the provider classification, recorded current spec, authoritative
+  queue, task counts, decision, blocker, operation, and next action; the
+  widget retains the latest bounded diagnostic events so provider waits,
+  boundary decisions, failed new-conversation attempts, and shutdown reasons
+  remain visible with their exact blocker and next action. Success or failure
+  is reported in the widget; copying never sends provider input and never
+  changes scheduling. Diagnostic writes are best-effort and never alter the
+  watcher's decision; raw provider transcripts and secrets are never stored.
 
 Copy-for-support workflow: when a boundary stalls, expand the widget, read
 the log, then `Copy context` and paste it into the support report. The full

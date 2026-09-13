@@ -241,10 +241,14 @@ status text, a read-only chronological diagnostic log with the latest
 watcher event, a hotkey field, and Reconcile/Editor/Session controls.
 `Copy log` places the bounded log on the desktop clipboard and
 `Copy context` places a redacted support snapshot (project, provider and
-session, current spec, OpenSpec queue, boundary decision, recent events)
-there instead — both use Tk's native clipboard with no extra prerequisite
-and report success or failure in the widget. The complete history stays
-available through `ariadex admin diagnostics`. Every daemon mutation goes
+session, current spec, OpenSpec queue, boundary decision, exact blocker,
+next action, recent events) there instead — both use Tk's native clipboard
+with no extra prerequisite and report success or failure in the widget.
+Every stop or no-advance path records the provider classification, recorded
+current spec, authoritative queue, task counts, decision, blocker,
+operation, and next action; the widget keeps the bounded chronological
+window and shows the latest decision, blocker, and next action. The complete
+history stays available through `ariadex admin diagnostics`. Every daemon mutation goes
 through the same typed local IPC as the terminal commands; the companion
 never writes state, touches the lease or tmux, or injects keystrokes into
 your editor. Expanding or copying never sends provider input and never

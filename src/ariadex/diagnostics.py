@@ -89,12 +89,31 @@ def build_diagnostic(
     closed_tasks: int = 0,
     command_role: str = "",
     recovery: str = "",
+    classification: str = "",
+    active_queue: tuple[str, ...] | list[str] = (),
+    evidence_source: str = "",
+    decision: str = "",
+    blocker: str = "",
+    operation: str = "",
+    next_action: str = "",
 ) -> dict:
-    """Build one versioned, redacted diagnostic record with stable keys."""
+    """Build one versioned, redacted diagnostic record with stable keys.
+
+    The no-advance fields (`classification`, `active_queue`,
+    `evidence_source`, `decision`, `blocker`, `operation`, `next_action`)
+    explain every stop/no-advance path: what the provider surface was,
+    which recorded spec and authoritative queue gated the boundary, what
+    was decided, why, and what the operator should do next. All free text
+    is redacted and bounded before persistence; raw provider captures
+    must never be passed in.
+    """
     category = category if category in CATEGORIES else "error"
     clean_action, action_cuts = _redacted_field(action)
     clean_message, message_cuts = _redacted_field(message)
     clean_recovery, recovery_cuts = _redacted_field(recovery)
+    clean_blocker, blocker_cuts = _redacted_field(blocker)
+    clean_next, next_cuts = _redacted_field(next_action)
+    queue = [str(name) for name in (active_queue or ())]
     return {
         "schema_version": DIAGNOSTIC_SCHEMA_VERSION,
         "at": now_iso(),
@@ -111,7 +130,18 @@ def build_diagnostic(
         "closed_tasks": closed_tasks,
         "command_role": command_role,
         "recovery": clean_recovery,
-        "redactions": action_cuts + message_cuts + recovery_cuts,
+        "classification": classification,
+        "active_queue": queue,
+        "evidence_source": evidence_source,
+        "decision": decision,
+        "blocker": clean_blocker,
+        "operation": operation,
+        "next_action": clean_next,
+        "redactions": action_cuts
+        + message_cuts
+        + recovery_cuts
+        + blocker_cuts
+        + next_cuts,
     }
 
 

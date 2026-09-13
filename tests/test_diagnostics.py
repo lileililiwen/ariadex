@@ -52,6 +52,13 @@ class SchemaTest(unittest.TestCase):
                     "command_role",
                     "recovery",
                     "redactions",
+                    "classification",
+                    "active_queue",
+                    "evidence_source",
+                    "decision",
+                    "blocker",
+                    "operation",
+                    "next_action",
                 ]
             ),
         )

@@ -866,13 +866,23 @@ class RobotWatcher:
         closed_tasks: int = 0,
         command_role: str = "",
         recovery: str = "",
+        classification: str = "",
+        active_queue: tuple[str, ...] | list[str] = (),
+        evidence_source: str = "",
+        decision: str = "",
+        blocker: str = "",
+        operation: str = "",
+        next_action: str = "",
     ) -> None:
         """Persist one durable diagnostic (best-effort, never raises).
 
         Diagnostic failure never changes scheduling: the in-memory
         activity event is already recorded and the lifecycle decision
         stands. Raw provider captures are never included; only bounded,
-        redacted classifications and evidence references.
+        redacted classifications and evidence references. Every
+        no-advance path carries the provider classification, recorded
+        spec, authoritative queue, task counts, decision, blocker,
+        operation, and next action so the widget can explain the stop.
         """
         try:
             conversation_id = ""
@@ -901,6 +911,13 @@ class RobotWatcher:
                     closed_tasks=closed_tasks,
                     command_role=command_role,
                     recovery=recovery,
+                    classification=classification or self.last_classification,
+                    active_queue=tuple(active_queue),
+                    evidence_source=evidence_source,
+                    decision=decision,
+                    blocker=blocker,
+                    operation=operation,
+                    next_action=next_action,
                 ),
             )
 
@@ -942,6 +959,9 @@ class RobotWatcher:
             "watcher stopped",
             result="stopped",
             message="watcher exited; session untouched",
+            decision="stopped",
+            operation="shutdown",
+            next_action="re-run the watcher to resume supervision",
         )
         return "stopped: watcher exited; the provider session is untouched"
 
@@ -1022,6 +1042,12 @@ class RobotWatcher:
                 "provider waits for approval",
                 result="waiting",
                 message="watcher continues observing",
+                classification=observed,
+                decision="waiting",
+                blocker=self.block_reason,
+                operation="observe",
+                next_action="answer the approval in the provider session; "
+                "watching resumes afterwards",
             )
             return self.phase
         if observed == CLASS_QUOTA:
@@ -1038,6 +1064,11 @@ class RobotWatcher:
                 result="waiting",
                 message=self.block_reason,
                 recovery="switch model or credentials, then watching resumes",
+                classification=observed,
+                decision="waiting",
+                blocker=self.block_reason,
+                operation="observe",
+                next_action="switch the model or credentials, then watching resumes",
             )
             return self.phase
         if observed == CLASS_ERROR:
@@ -1054,6 +1085,12 @@ class RobotWatcher:
                 result="blocked",
                 message=self.block_reason,
                 recovery="fix it in the session, then resume watching",
+                classification=observed,
+                decision="blocked",
+                blocker=self.block_reason,
+                operation="observe",
+                next_action="fix the provider error in the session, "
+                "then resume watching",
             )
             return self.phase
         if observed == CLASS_MAX_STEPS:
@@ -1083,6 +1120,11 @@ class RobotWatcher:
                 message="evaluating the OpenSpec task boundary; "
                 "no raw provider capture stored",
                 recovery="fresh conversation with the task-selected prompt",
+                classification=observed,
+                decision="recoverable",
+                operation="evaluate-boundary",
+                next_action="run the OpenSpec task boundary, then open a "
+                "fresh conversation with the selected prompt",
             )
             if self.stable_polls < self.config.debounce_polls:
                 return self.phase
@@ -1161,6 +1203,11 @@ class RobotWatcher:
                 result="blocked",
                 message=self.block_reason,
                 current_spec=target,
+                active_queue=tuple(queue),
+                decision="blocked",
+                blocker=self.block_reason,
+                operation="record-conversation",
+                next_action="verify `.ariadex/conversation.json` before continuing",
                 recovery="verify `.ariadex/conversation.json` before continuing",
             )
             return False
@@ -1175,6 +1222,11 @@ class RobotWatcher:
             result="recorded",
             message=f"role {role}; the recorded change gates the boundary",
             current_spec=target,
+            active_queue=tuple(queue),
+            decision="recorded",
+            operation="record-conversation",
+            next_action="open a fresh conversation, then send the "
+            f"{role} prompt after the input-ready surface",
         )
         return True
 
@@ -1220,6 +1272,10 @@ class RobotWatcher:
                 result="blocked",
                 message=self.block_reason,
                 command_role="handoff-read",
+                decision="blocked",
+                blocker=self.block_reason,
+                operation="selection",
+                next_action="verify the handoff file before continuing",
                 recovery="verify the handoff file before continuing",
             )
             return self.phase
@@ -1240,6 +1296,10 @@ class RobotWatcher:
                     result="blocked",
                     message=self.block_reason,
                     command_role="spec-discovery",
+                    decision="blocked",
+                    blocker=self.block_reason,
+                    operation="selection",
+                    next_action="verify the change name before continuing",
                 )
                 return self.phase
         except evidence_mod.EvidenceBlocked as exc:
@@ -1252,6 +1312,10 @@ class RobotWatcher:
                 result="blocked",
                 message=self.block_reason,
                 command_role="openspec-list",
+                decision="blocked",
+                blocker=self.block_reason,
+                operation="selection",
+                next_action="verify the OpenSpec queue before continuing",
             )
             return self.phase
         if not target:
@@ -1262,6 +1326,10 @@ class RobotWatcher:
                 "no active OpenSpec work remains",
                 result="done",
                 message="stopping without a prompt",
+                active_queue=tuple(queue),
+                decision="empty",
+                operation="selection",
+                next_action="stop the managed workflow",
             )
             return self.phase
         if not self._record_before_prompt("first", target, queue):
@@ -1278,6 +1346,11 @@ class RobotWatcher:
             result="sent",
             message="sent initial prompt to the ready conversation",
             current_spec=target,
+            active_queue=tuple(queue),
+            decision="first-prompt",
+            operation="send-initial-prompt",
+            next_action="supervise the provider conversation until the "
+            "next stable input-ready surface",
         )
         return self.phase
 
@@ -1287,6 +1360,16 @@ class RobotWatcher:
             self.phase = BLOCKED
             self.block_reason = recovery
             self._record("boundary", f"blocked: {recovery}")
+            self._diag(
+                "boundary",
+                "conversation recovery blocked",
+                result="blocked",
+                message=recovery,
+                decision="blocked",
+                blocker=recovery,
+                operation="recover-conversation",
+                next_action="verify `.ariadex/conversation.json` before continuing",
+            )
             return self.phase
         if not self.initial_sent:
             return self._send_initial()
@@ -1314,6 +1397,12 @@ class RobotWatcher:
                 current_spec=check.current_spec or None,
                 open_tasks=check.open_tasks,
                 command_role=check.evidence_source,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="blocked",
+                blocker=check.reason,
+                operation="evaluate-boundary",
+                next_action="resolve the blocker, then resume watching",
             )
             self.boundary_error_category = ""
             return self.phase
@@ -1329,6 +1418,11 @@ class RobotWatcher:
                 result="done",
                 message="stopping without a prompt",
                 current_spec=check.current_spec or None,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="empty",
+                operation="evaluate-boundary",
+                next_action="stop the managed workflow",
             )
             self.boundary_error_category = ""
             return self.phase
@@ -1346,6 +1440,12 @@ class RobotWatcher:
                 current_spec=check.current_spec or None,
                 open_tasks=check.open_tasks,
                 command_role=check.evidence_source,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="unfinished",
+                operation="evaluate-boundary",
+                next_action="open a fresh conversation and send the "
+                "confirmation prompt",
             )
             return self._open_confirmation(check)
         if check.decision == "ready-to-archive":
@@ -1362,6 +1462,12 @@ class RobotWatcher:
                 current_spec=check.current_spec or None,
                 open_tasks=check.open_tasks,
                 command_role=check.evidence_source,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="ready-to-archive",
+                operation="evaluate-boundary",
+                next_action="open a fresh conversation and send the "
+                "confirmation prompt with the archival instruction",
             )
             return self._open_confirmation(check, check.task_detail)
         self._record(
@@ -1377,6 +1483,11 @@ class RobotWatcher:
             current_spec=check.current_spec or check.active[0],
             open_tasks=check.open_tasks,
             command_role=check.evidence_source,
+            active_queue=tuple(check.active),
+            evidence_source=check.evidence_source,
+            decision="complete",
+            operation="evaluate-boundary",
+            next_action="open a fresh conversation and send the continuation prompt",
         )
         return self._open_continuation(check)
 
@@ -1398,6 +1509,17 @@ class RobotWatcher:
         if not next_target:
             self.phase = DONE
             self._record("boundary", "no active OpenSpec work remains; stopping")
+            self._diag(
+                "boundary",
+                "no active OpenSpec work remains",
+                result="done",
+                message="stopping without a prompt",
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="empty",
+                operation="new-conversation",
+                next_action="stop the managed workflow",
+            )
             return self.phase
         if not self._record_before_prompt(
             "continuation", next_target, list(check.active)
@@ -1419,6 +1541,13 @@ class RobotWatcher:
                 result="blocked",
                 message=self.block_reason,
                 current_spec=next_target,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="blocked",
+                blocker=self.block_reason,
+                operation="new-conversation",
+                next_action="open a new provider conversation manually, "
+                "then resume watching",
             )
             return self.phase
         except Exception as exc:
@@ -1435,6 +1564,12 @@ class RobotWatcher:
                 result="blocked",
                 message=self.block_reason,
                 current_spec=next_target,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="blocked",
+                blocker=self.block_reason,
+                operation="new-conversation",
+                next_action="verify the provider session before continuing",
                 recovery="verify the provider session before continuing",
             )
             return self.phase
@@ -1452,6 +1587,13 @@ class RobotWatcher:
                 result="blocked",
                 message=self.block_reason,
                 current_spec=next_target,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="blocked",
+                blocker=self.block_reason,
+                operation="new-conversation",
+                next_action="verify the provider session shows an "
+                "input-ready surface, then resume watching",
             )
             return self.phase
         self._send(self.config.continuation_prompt)
@@ -1471,6 +1613,12 @@ class RobotWatcher:
             message="sent continuation prompt in a fresh conversation; "
             f"error_category={error_category}; no raw provider capture stored",
             current_spec=next_target,
+            active_queue=tuple(check.active),
+            evidence_source=check.evidence_source,
+            decision="continuation",
+            operation="new-conversation",
+            next_action="supervise the fresh conversation until the next "
+            "stable input-ready surface",
         )
         self.boundary_error_category = ""
         return self.phase
@@ -1501,6 +1649,12 @@ class RobotWatcher:
                 "confirmation has no recorded change",
                 result="blocked",
                 message=self.block_reason,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="blocked",
+                blocker=self.block_reason,
+                operation="new-conversation",
+                next_action="verify the conversation record before continuing",
             )
             return self.phase
         if not self._record_before_prompt("confirmation", target, list(check.active)):
@@ -1524,6 +1678,12 @@ class RobotWatcher:
             message=f"{detail}; error_category={error_category}",
             current_spec=target,
             open_tasks=check.open_tasks,
+            active_queue=tuple(check.active),
+            evidence_source=check.evidence_source,
+            decision=check.decision,
+            operation="new-conversation",
+            next_action="open a fresh conversation and send the "
+            "confirmation prompt after the input-ready surface",
         )
         try:
             self.adapter.new_conversation()
@@ -1540,6 +1700,14 @@ class RobotWatcher:
                 result="blocked",
                 message=self.block_reason,
                 current_spec=target,
+                open_tasks=check.open_tasks,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="blocked",
+                blocker=self.block_reason,
+                operation="new-conversation",
+                next_action="open a new provider conversation manually, "
+                "then resume watching",
             )
             return self.phase
         except Exception as exc:
@@ -1556,6 +1724,13 @@ class RobotWatcher:
                 result="blocked",
                 message=self.block_reason,
                 current_spec=target,
+                open_tasks=check.open_tasks,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="blocked",
+                blocker=self.block_reason,
+                operation="new-conversation",
+                next_action="verify the provider session before continuing",
                 recovery="verify the provider session before continuing",
             )
             return self.phase
@@ -1574,6 +1749,14 @@ class RobotWatcher:
                 result="blocked",
                 message=self.block_reason,
                 current_spec=target,
+                open_tasks=check.open_tasks,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="blocked",
+                blocker=self.block_reason,
+                operation="new-conversation",
+                next_action="verify the provider session shows an "
+                "input-ready surface, then resume watching",
             )
             return self.phase
         self._send(self.config.confirmation_prompt)
@@ -1595,6 +1778,12 @@ class RobotWatcher:
             f"error_category={error_category}; no raw provider capture stored",
             current_spec=target,
             open_tasks=check.open_tasks,
+            active_queue=tuple(check.active),
+            evidence_source=check.evidence_source,
+            decision="confirmation",
+            operation="new-conversation",
+            next_action="supervise the fresh conversation until the next "
+            "stable input-ready surface",
         )
         self.boundary_error_category = ""
         return self.phase
@@ -1625,6 +1814,10 @@ class RobotWatcher:
             "watcher started",
             result="started",
             message=f"watching session `{self.config.session}`",
+            decision="started",
+            operation="watch",
+            next_action="observe the provider session until a stable "
+            "input-ready surface",
         )
         while True:
             if self._quit:
@@ -1633,6 +1826,10 @@ class RobotWatcher:
                     "watcher quit requested",
                     result="stopped",
                     message=self.block_reason or "provider session untouched",
+                    decision="stopped",
+                    blocker=self.block_reason,
+                    operation="shutdown",
+                    next_action="re-run the watcher to resume supervision",
                 )
                 return RobotReport(
                     outcome=STOPPED,
@@ -1651,6 +1848,9 @@ class RobotWatcher:
                     "managed shutdown requested",
                     result="stopped",
                     message="managed shutdown requested",
+                    decision="stopped",
+                    operation="shutdown",
+                    next_action="stopped; re-run the watcher to resume",
                 )
                 continue
             if self.phase in (DONE, BLOCKED):
@@ -1661,6 +1861,12 @@ class RobotWatcher:
                     f"watcher {outcome}",
                     result=outcome,
                     message=detail,
+                    decision=outcome,
+                    blocker=detail,
+                    operation="shutdown",
+                    next_action="stop the managed workflow"
+                    if outcome == "done"
+                    else "resolve the blocker, then resume watching",
                 )
                 return RobotReport(
                     outcome=outcome,
@@ -1674,6 +1880,11 @@ class RobotWatcher:
                     result="max-polls",
                     message=f"poll budget of {self.config.max_polls} spent "
                     f"in phase `{self.phase}`; no completion claimed",
+                    decision="max-polls",
+                    blocker=f"poll budget of {self.config.max_polls} spent "
+                    f"in phase `{self.phase}`",
+                    operation="watch",
+                    next_action="raise `--max-polls` and re-run to continue",
                 )
                 return RobotReport(
                     outcome="max-polls",
