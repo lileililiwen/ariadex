@@ -340,12 +340,14 @@ class RobotWatcher:
         driver: TerminalDriver,
         adapter: AgentAdapter,
         shutdown_requested: Callable[[], bool] | None = None,
+        mode_requested: Callable[[], str] | None = None,
     ) -> None:
         self.project_dir = project_dir
         self.config = validate_config(config)
         self.driver = driver
         self.adapter = adapter
         self.shutdown_requested = shutdown_requested
+        self.mode_requested = mode_requested
         self.phase = ATTACHED
         self.stable_polls = 0
         # Empty initial prompt means attach to the current conversation and
@@ -410,6 +412,15 @@ class RobotWatcher:
         if self._quit:
             self.phase = STOPPED
             return self.phase
+        if self.mode_requested is not None:
+            mode = self.mode_requested()
+            if mode == "PAUSE":
+                self._paused = True
+                self.phase = PAUSED
+                self.stable_polls = 0
+                return self.phase
+            if self._paused and mode == "AUTO":
+                self.request_resume()
         if self._paused:
             self.phase = PAUSED
             return self.phase

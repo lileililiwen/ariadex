@@ -1616,6 +1616,7 @@ def _build_managed_watcher(project_dir, cfg, driver, adapter, session, resolved)
         driver,
         adapter,
         shutdown_requested=lambda: _managed_shutdown_requested(project_dir),
+        mode_requested=lambda: state_mod.read(project_dir).mode,
     )
 
 

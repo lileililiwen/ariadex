@@ -698,6 +698,14 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.window._on_stop()
         self.assertEqual(self.client.calls, ["pause", "resume", "stop"])
 
+    def test_paused_state_keeps_pause_label_and_enables_play(self):
+        self.client.state = live_state(mode="PAUSE")
+        self.window._refresh()
+
+        self.assertEqual(self.window.pause_button.options.get("text"), "Pause")
+        self.assertEqual(self.window.pause_button.options.get("state"), "disabled")
+        self.assertEqual(self.window.play_button.options.get("state"), "normal")
+
     def test_stop_decline_sends_nothing(self):
         FakeMessagebox.answer = False
         try:

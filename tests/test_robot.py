@@ -57,6 +57,7 @@ def make_watcher(
         "poll_interval_s": 0.01,
     }
     shutdown_requested = overrides.pop("shutdown_requested", None)
+    mode_requested = overrides.pop("mode_requested", None)
     params.update(overrides)
     config = robot_mod.RobotConfig(**params)
     return robot_mod.RobotWatcher(
@@ -65,6 +66,7 @@ def make_watcher(
         driver,
         adapter,
         shutdown_requested=shutdown_requested,
+        mode_requested=mode_requested,
     )
 
 
@@ -361,6 +363,28 @@ class WatcherStateTest(unittest.TestCase):
         )
 
         self.assertEqual(watcher.poll(), robot_mod.WAITING)
+        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+
+    def test_paused_managed_mode_blocks_first_prompt_until_auto(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": self._ready(),
+            "workdir": "/t",
+        }
+        mode = ["PAUSE"]
+        watcher = make_watcher(
+            project,
+            driver,
+            debounce_polls=1,
+            mode_requested=lambda: mode[0],
+        )
+
+        self.assertEqual(watcher.poll(), robot_mod.PAUSED)
+        self.assertEqual(driver.sent_inputs("agent"), [])
+        mode[0] = "AUTO"
+        self.assertEqual(watcher.poll(), robot_mod.CONTINUING)
         self.assertEqual(driver.sent_inputs("agent"), ["please start"])
         self.assertTrue(watcher.initial_sent)
         # The echoed prompt keeps the surface ready; the boundary check

@@ -1055,9 +1055,7 @@ class CompanionWindow:
         self.state_label.configure(text=f"{indicator}{suffix}")
         self.work_label.configure(text=str(model.get("work_label", "")))
         actions = model.get("actions", {})
-        self.pause_button.configure(
-            text="Resume" if model.get("indicator") == "paused" else "Pause"
-        )
+        self.pause_button.configure(text="Pause")
         self.pause_button.configure(
             state="normal" if actions.get("pause") else "disabled"
         )
