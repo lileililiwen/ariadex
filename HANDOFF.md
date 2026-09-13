@@ -2,8 +2,13 @@
 
 ## Current state
 
-- Planning queue is empty: both diagnostics follow-ups are implemented,
-  verified, and archived. No active changes remain.
+- Planning queue now contains two unimplemented follow-ups:
+  `provider-terminal-error-recovery` (provider terminal errors must reach the
+  task-aware new-conversation flow) and `boundary-diagnostic-evidence` (every
+  stop/no-advance decision must be precise, bounded, redacted, retained, and
+  copyable in the widget). The `/tmp` permission policy remains deferred and
+  is intentionally not included. No implementation is authorized by these
+  planning artifacts; implement one active change at a time.
 - Implemented, verified, and archived:
   `2026-09-13-allow-dirty-task-recovery` (commit `7f6a78e`). A conversation
   with valid unfinished tasks can now recover even when the agent has
@@ -217,8 +222,9 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active changes remain. The next work item has not been planned yet;
-run a fresh planning pass before selecting anything new.
+Implement `provider-terminal-error-recovery` first. Then implement
+`boundary-diagnostic-evidence`. Both are planning-only and must be delivered
+one active change at a time.
 
 ## Latest verification evidence
 
