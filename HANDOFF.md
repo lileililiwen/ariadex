@@ -2,6 +2,12 @@
 
 ## Current state
 
+- Follow-up widget pause synchronization: the managed watcher now honors
+  durable `PAUSE` before delivering the first or continuation prompt and
+  resumes only after Play returns the daemon to `AUTO`. The widget keeps its
+  Pause label disabled while paused and enables Play as the resume action.
+  Verified with 906 tests, Ruff check/format, and strict OpenSpec validation
+  (no active changes).
 - Follow-up managed single-writer correction: `ariadex start` marks the
   project as managed, so the resident daemon keeps lease/IPC/status/control
   responsibilities but never sends `Runner` prompts. The managed watcher is
