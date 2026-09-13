@@ -270,7 +270,7 @@ def check_boundary(
     project_dir: Path,
     config: RobotConfig,
 ) -> BoundaryCheck:
-    """Inspect HANDOFF.md, tasks, git, and the active OpenSpec list.
+    """Inspect HANDOFF.md, git, and the active OpenSpec list.
 
     Returns ok only when the previous conversation's work is represented
     durably. An empty active list is ok with no remaining work: the
@@ -287,7 +287,7 @@ def check_boundary(
             active=[],
         )
     try:
-        handoff = handoff_mod.read_handoff(handoff_path)
+        handoff_mod.read_handoff(handoff_path)
     except (handoff_mod.HandoffError, OSError) as exc:
         return BoundaryCheck(ok=False, reason=f"handoff unreadable: {exc}", active=[])
     graph, errors = spec_graph_mod.load_graph(project_dir, config.spec_dir)
@@ -298,11 +298,9 @@ def check_boundary(
             reason=f"spec metadata blocked: {errors[first]}",
             active=sorted(graph),
         )
-    finished_change = config.finished_change or handoff.current_spec or ""
-    if finished_change:
-        done, reason = _tasks_complete(project_dir, config.spec_dir, finished_change)
-        if not done:
-            return BoundaryCheck(ok=False, reason=reason, active=sorted(graph))
+    # Open tasks are expected between conversations: a spec commonly needs
+    # several prompts. Task markers gate verified spec completion in Runner;
+    # they must not prevent the watcher from opening the next conversation.
     clean, reason = _git_tree_clean(project_dir)
     if not clean:
         return BoundaryCheck(ok=False, reason=reason, active=sorted(graph))

@@ -189,11 +189,11 @@ Behavior:
   continuation prompt (default `Please read the HANDOFF.md, and implement
   the next spec.`) is sent to every subsequent new conversation.
 - Before each continuation, the robot checks the durable boundary:
-  handoff readability, task completion for the change named by
-  `HANDOFF.md` (or the explicit `--finished-change` override), a clean git
-  tree, and the active OpenSpec list. Unfinished work blocks with the
-  exact reason; an empty active list stops the watcher with a completion
-  report and no further prompt. `--max-polls` bounds a run (0 means
+  handoff readability, a clean git tree, and the active OpenSpec list. Open
+  tasks are expected across multiple conversations and do not block `/new`;
+  configured verification and task completion gate actual spec completion.
+  An empty active list stops the watcher with a completion report and no
+  further prompt. `--max-polls` bounds a run (0 means
   unbounded); `--poll-interval` sets the seconds between pane polls.
 - Providers continue automatically once the durable boundary is verified:
   OpenCode opens a fresh conversation with its verified in-session

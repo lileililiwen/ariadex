@@ -812,23 +812,32 @@ class BoundaryTest(unittest.TestCase):
         self.assertFalse(check.ok)
         self.assertIn("broken", check.reason)
 
-    def test_open_tasks_block(self) -> None:
+    def test_open_tasks_do_not_block_next_conversation(self) -> None:
         project = make_project(self._tmp)
         change = project / "openspec" / "changes" / "demo"
         change.mkdir(parents=True)
         (change / "tasks.md").write_text(
             "# Tasks\n\n- [x] Done\n- [ ] Open\n", encoding="utf-8"
         )
-        check = robot_mod.check_boundary(project, self._config(finished_change="demo"))
-        self.assertFalse(check.ok)
-        self.assertIn("open task", check.reason)
+        with unittest.mock.patch.object(
+            robot_mod, "_git_tree_clean", return_value=(True, "")
+        ):
+            check = robot_mod.check_boundary(
+                project, self._config(finished_change="demo")
+            )
+        self.assertTrue(check.ok, check.reason)
+        self.assertEqual(check.active, ["demo"])
 
-    def test_missing_tasks_file_blocks(self) -> None:
+    def test_missing_tasks_file_does_not_block_next_conversation(self) -> None:
         project = make_project(self._tmp)
         (project / "openspec" / "changes" / "demo").mkdir(parents=True)
-        check = robot_mod.check_boundary(project, self._config(finished_change="demo"))
-        self.assertFalse(check.ok)
-        self.assertIn("tasks.md", check.reason)
+        with unittest.mock.patch.object(
+            robot_mod, "_git_tree_clean", return_value=(True, "")
+        ):
+            check = robot_mod.check_boundary(
+                project, self._config(finished_change="demo")
+            )
+        self.assertTrue(check.ok, check.reason)
 
     def test_archived_change_has_no_open_tasks(self) -> None:
         project = make_project(self._tmp)
@@ -868,7 +877,7 @@ class BoundaryTest(unittest.TestCase):
         self.assertTrue(check.ok, check.reason)
         self.assertEqual(check.active, ["demo"])
 
-    def test_handoff_current_spec_open_tasks_block_without_override(self) -> None:
+    def test_handoff_current_spec_open_tasks_allow_next_conversation(self) -> None:
         project = make_project(self._tmp)
         change = project / "openspec" / "changes" / "demo"
         change.mkdir(parents=True)
@@ -880,10 +889,13 @@ class BoundaryTest(unittest.TestCase):
         handoff.current_spec = "demo"
         handoff_mod.write_handoff(project / "HANDOFF.md", handoff)
 
-        check = robot_mod.check_boundary(project, self._config())
+        with unittest.mock.patch.object(
+            robot_mod, "_git_tree_clean", return_value=(True, "")
+        ):
+            check = robot_mod.check_boundary(project, self._config())
 
-        self.assertFalse(check.ok)
-        self.assertIn("1 open task", check.reason)
+        self.assertTrue(check.ok, check.reason)
+        self.assertEqual(check.active, ["demo"])
 
     def test_git_gate_refuses_outside_a_repo(self) -> None:
         project = make_project(self._tmp)
