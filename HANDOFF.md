@@ -2,14 +2,31 @@
 
 ## Current state
 
-- Planning queue now contains one unimplemented follow-up:
-  `boundary-diagnostic-evidence` (every stop/no-advance decision must be
-  precise, bounded, redacted, retained, and copyable in the widget). The
-  `/tmp` permission policy remains deferred and is intentionally not
-  included. No implementation is authorized by these planning artifacts;
-  implement one active change at a time.
+- Planning queue is empty: `boundary-diagnostic-evidence` is implemented
+  below and no active changes remain (`openspec list` reports no items).
+  The `/tmp` permission policy remains deferred and is intentionally not
+  included.
 - Implemented, verified, and archived:
-  `2026-09-13-provider-terminal-error-recovery` (commit `bfb698c`).
+  `2026-09-13-boundary-diagnostic-evidence` (commit `96dc8fe`). Every
+  provider stop, boundary evaluation, failed new-conversation operation,
+  blocked transition, and managed shutdown now records a bounded redacted
+  diagnostic with the provider classification, recorded current spec,
+  authoritative active queue, task counts, decision, exact blocker,
+  operation, and next action (`diagnostics.build_diagnostic` gains
+  `classification`, `active_queue`, `evidence_source`, `decision`,
+  `blocker`, `operation`, `next_action`; all free text redacted/bounded;
+  raw captures never stored). The daemon widget context projects the new
+  fields per event, the managed widget keeps the bounded chronological
+  window (latest 20) and renders the exact blocker and next action per
+  event plus the latest decision/blocker/next in its collapsed text, and
+  Copy log/Copy context carry the same redacted evidence. Diagnostic
+  failure stays best-effort and never alters scheduling. Verified with
+  1054 tests (13 new in `tests/test_boundary_diagnostics.py`; stable-keys
+  expectation extended for the 7 new fields), Ruff check/format, mypy,
+  coverage 86% (floors pass), `git diff --check`, and strict validation
+  (47 canonical specs, no active changes).
+- Implemented, verified, and archived:
+  `2026-09-13-provider-terminal-error-recovery` (commit `4a1508c`).
   Recognized provider terminal-error surfaces (interrupted stream, reset
   or failed connection, timeout, overloaded/unavailable service) with a
   usable input-ready marker now classify as `terminal-error` and reach
@@ -240,8 +257,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Implement `boundary-diagnostic-evidence` next. It is planning-only and must
-be delivered one active change at a time.
+No active changes remain. `openspec list` reports an empty queue; select
+the next change only when new planning artifacts appear, one at a time.
 
 ## Latest verification evidence
 
