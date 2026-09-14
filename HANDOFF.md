@@ -50,6 +50,22 @@
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-robot-hub-tab-detail`. Hub tabs now carry queue evidence and
+  the detail panel is organized in labeled rows. `robot.queue_summary`
+  (plus `RobotWatcher.queue_summary`) reads active-change discovery, the
+  recorded conversation, the handoff, and the current spec's tasks.md with
+  file reads only — no subprocess, no provider I/O, never raises — and
+  `format_hub_queue_text` renders `queue: N active · <spec> open/total`
+  (honest `n/a` with the exact reason for non-OpenSpec or unreadable
+  projects, isolated per tab). The panel shows a header (state dot, phase,
+  current spec), `project`, `session`, `queue`, and `latest` rows, plus an
+  expanded-only run-stats row (prompts, confirmations, approvals from the
+  newly exposed `status_view["prompts_sent"]`). Tab switches and log expand
+  still send no input. Verified with 1239 tests OK (18 new in
+  `tests/test_robot_hub.py`), Ruff check/format clean on touched files,
+  mypy clean (34 files), coverage 86% (floors pass), and strict
+  change/spec validation green (55 specs).
+- Implemented, verified, and archived:
   `2026-09-14-multi-project-robot-hub`. One tabbed hub window replaces one
   floating robot widget per project: `ariadex watch --hub
   PROJECT:SESSION[:PROVIDER]` (repeatable) supervises each project with its
