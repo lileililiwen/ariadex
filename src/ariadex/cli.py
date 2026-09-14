@@ -3910,7 +3910,7 @@ def _run_guarded(
     def _release_on_term(signum, frame) -> None:  # pragma: no cover - signal path
         concurrency_mod.release(project_dir)
         signal.signal(signal.SIGTERM, old_term)
-        os.kill(os.getpid(), signum)
+        signal.raise_signal(signum)
 
     with contextlib.suppress(OSError, ValueError):
         signal.signal(signal.SIGTERM, _release_on_term)
