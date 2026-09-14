@@ -225,6 +225,11 @@ For later accident analysis, inspect `.ariadex/diagnostics/diagnostics.jsonl`
 for structured provider-exit evidence and `.ariadex/daemon.log` for daemon
 stdout/stderr. Provider pane evidence is bounded and redacted.
 
+```bash
+ariadex admin diagnostics --json  # machine-readable exit and lifecycle evidence
+ariadex admin diagnostics --help  # filters and output options
+```
+
 For OpenCode, the terminal UI and API backend are tracked separately. If the
 tmux UI exits but the Ariadex-owned OpenCode backend is still responsive,
 rerunning `ariadex start` attaches a replacement UI to the same backend rather
