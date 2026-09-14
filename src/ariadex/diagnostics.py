@@ -211,6 +211,39 @@ def try_record(project_dir: Path, record: dict) -> bool:
     return True
 
 
+def record_operation(
+    project_dir: Path,
+    operation: str,
+    *,
+    phase: str,
+    result: str = "started",
+    provider: str = "",
+    session: str = "",
+    actor: str = "ariadex",
+    details: dict[str, object] | None = None,
+) -> bool:
+    """Record a potentially destructive lifecycle operation best-effort.
+
+    This is deliberately separate from scheduling diagnostics: an operation
+    audit is written immediately before and after signals, tmux teardown, and
+    provider startup so postmortems can identify the actor and target even
+    when the operation fails.
+    """
+    safe_details = {"actor": actor, **(details or {})}
+    return try_record(
+        project_dir,
+        build_diagnostic(
+            "provider",
+            operation,
+            result=result,
+            provider=provider,
+            session=session,
+            phase=phase,
+            details=safe_details,
+        ),
+    )
+
+
 def _parse_time(value: object) -> float | None:
     if not isinstance(value, str) or not value:
         return None

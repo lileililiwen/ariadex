@@ -155,6 +155,45 @@ class ManagedRuntime:
     def _run_watcher(self) -> None:
         if self.watcher is not None:
             self.outcome = self.watcher.run()
+            if self._unexpected_provider_exit():
+                from . import diagnostics as diagnostics_mod
+
+                details: dict[str, object] = {"watcher_outcome": str(self.outcome)}
+                adapter = self.adapter
+                if adapter is not None:
+                    try:
+                        details["final_capture"] = adapter.capture_output()[-4000:]
+                    except Exception as exc:
+                        details["final_capture_error"] = str(exc)
+                diagnostics_mod.record_operation(
+                    self.project_dir,
+                    "unexpected-provider-exit",
+                    phase="observed",
+                    result="provider-missing",
+                    provider=getattr(adapter, "provider_name", ""),
+                    session=getattr(adapter, "session_name", ""),
+                    details=details,
+                )
+
+    def _unexpected_provider_exit(self) -> bool:
+        """Return true only for a provider loss without an explicit stop."""
+        record = None
+        try:
+            from . import daemon
+
+            record = daemon.read_record(self.project_dir)
+        except Exception as exc:
+            record = None
+            _ = exc
+        if record is not None and record.status in ("stopping", "stopped"):
+            return False
+        adapter = self.adapter
+        if adapter is None:
+            return False
+        try:
+            return not bool(adapter.driver.session_alive(adapter.session_name))
+        except Exception:
+            return False
 
     def stop(self, reason: str) -> None:
         """Request watcher stop, then terminate provider and widget once."""

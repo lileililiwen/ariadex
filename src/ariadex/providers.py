@@ -31,6 +31,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+from . import diagnostics as diagnostics_mod
 from . import provider_runtime
 from .adapters import AgentAdapter, Capabilities, StartupError, UnsupportedOperation
 from .terminal import TerminalDriver, TmuxDriver
@@ -134,11 +135,37 @@ class OpenCodeAdapter(AgentAdapter):
                 command = self.launch_command_for_provider()
                 reused = False
         try:
+            diagnostics_mod.record_operation(
+                project_dir,
+                "provider-start",
+                phase="before",
+                provider=self.provider_name,
+                session=self.session_name,
+                details={"command": " ".join(command), "reused": reused},
+            )
             result = self.driver.create_or_connect(
                 self.session_name, self.workdir, command
             )
         except Exception as exc:
+            diagnostics_mod.record_operation(
+                project_dir,
+                "provider-start",
+                phase="after",
+                result="failed",
+                provider=self.provider_name,
+                session=self.session_name,
+                details={"error": str(exc)},
+            )
             raise StartupError(f"{self.provider_name} startup failed: {exc}") from exc
+        diagnostics_mod.record_operation(
+            project_dir,
+            "provider-start",
+            phase="after",
+            result="succeeded",
+            provider=self.provider_name,
+            session=self.session_name,
+            details={"result": result, "reused": reused},
+        )
         if isinstance(self.driver, TmuxDriver) and not reused:
             process = provider_runtime.find_process(self.api_port, project_dir)
             if process is None:
@@ -168,11 +195,47 @@ class OpenCodeAdapter(AgentAdapter):
         )
 
     def terminate(self) -> None:
-        record = provider_runtime.read_record(Path(self.workdir))
-        super().terminate()
+        project_dir = Path(self.workdir)
+        record = provider_runtime.read_record(project_dir)
+        details = {
+            "pid": record.pid if record else None,
+            "process_start_ticks": record.process_start_ticks if record else None,
+            "generation": record.generation if record else "",
+        }
+        diagnostics_mod.record_operation(
+            project_dir,
+            "provider-terminate",
+            phase="before",
+            provider=self.provider_name,
+            session=self.session_name,
+            details=details,
+        )
+        try:
+            super().terminate()
+        except Exception as exc:
+            diagnostics_mod.record_operation(
+                project_dir,
+                "provider-terminate",
+                phase="after",
+                result="failed",
+                provider=self.provider_name,
+                session=self.session_name,
+                details={**details, "error": str(exc)},
+            )
+            raise
         if record is not None:
-            provider_runtime.terminate_owned(Path(self.workdir), record)
-            provider_runtime.clear_record(Path(self.workdir))
+            owned_result = provider_runtime.terminate_owned(project_dir, record)
+            provider_runtime.clear_record(project_dir)
+            details["owned_process_signal_result"] = owned_result
+        diagnostics_mod.record_operation(
+            project_dir,
+            "provider-terminate",
+            phase="after",
+            result="succeeded",
+            provider=self.provider_name,
+            session=self.session_name,
+            details=details,
+        )
 
     def launch_command_for_provider(self) -> list[str]:
         return [*self.launch_command, "--port", str(self.api_port)]

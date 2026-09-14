@@ -223,6 +223,11 @@ generation. It never creates a second daemon, session, supervisor, or prompt.
 For later accident analysis, inspect `.ariadex/diagnostics/diagnostics.jsonl`
 for structured provider-exit evidence and `.ariadex/daemon.log` for daemon
 stdout/stderr. Provider pane evidence is bounded and redacted.
+Lifecycle diagnostics include before/after provider start and termination
+records, the initiating actor, target PID/start identity, operation result,
+and unexpected-exit evidence. These records are the source for determining
+whether Ariadex requested termination; an external signal is reported as
+unknown unless the host audit service captured its sender.
 
 ```bash
 ariadex admin diagnostics --json  # machine-readable exit and lifecycle evidence

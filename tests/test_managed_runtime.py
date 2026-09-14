@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from ariadex import cli, managed_runtime, prerequisites
+from ariadex import cli, diagnostics, managed_runtime, prerequisites
 
 
 class FakeAdapter:
@@ -18,6 +18,20 @@ class FakeAdapter:
 
     def terminate(self):
         self.events.append("provider-stop")
+
+
+class DeadDriver:
+    def session_alive(self, _name):
+        return False
+
+
+class DeadAdapter(FakeAdapter):
+    provider_name = "opencode"
+    session_name = "ariadex-test"
+    driver = DeadDriver()
+
+    def capture_output(self):
+        return "final pane output"
 
 
 class FakeWatcher:
@@ -131,6 +145,21 @@ class ManagedRuntimeTest(unittest.TestCase):
             runtime.start()
             runtime.stop("operator")
             self.assertEqual(runtime.last_stop_reason, "operator")
+
+    def test_unexpected_provider_exit_records_final_evidence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = managed_runtime.ManagedRuntime(
+                Path(temp),
+                adapter_factory=lambda: DeadAdapter([]),
+                watcher_factory=lambda: FakeWatcher([]),
+            )
+            with mock.patch.object(managed_runtime, "write_generation"):
+                runtime.start()
+            runtime._watcher_thread.join(timeout=2)
+            records, _ = diagnostics.read_diagnostics(Path(temp))
+            exits = [r for r in records if r["action"] == "unexpected-provider-exit"]
+            self.assertEqual(len(exits), 1)
+            self.assertEqual(exits[0]["details"]["final_capture"], "final pane output")
 
 
 if __name__ == "__main__":
