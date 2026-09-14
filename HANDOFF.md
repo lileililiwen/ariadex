@@ -50,6 +50,18 @@
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-hub-tab-quit-index`. Quitting a middle hub tab left the
+  remaining buttons bound to stale indices, so the next click set an
+  out-of-range active index and every render died with `IndexError`
+  (frozen panel, dead expand; reproduced under real Tk on Xvfb).
+  `_on_quit_active` now delegates removal to `remove_project`, which
+  rebuilds the tab bar and caches from the surviving list, and `_render`
+  clamps a stale active index instead of raising. Verified with 1275
+  tests OK (1 new regression test), real-Tk Xvfb drill (quit middle,
+  click, add, expand — no callback exceptions), Ruff check/format clean,
+  mypy clean (35 files), coverage 86% (floors pass), and strict
+  change/spec validation green (55 specs).
+- Implemented, verified, and archived:
   `2026-09-14-hub-auto-join`. Running `ariadex start` in each project now
   auto-registers one daemon-backed tab in the singleton hub window with no
   extra flags: the first start spawns `admin hub-window` in the
