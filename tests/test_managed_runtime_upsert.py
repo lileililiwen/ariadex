@@ -126,6 +126,33 @@ class ManagedStartRepairTests(unittest.TestCase):
         )
         adapter.start.assert_called_once()
 
+    def test_live_daemon_rerun_resumes_paused_scheduler(self):
+        cfg = config.load(self.root)
+        st = state.read(self.root)
+        driver = mock.Mock()
+        driver.session_alive.return_value = True
+        with (
+            mock.patch.object(
+                cli.widget_runtime_mod, "ensure_widget", return_value=(None, False)
+            ),
+            mock.patch.object(cli.terminal_mod, "TmuxDriver", return_value=driver),
+            mock.patch.object(
+                cli,
+                "_daemon_ipc_or_none",
+                side_effect=[{"mode": "PAUSE"}, {"mode": "AUTO"}],
+            ) as ipc,
+            mock.patch.object(cli, "_has_terminal", return_value=False),
+        ):
+            code = cli._repair_live_runtime(self.root, cfg, st)
+        self.assertEqual(code, cli.EXIT_OK)
+        self.assertEqual(
+            ipc.call_args_list,
+            [
+                mock.call(self.root, "status"),
+                mock.call(self.root, "resume"),
+            ],
+        )
+
     def test_start_help_hides_internal_lifecycle_commands(self):
         output = io.StringIO()
         with redirect_stdout(output), self.assertRaises(SystemExit) as raised:

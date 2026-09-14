@@ -1,0 +1,6 @@
+- [x] Size collapsed and expanded widgets for all visible controls and text areas.
+- [x] Stabilize titlebar and action-row layout propagation.
+- [x] Resume a paused daemon during explicit managed-start reconciliation.
+- [x] Add geometry and lifecycle regression tests.
+- [x] Run focused tests, lint, type checks, diff checks, and strict OpenSpec validation.
+- [x] Archive only after canonical spec promotion.

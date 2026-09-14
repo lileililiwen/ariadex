@@ -1823,6 +1823,13 @@ def _repair_live_runtime(project_dir: Path, cfg, st, as_json: bool = False) -> i
                     "provider session did not remain alive"
                 )
             print("provider: restored managed editor")
+        daemon_state = _daemon_ipc_or_none(project_dir, "status")
+        if (
+            daemon_state
+            and daemon_state.get("mode") == "PAUSE"
+            and _daemon_ipc_or_none(project_dir, "resume") is not None
+        ):
+            print("scheduling: resumed")
         if _has_terminal():
             return _attach_session(driver.attach_command(session))
     except terminal_mod.TerminalError as exc:

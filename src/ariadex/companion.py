@@ -33,9 +33,10 @@ POLL_INTERVAL_S = 2.0
 WIDGET_WIDTH = 360
 # Four action buttons plus the titlebar, status row, and frame padding need
 # more than the legacy three-button 116px mini-player height.
-WIDGET_COLLAPSED_HEIGHT = 148
+WIDGET_COLLAPSED_HEIGHT = 190
 WIDGET_EXPANDED_HEIGHT = 320
-WIDGET_EXPANDED_WINDOW_HEIGHT = 340
+# Includes both read-only text areas and every expanded action row.
+WIDGET_EXPANDED_WINDOW_HEIGHT = 560
 WIDGET_ACTION_BUTTON_WIDTH = 6
 WIDGET_COPY_BUTTON_WIDTH = 8
 
@@ -1139,6 +1140,8 @@ class CompanionWindow:
 
         self.titlebar = tk.Frame(self.frame, background="#20242b")
         self.titlebar.pack(fill="x")
+        self.titlebar.configure(height=30)
+        self.titlebar.pack_propagate(False)
         self.dot = tk.Label(
             self.titlebar,
             text="●",
@@ -1198,6 +1201,8 @@ class CompanionWindow:
         self.controls = tk.Frame(self.frame, background="#20242b")
         controls = self.controls
         controls.pack(fill="x", pady=(4, 0))
+        controls.configure(height=36)
+        controls.pack_propagate(False)
         self.play_button = tk.Button(
             controls,
             text="Play",

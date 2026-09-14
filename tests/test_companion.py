@@ -491,6 +491,9 @@ class FakeTkWidget:
     def pack(self, **kwargs):
         self.packed = True
 
+    def pack_propagate(self, flag):
+        self.options["pack_propagate"] = flag
+
     def pack_forget(self):
         self.packed = False
 
@@ -697,6 +700,8 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.assertEqual(
             self.window._active_window_height(), companion.WIDGET_COLLAPSED_HEIGHT
         )
+        self.assertEqual(self.window.titlebar.options["height"], 30)
+        self.assertEqual(self.window.controls.options["height"], 36)
         self.assertEqual(self.window.state_label.options["text"], "WORKING")
         self.assertEqual(self.window.pause_button.options.get("state"), "normal")
         self.assertEqual(self.window.play_button.options.get("state"), "disabled")
@@ -709,6 +714,14 @@ class HeadlessWidgetTest(unittest.TestCase):
         FakeMessagebox.answer = True
         self.window._on_stop()
         self.assertEqual(self.client.calls, ["pause", "resume", "stop"])
+
+    def test_expanded_height_includes_diagnostic_textareas(self):
+        self.window._toggle_expanded()
+        self.assertEqual(
+            self.window._active_window_height(),
+            companion.WIDGET_EXPANDED_WINDOW_HEIGHT,
+        )
+        self.assertGreaterEqual(companion.WIDGET_EXPANDED_WINDOW_HEIGHT, 500)
 
     def test_paused_state_keeps_pause_label_and_enables_play(self):
         self.client.state = live_state(mode="PAUSE")

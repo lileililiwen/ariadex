@@ -56,6 +56,13 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-widget-geometry-and-auto-resume`. Collapsed and expanded widget
+  heights now fit all controls and diagnostic text areas; titlebar and action
+  rows have stable layout heights; live-daemon start resumes PAUSE after
+  provider reconciliation. Verified with 99 focused tests, docs consistency,
+  Ruff, mypy, diff check, and strict OpenSpec validation.
+
+- Implemented, verified, and archived:
   `2026-09-14-automatic-provider-recovery`. A live daemon with a missing
   managed provider session now restores the provider through its configured
   ownership-aware adapter; normal users receive a concise safe-retry message
