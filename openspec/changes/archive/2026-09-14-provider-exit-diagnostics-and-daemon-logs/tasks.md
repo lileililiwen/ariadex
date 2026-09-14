@@ -1,0 +1,7 @@
+- [x] Add bounded, redacted structured detail fields to diagnostics.
+- [x] Record provider exit state at the managed-start observation boundary.
+- [x] Preserve daemon stdout/stderr in a project-scoped secure log.
+- [x] Add regression tests for redaction and exit evidence.
+- [x] Update canonical requirements and documentation.
+- [x] Run focused tests, lint, type checks, diff checks, and strict OpenSpec validation.
+- [x] Archive the change only after canonical spec promotion.

@@ -97,6 +97,17 @@ uses `opencode attach http://127.0.0.1:<port>` and preserves the backend
 conversation. This avoids the port collision caused by launching a second
 `opencode --port <port>` process.
 
+### Exit investigation logs
+
+An observed provider exit is recorded in `.ariadex/diagnostics/diagnostics.jsonl`.
+The record includes the attach return code, watcher outcome, daemon PID and
+socket state, provider ownership-record presence, tmux PID/aliveness, and a
+bounded redacted pane tail when it can still be captured. Ariadex also directs
+daemon stdout/stderr to `.ariadex/daemon.log` with owner-only permissions.
+These records explain whether the provider disappeared, the daemon failed to
+start, or the terminal attach returned unexpectedly; they do not decide
+completion and never contain an unbounded transcript.
+
 If neither UI nor backend is reusable, Ariadex performs bounded cleanup only
 when the recorded process identity still matches. A responsive endpoint with
 no matching owner is an ownership conflict: Ariadex does not kill it and does

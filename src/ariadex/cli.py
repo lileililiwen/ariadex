@@ -31,6 +31,7 @@ from . import openspec_evidence as openspec_evidence_mod
 from . import operator as operator_mod
 from . import preflight as preflight_mod
 from . import prerequisites as prerequisites_mod
+from . import provider_runtime as provider_runtime_mod
 from . import providers as providers_mod
 from . import resync as resync_mod
 from . import robot as robot_mod
@@ -1986,6 +1987,66 @@ def _shutdown_managed_session(
         )
 
 
+def _record_provider_exit_diagnostic(
+    project_dir: Path,
+    adapter,
+    session: str,
+    provider: str,
+    *,
+    reason: str,
+    attach_rc: int | None,
+    watcher_outcome: str = "",
+) -> None:
+    """Persist bounded evidence when supervision observes provider loss.
+
+    This is deliberately best-effort. The capture is redacted and bounded by
+    the diagnostics layer; it is evidence for later analysis, not scheduling
+    input or a completion signal.
+    """
+    details: dict[str, object] = {
+        "reason": reason,
+        "attach_returncode": attach_rc,
+        "watcher_outcome": watcher_outcome,
+        "socket_present": daemon_mod.socket_path(project_dir).exists(),
+    }
+    daemon_record = daemon_mod.read_record(project_dir)
+    details["daemon_pid"] = daemon_record.pid if daemon_record else None
+    details["daemon_alive"] = daemon_mod.daemon_alive(daemon_record)
+    runtime_record = provider_runtime_mod.read_record(project_dir)
+    details["provider_pid"] = runtime_record.pid if runtime_record else None
+    details["provider_runtime_record"] = runtime_record is not None
+    driver = getattr(adapter, "driver", None)
+    if driver is not None:
+        try:
+            details["session_alive"] = driver.session_alive(session)
+        except Exception as exc:
+            details["session_alive_error"] = str(exc)
+        try:
+            details["session_pid"] = driver.session_pid(session)
+        except Exception as exc:
+            details["session_pid_error"] = str(exc)
+        try:
+            capture = driver.capture(session)
+            details["capture_tail"] = capture[-4000:]
+        except Exception as exc:
+            details["capture_error"] = str(exc)
+    diagnostics_mod.try_record(
+        project_dir,
+        diagnostics_mod.build_diagnostic(
+            "provider",
+            "provider session ended",
+            result="observed",
+            message=(
+                f"provider `{provider}` session `{session}` ended without "
+                "an explicit Ariadex shutdown request"
+            ),
+            provider=provider,
+            session=session,
+            details=details,
+        ),
+    )
+
+
 def run_managed_start(
     project_dir: Path,
     cfg,
@@ -2153,6 +2214,15 @@ def run_managed_start(
     except Exception:
         alive = False
     if not alive:
+        _record_provider_exit_diagnostic(
+            project_dir,
+            adapter,
+            session,
+            provider,
+            reason="provider session no longer exists",
+            attach_rc=attach_rc,
+            watcher_outcome=(finished.outcome if finished is not None else ""),
+        )
         print(
             "provider session ended; widget and daemon remain running "
             "(quit or Ctrl+C to exit)"
@@ -2310,6 +2380,14 @@ def _start_daemon_only(project_dir: Path, as_json: bool = False) -> int:
         print(
             f"stale daemon record (pid {record.pid}) reconciled; starting a new daemon"
         )
+    daemon_log = project_dir / ".ariadex" / "daemon.log"
+    try:
+        daemon_log.parent.mkdir(parents=True, exist_ok=True)
+        logging_mod.ensure_secure_permissions(daemon_log.parent)
+        daemon_output = daemon_log.open("ab")
+    except OSError as exc:
+        print(f"error: daemon log unavailable: {exc}", file=sys.stderr)
+        return EXIT_ERROR
     try:
         # Absolute import path: the child must resolve `ariadex` even when
         # the parent was launched with a relative PYTHONPATH or from a
@@ -2323,8 +2401,8 @@ def _start_daemon_only(project_dir: Path, as_json: bool = False) -> int:
         proc = subprocess.Popen(  # noqa: S603
             [sys.executable, "-m", "ariadex.daemon", str(project_dir)],
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=daemon_output,
+            stderr=daemon_output,
             start_new_session=True,
             cwd=str(project_dir),
             env=child_env,
@@ -2332,6 +2410,9 @@ def _start_daemon_only(project_dir: Path, as_json: bool = False) -> int:
     except OSError as exc:
         print(f"error: daemon start failed: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    finally:
+        daemon_output.close()
+    logging_mod.ensure_secure_permissions(daemon_log)
     deadline = time.monotonic() + daemon_mod.DEFAULT_IPC_TIMEOUT_S
     ready = False
     while time.monotonic() < deadline:
@@ -2349,7 +2430,7 @@ def _start_daemon_only(project_dir: Path, as_json: bool = False) -> int:
         print(
             "error: daemon did not become ready within the bounded wait; "
             "run `ariadex status` and `ariadex admin recover` "
-            "(no provider input sent)",
+            f"(no provider input sent; see `{daemon_log}`)",
             file=sys.stderr,
         )
         return EXIT_ERROR

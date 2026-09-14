@@ -395,6 +395,11 @@ class ReconcileTest(unittest.TestCase):
         self.assertIn("provider session ended", out.getvalue())
         self.assertNotIn("adapter.terminate", harness.calls)
         self.assertNotIn("widget.terminate", harness.calls)
+        records, _ = cli.diagnostics_mod.read_diagnostics(self.root)
+        exit_records = [r for r in records if r["action"] == "provider session ended"]
+        self.assertEqual(len(exit_records), 1)
+        self.assertEqual(exit_records[0]["details"]["attach_returncode"], 0)
+        self.assertFalse(exit_records[0]["details"]["session_alive"])
 
     def test_daemon_stop_request_tears_down_managed_provider(self):
         harness = Harness(self.root, watcher_outcome="stopped")

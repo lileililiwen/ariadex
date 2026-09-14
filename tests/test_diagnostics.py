@@ -62,6 +62,7 @@ class SchemaTest(unittest.TestCase):
                     "requested_path",
                     "normalized_path",
                     "policy",
+                    "details",
                 ]
             ),
         )
@@ -84,6 +85,16 @@ class SchemaTest(unittest.TestCase):
         record = make_record("prompt", "a" * 5000)
         self.assertLessEqual(len(record["action"]), 2200)
         self.assertIn("truncated", record["action"])
+
+    def test_details_are_bounded_and_redacted(self):
+        record = make_record(
+            "provider",
+            "provider session ended",
+            details={"pid": 42, "capture_tail": "token=secret " * 500},
+        )
+        self.assertEqual(record["details"]["pid"], 42)
+        self.assertNotIn("secret", record["details"]["capture_tail"])
+        self.assertLessEqual(len(record["details"]["capture_tail"]), 2200)
 
 
 class StorageTest(unittest.TestCase):

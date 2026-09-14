@@ -56,6 +56,14 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-provider-exit-diagnostics-and-daemon-logs`. Managed provider
+  exits retain bounded redacted evidence in
+  `.ariadex/diagnostics/diagnostics.jsonl`; daemon stdout/stderr is retained
+  in `.ariadex/daemon.log`. Verified with 58 focused tests, Ruff, mypy, diff
+  check, and strict OpenSpec validation. Full-suite socket errors remain
+  sandbox permission blockers.
+
+- Implemented, verified, and archived:
   `2026-09-14-preserve-provider-and-widget-until-explicit-quit`. Normal
   watcher completion and independent provider exit now leave the editor,
   widget, and daemon alive; explicit quit/Ctrl+C remains the shutdown path.

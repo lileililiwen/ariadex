@@ -8,8 +8,8 @@ delivery, provider readiness/waits/quota/errors, OpenSpec evidence,
 boundary decisions, verification, widget lifecycle, human controls,
 errors, and shutdown.
 
-Raw provider captures never enter the stream; only bounded, redacted
-evidence references and classifications are kept. A failed diagnostic
+Raw provider captures never enter the stream unbounded; an explicitly
+bounded, redacted tail may be retained for an exit diagnosis. A failed diagnostic
 write never changes scheduling: callers record best-effort and keep
 their original lifecycle decision. Diagnostics are never a second
 provider-input writer nor a second source of scheduling truth.
@@ -99,6 +99,7 @@ def build_diagnostic(
     requested_path: str = "",
     normalized_path: str = "",
     policy: str = "",
+    details: dict[str, object] | None = None,
 ) -> dict:
     """Build one versioned, redacted diagnostic record with stable keys.
 
@@ -122,6 +123,19 @@ def build_diagnostic(
     clean_normalized, normalized_cuts = _redacted_field(normalized_path)
     clean_policy, policy_cuts = _redacted_field(policy)
     queue = [str(name) for name in (active_queue or ())]
+    safe_details: dict[str, object] = {}
+    for key, value in (details or {}).items():
+        name = str(key)
+        if isinstance(value, str):
+            cleaned, cuts = _redacted_field(value)
+            safe_details[name] = cleaned
+            action_cuts += cuts
+        elif isinstance(value, (bool, int, float)) or value is None:
+            safe_details[name] = value
+        else:
+            cleaned, cuts = _redacted_field(str(value))
+            safe_details[name] = cleaned
+            action_cuts += cuts
     return {
         "schema_version": DIAGNOSTIC_SCHEMA_VERSION,
         "at": now_iso(),
@@ -148,6 +162,7 @@ def build_diagnostic(
         "requested_path": clean_requested,
         "normalized_path": clean_normalized,
         "policy": clean_policy,
+        "details": safe_details,
         "redactions": action_cuts
         + message_cuts
         + recovery_cuts
