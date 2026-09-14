@@ -82,6 +82,13 @@ that promotion has been skipped or failed.
   companion tests, Ruff, diff check, and strict OpenSpec validation.
 
 - Implemented, verified, and archived:
+  `2026-09-14-preserve-opencode-drafts`. A non-empty OpenCode composer is no
+  longer classified as ready, and PAUSE is checked immediately before any
+  automatic continuation reset. This prevents `/new` and Enter from being
+  appended to an operator's unfinished prompt. Verified with 95 adapter/robot
+  tests, Ruff, diff check, and strict OpenSpec validation.
+
+- Implemented, verified, and archived:
   `2026-09-14-dead-owner-lease-recovery`. Scheduler, provider, terminal, and
   widget process ownership now use portable psutil identity/liveness and
   termination APIs. A dead local PID is stale immediately even with a fresh
