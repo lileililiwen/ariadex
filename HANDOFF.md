@@ -89,6 +89,17 @@ that promotion has been skipped or failed.
   tests, Ruff, diff check, and strict OpenSpec validation.
 
 - Implemented, verified, and archived:
+  `2026-09-14-provider-input-surface-interface`. The stable watcher now
+  consumes the provider-neutral `InputSurface` contract; provider adapters
+  own variable markers, composer parsing, status interpretation, and reset
+  input such as OpenCode `/new`. A reported `DRAFT` blocks automatic reset
+  and continuation input, including at the final pause boundary. OpenCode,
+  Codex, and CodeBuddy therefore share the same watcher path without
+  provider-specific branches. Verified with 129 adapter/robot tests, Ruff,
+  diff check, and strict OpenSpec validation; canonical specs were promoted
+  during archive without `--skip-specs`.
+
+- Implemented, verified, and archived:
   `2026-09-14-dead-owner-lease-recovery`. Scheduler, provider, terminal, and
   widget process ownership now use portable psutil identity/liveness and
   termination APIs. A dead local PID is stale immediately even with a fresh
