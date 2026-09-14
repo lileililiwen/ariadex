@@ -39,10 +39,9 @@ that promotion has been skipped or failed.
   widget-crash-repair lifecycle tests, Ruff, diff check, and strict validation
   (51 canonical specs).
 
-- In progress: `provider-owned-input-readiness`. The current OpenCode TUI
-  composer is adapter-recognized; the watcher uses provider UI state first,
-  then OpenSpec queue/task evidence for the boundary. Do not infer completion
-  from model report text.
+- No active OpenSpec change remains. The next implementation must begin by
+  selecting a change from `openspec list` and updating this handoff only after
+  its verified archive.
 - Implemented, verified, and archived:
   `2026-09-13-provider-owned-input-readiness`. `AgentAdapter` now owns
   input-ready detection; OpenCode 1.18.x recognizes its current blank
@@ -64,13 +63,12 @@ that promotion has been skipped or failed.
   full daemon socket tests remain sandbox-blocked by local socket permission.
 
 - Implemented, verified, and archived:
-  `2026-09-14-managed-memory-protection`. Added
-  `scripts/setup-memory-protection.sh`, an idempotent Bash operator script
-  that persists an additional 8 GiB swap file and configures earlyoom to
-  prefer browsers without exempting OpenCode. Verified with Bash syntax,
-  2 stdlib regression tests, compileall, diff check, and strict OpenSpec
-  validation; archive promoted `host-memory-protection` into canonical specs.
-  Host verification showed `/swapfile-ariadex` active and earlyoom enabled.
+  `2026-09-14-dead-owner-lease-recovery`. Scheduler, provider, terminal, and
+  widget process ownership now use portable psutil identity/liveness and
+  termination APIs. A dead local PID is stale immediately even with a fresh
+  heartbeat, so a crashed run no longer blocks `start`. Removed the shipped
+  Linux-only memory setup script and its tests/docs. Verified with 123 focused
+  tests, Ruff, diff check, and strict OpenSpec validation (59 canonical specs).
 
 - Implemented, verified, and archived:
   `2026-09-14-managed-lifecycle-operation-audit`. Managed provider starts and
