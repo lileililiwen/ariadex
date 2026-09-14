@@ -48,6 +48,30 @@ No IDE plugins or LLM API keys are required. The current runtime drives the
 Coding CLIs you already use; the planned daemon and desktop companion will
 remain local control layers and will never call a provider LLM API itself.
 
+### Host memory protection
+
+OpenCode can be terminated by the host's `earlyoom` service when both RAM and
+swap are low. The repository includes one idempotent setup script that adds an
+8 GiB swap file and makes earlyoom prefer browser processes:
+
+```bash
+./scripts/setup-memory-protection.sh
+```
+
+The script uses `sudo`, preserves existing swap, persists `/swapfile-ariadex`
+in `/etc/fstab`, enables earlyoom at boot, and never uses `swapoff -a` or
+exempts OpenCode from emergency protection. Verify after setup with:
+
+```bash
+swapon --show
+systemctl is-enabled earlyoom
+systemctl is-active earlyoom
+```
+
+This does not assume that `.opencodeignore`, `NODE_OPTIONS`, or a global
+`dotnet` parallelism limit are supported by every provider version. Configure
+those separately only after verifying them against the installed provider.
+
 ## Installation
 
 Prerequisites (never bundled, never silently downloaded as packages):

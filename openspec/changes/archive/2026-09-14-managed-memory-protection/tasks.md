@@ -1,0 +1,6 @@
+- [x] Add the idempotent host memory protection script.
+- [x] Add regression checks for safe shell syntax and required safeguards.
+- [x] Document permanent setup, verification, and non-goals.
+- [x] Run focused tests and quality checks.
+- [x] Validate the change strictly.
+- [x] Archive the completed change with canonical spec promotion.
