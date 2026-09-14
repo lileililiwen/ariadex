@@ -50,6 +50,24 @@
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-hub-auto-join`. Running `ariadex start` in each project now
+  auto-registers one daemon-backed tab in the singleton hub window with no
+  extra flags: the first start spawns `admin hub-window` in the
+  background, later starts reuse it over a bounded user-scoped socket
+  (`~/.local/share/ariadex/hub.sock`) carrying only the project directory.
+  New `src/ariadex/hub.py` holds the register/unregister/ping protocol,
+  the hub client with bounded spawn wait, and the tab factory (label and
+  queue evidence resolved hub-side; state from the daemon status
+  endpoint; Pause/Resume drive daemon IPC; quit unregisters only that
+  tab). `RobotHubWindow` gains dynamic `add_tab`/`remove_project`, exits
+  when the last tab leaves, and window close exits only the hub while
+  daemons, sessions, and watchers keep running. `start` falls back to the
+  single widget when the hub is unavailable; `stop` unregisters
+  best-effort. Verified with 1274 tests OK (33 new in
+  `tests/test_hub_auto_join.py`), Ruff check/format clean on touched
+  files, mypy clean (35 files), coverage 85% (floors pass), and strict
+  change/spec validation green (55 specs).
+- Implemented, verified, and archived:
   `2026-09-14-robot-hub-tab-detail`. Hub tabs now carry queue evidence and
   the detail panel is organized in labeled rows. `robot.queue_summary`
   (plus `RobotWatcher.queue_summary`) reads active-change discovery, the
