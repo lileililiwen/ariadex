@@ -63,6 +63,13 @@ that promotion has been skipped or failed.
   full daemon socket tests remain sandbox-blocked by local socket permission.
 
 - Implemented, verified, and archived:
+  `2026-09-14-daemon-provider-record-recovery`. A missing provider PID in a
+  stale runtime record is now treated as non-reusable instead of allowing
+  `psutil.NoSuchProcess` to terminate daemon startup before readiness. Verified
+  with provider-runtime regression tests, Ruff, diff check, and strict OpenSpec
+  validation.
+
+- Implemented, verified, and archived:
   `2026-09-14-dead-owner-lease-recovery`. Scheduler, provider, terminal, and
   widget process ownership now use portable psutil identity/liveness and
   termination APIs. A dead local PID is stale immediately even with a fresh
