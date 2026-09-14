@@ -25,7 +25,10 @@ class LifecycleTest(unittest.TestCase):
     def test_start_creates_session_with_launch_command(self):
         adapter, driver = make_open_code()
         self.assertEqual(adapter.start(), "created")
-        self.assertEqual(driver.sessions["test-session"]["command"], ["opencode"])
+        self.assertEqual(
+            driver.sessions["test-session"]["command"],
+            ["opencode", "--port", str(adapter.api_port)],
+        )
 
     def test_start_connects_when_session_alive(self):
         adapter, _driver = make_open_code()

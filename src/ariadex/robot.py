@@ -90,10 +90,16 @@ AUTH_MARKERS = (
 )
 
 ERROR_MARKERS = (
+    "failed",
+)
+
+# Provider-emitted error lines describe the live surface, not scrollback
+# prose: they block even when the same tail carries a ready marker (the
+# legacy `Ask anything` chrome shares the tail with the error line).
+HARD_ERROR_MARKERS = (
     "traceback",
     "exception",
     "error:",
-    "failed",
 )
 
 # Recoverable provider terminal errors: the provider stops the current
@@ -263,6 +269,10 @@ def classify_capture(provider: str, text: str, input_ready: bool | None = None) 
     # Generic words belong to captured scrollback, not provider state. Once
     # the OpenCode adapter has explicitly reported its live ready surface,
     # they must not override that state or prevent the OpenSpec boundary.
+    # Provider-emitted error lines (colon form, tracebacks, exceptions) are
+    # exempt from that rule: they describe the live surface itself.
+    if any(marker in lowered for marker in HARD_ERROR_MARKERS):
+        return CLASS_ERROR
     if any(marker in lowered for marker in ERROR_MARKERS) and not (
         provider == "opencode" and input_ready is True
     ):

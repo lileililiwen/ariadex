@@ -172,6 +172,15 @@ class ClassifyTest(unittest.TestCase):
             robot_mod.classify_capture("codex", READY_CODEX + ERROR), "error"
         )
 
+    def test_hard_error_beats_modern_ready_surface(self) -> None:
+        capture = (
+            "┃\n\n▣  Build · test · 1m 00s\nerror: provider exploded\n"
+        )
+        self.assertEqual(
+            robot_mod.classify_capture("opencode", capture, input_ready=True),
+            "error",
+        )
+
     def test_auth_failure_blocks(self) -> None:
         self.assertEqual(robot_mod.classify_capture("codex", "please log in"), "error")
 

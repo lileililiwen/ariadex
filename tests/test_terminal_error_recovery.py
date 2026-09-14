@@ -172,16 +172,11 @@ class RoutingTest(unittest.TestCase):
         self.addCleanup(lambda: [tmp.cleanup() for tmp in self._tmp])
 
     def _clean_git(self) -> unittest.mock._patch:
-        import subprocess
-
-        real_run = subprocess.run
-
-        def fake_run(cmd, **kwargs):
-            if cmd[:2] == ["git", "status"]:
-                return unittest.mock.Mock(returncode=0, stdout="", stderr="")
-            return real_run(cmd, **kwargs)
-
-        return unittest.mock.patch("ariadex.robot.subprocess.run", fake_run)
+        # `_git_tree_clean` is a deprecated clean-tree stub; keep the seam
+        # pinned clean without touching subprocesses.
+        return unittest.mock.patch.object(
+            robot_mod, "_git_tree_clean", return_value=(True, "")
+        )
 
     def test_terminal_error_with_unfinished_tasks_sends_confirmation(self) -> None:
         project = make_project(self._tmp)
@@ -287,17 +282,10 @@ class RecordingTest(unittest.TestCase):
         }
         watcher = make_watcher(project, driver)
         watcher.initial_sent = True
-        import subprocess
-
-        real_run = subprocess.run
-
-        def fake_run(cmd, **kwargs):
-            if cmd[:2] == ["git", "status"]:
-                return unittest.mock.Mock(returncode=0, stdout="", stderr="")
-            return real_run(cmd, **kwargs)
-
         with (
-            unittest.mock.patch("ariadex.robot.subprocess.run", fake_run),
+            unittest.mock.patch.object(
+                robot_mod, "_git_tree_clean", return_value=(True, "")
+            ),
             unittest.mock.patch.object(
                 watcher, "_capture", side_effect=[secret_capture, READY_OPENCODE]
             ),
