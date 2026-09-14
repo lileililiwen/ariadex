@@ -98,7 +98,7 @@ def is_healthy(project_dir: Path, record: WidgetRecord | None) -> bool:
         return False
     try:
         identity = process_identity(record.pid)
-    except (OSError, ValueError):
+    except (OSError, ValueError, psutil.Error):
         return False
     if identity[0] != record.pid or identity[1] != record.process_start_ticks:
         return False

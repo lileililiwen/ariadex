@@ -1,0 +1,4 @@
+- [x] Add a regression test for a missing widget PID.
+- [x] Catch psutil lookup failures during widget health checking.
+- [x] Verify focused tests and strict OpenSpec validation.
+- [x] Archive with canonical spec promotion.

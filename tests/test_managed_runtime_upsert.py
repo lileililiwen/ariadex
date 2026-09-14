@@ -52,6 +52,24 @@ class WidgetRuntimeRecordTests(unittest.TestCase):
             ):
                 self.assertFalse(widget_runtime.is_healthy(root, record))
 
+    def test_missing_widget_process_record_is_unhealthy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            record = widget_runtime.WidgetRecord(
+                project=str(root.resolve()),
+                pid=123,
+                process_start_ticks=456,
+                token=TOKEN,
+                daemon_pid=77,
+                ready=True,
+            )
+            with mock.patch.object(
+                widget_runtime,
+                "process_identity",
+                side_effect=widget_runtime.psutil.NoSuchProcess(123),
+            ):
+                self.assertFalse(widget_runtime.is_healthy(root, record))
+
 
 class ManagedStartRepairTests(unittest.TestCase):
     def setUp(self):
