@@ -49,6 +49,26 @@
 
 ## Current state
 
+- Implemented, verified, and archived:
+  `2026-09-14-multi-project-robot-hub`. One tabbed hub window replaces one
+  floating robot widget per project: `ariadex watch --hub
+  PROJECT:SESSION[:PROVIDER]` (repeatable) supervises each project with its
+  own watcher thread under a single middle-right Tk window. Tabs show
+  `folder [provider]` with a per-tab state dot, duplicate basenames gain
+  parent segments then the session name, and the detail panel shows the full
+  project path plus `provider @ session`. Per-tab Pause/Resume/Quit stay
+  isolated, `Pause all` pauses every non-stopped tab, the hotkey toggles the
+  visible tab only, quitting a tab detaches only that tab, and window close
+  quits all watchers in order with sessions left attachable. Every entry is
+  validated before any thread starts; `--no-widget` + `--hub` is refused.
+  The single-watch path is unchanged. `companion.py` gains pure
+  `hub_tab_label`/`disambiguate_hub_labels`/`build_hub_view_model`,
+  `RobotHubTab`/`RobotHubWindow`/`run_robot_hub`; `cli.py` gains
+  `parse_hub_entry`/`cmd_watch_hub`. Verified with 1221 tests OK (44 new in
+  `tests/test_robot_hub.py`), Ruff check clean on touched files (3
+  repo-wide format flags at HEAD pre-exist and are untouched), mypy clean
+  (34 files), coverage 86% (floors pass: cli 79%, companion 90%), and
+  strict change/spec validation green (55 specs).
 - The latest boundary fix is implemented, verified, and archived below.
 - Implemented, verified, and archived:
   `2026-09-14-confirmation-retry-and-watchdog`. After `adapter.new_conversation()`
