@@ -1,7 +1,13 @@
 # Ariadex handoff
 
+## Mandatory OpenSpec rule
+
+NEVER use `--skip-specs` when archiving. Every archive MUST promote the
+change requirements into the canonical specs; an archive is not complete when
+that promotion has been skipped or failed.
+
 - Implemented and archived:
-  `2026-09-13-opencode-api-session-state`. Managed OpenCode now launches with
+`2026-09-13-opencode-api-session-state`. Managed OpenCode now launches with
   a project-scoped API port and the watcher uses session status (`active`,
   `idle`, `retry`, `error`) for scheduling. Build footer and pane text no
   longer decide conversation boundaries; API-unavailable state fails closed.

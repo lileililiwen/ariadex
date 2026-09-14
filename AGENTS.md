@@ -20,6 +20,8 @@ Read `README.md`, `ROADMAP.md`, and `HANDOFF.md` before changing the project. Ar
 3. Update its `tasks.md` as tasks complete.
 4. Verify with relevant tests and strict OpenSpec validation.
 5. Archive the completed change.
+   NEVER use `--skip-specs` when archiving. Canonical specs MUST be updated
+   from the change before the archive is accepted.
 6. Commit 1: implementation, tests, archive, and related generated specs only.
 7. Update `HANDOFF.md` with completion evidence and the next change.
 8. Commit 2: only the `HANDOFF.md` update.
