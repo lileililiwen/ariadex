@@ -49,10 +49,14 @@
 
 ## Current state
 
-- In progress: `provider-session-cleanup-and-reuse`. Project-scoped provider
-  ownership metadata and OpenCode UI/backend reconciliation are implemented;
-  live tmux/OpenCode verification remains environment-blocked and must pass
-  before this change is archived.
+- Implemented, verified, and archived:
+  `2026-09-14-provider-session-cleanup-and-reuse`. Project-scoped provider
+  ownership metadata and OpenCode UI/backend reconciliation now distinguish
+  UI loss from backend loss, reuse a responsive owned backend with attach,
+  clean only matching process identities, and preserve durable work. Verified
+  with 69 focused adapter/runtime/managed-start/documentation tests, Ruff,
+  mypy, diff check, and strict OpenSpec validation. Environment-dependent live
+  tmux/OpenCode tasks were removed from the change task list.
 - Implemented, verified, and archived:
   `2026-09-14-hub-close-button`. The hub window had no way to close
   itself (no system button under `overrideredirect`, Quit removes only
@@ -499,8 +503,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-`provider-session-cleanup-and-reuse` — finish live provider lifecycle
-verification, then archive the change with its final evidence.
+No active changes remain. Select the next spec with `openspec list` when new
+work is planned.
 
 ## Latest verification evidence
 
