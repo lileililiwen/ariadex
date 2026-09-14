@@ -559,6 +559,22 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 No active changes remain. Select the next spec with `openspec list` when new
 work is planned.
 
+## Latest change: widget live log and queue visibility
+
+- Implemented and archived `widget-live-log-and-queue-visibility` as
+  `2026-09-14-widget-live-log-and-queue-visibility`. The managed widget now
+  renders its bounded diagnostic log immediately below the action buttons in
+  collapsed and expanded states, refreshing it on every daemon status poll.
+  The compact summary also shows the active-spec count and names; detailed
+  per-spec task progress remains in the log.
+- Increased widget geometry for the always-visible textarea without removing
+  drag, collapse/expand, Copy log, Copy context, or lifecycle controls.
+- Verification: 42 focused widget tests passed; Ruff check/format and
+  `git diff --check` passed; strict change validation passed before archive;
+  canonical spec validation passed after archive (57 specs). Full-suite
+  baseline remains 1294/1296 due the two previously recorded host fixture
+  failures (`WidgetSmokeTest` Tk object API and tmux stub `list-panes`).
+
 ## Latest change: daemon-owned managed runtime
 
 - Implemented and archived `explicit-managed-shutdown` as
