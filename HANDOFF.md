@@ -76,6 +76,12 @@ that promotion has been skipped or failed.
   regression tests, Ruff, diff check, and strict OpenSpec validation.
 
 - Implemented, verified, and archived:
+  `2026-09-14-responsive-widget-controls`. Widget refreshes no longer block or
+  discard Pause, Stop, Reconcile, Quit, or hotkey actions; managed IPC runs
+  asynchronously and Quit waits for confirmed daemon stop. Verified with 70
+  companion tests, Ruff, diff check, and strict OpenSpec validation.
+
+- Implemented, verified, and archived:
   `2026-09-14-dead-owner-lease-recovery`. Scheduler, provider, terminal, and
   widget process ownership now use portable psutil identity/liveness and
   termination APIs. A dead local PID is stale immediately even with a fresh
