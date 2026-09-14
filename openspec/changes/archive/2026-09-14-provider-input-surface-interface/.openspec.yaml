@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Codex, CodeBuddy, and OpenCode use one explicit adapter contract for
+  draft-safe automation.

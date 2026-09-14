@@ -31,7 +31,7 @@ from . import handoff as handoff_mod
 from . import openspec_evidence as evidence_mod
 from . import permissions as permissions_mod
 from . import spec_graph as spec_graph_mod
-from .adapters import AgentAdapter, UnsupportedOperation
+from .adapters import AgentAdapter, InputSurface, UnsupportedOperation
 from .config import DEFAULT_CONFIRMATION_PROMPT
 from .logging import redact
 from .terminal import TerminalDriver
@@ -1758,6 +1758,12 @@ class RobotWatcher:
         if not self._record_before_prompt(
             "continuation", next_target, list(check.active)
         ):
+            return self.phase
+        if self.adapter.input_surface(self._capture()) is InputSurface.DRAFT:
+            self.phase = PAUSED
+            self._record(
+                "pause", "automatic continuation deferred while input is not empty"
+            )
             return self.phase
         if self._paused or (
             self.mode_requested is not None and self.mode_requested() == "PAUSE"

@@ -9,6 +9,7 @@ from ariadex.adapters import (
     AdapterError,
     Capabilities,
     CaptureError,
+    InputSurface,
     StartupError,
     TerminationError,
     TransportError,
@@ -67,8 +68,9 @@ class LifecycleTest(unittest.TestCase):
 
     def test_opencode_draft_is_not_input_ready(self):
         adapter, _ = make_open_code()
-        self.assertFalse(
-            adapter.is_input_ready("Ask anything\n┃ unfinished request\n▣ Build")
+        self.assertIs(
+            adapter.input_surface("Ask anything\n┃ unfinished request\n▣ Build"),
+            InputSurface.DRAFT,
         )
 
     def test_terminate_removes_session(self):

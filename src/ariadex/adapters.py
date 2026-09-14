@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import abc
 import dataclasses
+import enum
 from pathlib import Path
 
 from . import terminal as terminal_mod
@@ -26,6 +27,16 @@ class Capabilities:
     structured_output: bool = False
     interrupt: bool = True
     manual_takeover: bool = True
+
+
+class InputSurface(enum.StrEnum):
+    """Provider-neutral current input surface classification."""
+
+    EMPTY = "empty"
+    DRAFT = "draft"
+    BUSY = "busy"
+    APPROVAL = "approval"
+    UNKNOWN = "unknown"
 
 
 class AdapterError(Exception):
@@ -225,10 +236,16 @@ class AgentAdapter(abc.ABC):
         override this method; terminal-only providers may use their own
         stable UI surface.
         """
+        return self.input_surface(capture) is InputSurface.EMPTY
+
+    def input_surface(self, capture: str) -> InputSurface:
+        """Classify the provider-owned composer without provider branching."""
         lowered = "\n".join((capture or "").splitlines()[-16:]).lower()
-        return bool(self.ready_markers) and any(
+        if bool(self.ready_markers) and any(
             marker.lower() in lowered for marker in self.ready_markers
-        )
+        ):
+            return InputSurface.EMPTY
+        return InputSurface.UNKNOWN
 
     def provider_state(self) -> str | None:
         """Return provider lifecycle state when a machine status API exists."""

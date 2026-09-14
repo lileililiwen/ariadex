@@ -33,7 +33,13 @@ from pathlib import Path
 
 from . import diagnostics as diagnostics_mod
 from . import provider_runtime
-from .adapters import AgentAdapter, Capabilities, StartupError, UnsupportedOperation
+from .adapters import (
+    AgentAdapter,
+    Capabilities,
+    InputSurface,
+    StartupError,
+    UnsupportedOperation,
+)
 from .terminal import TerminalDriver, TmuxDriver
 
 PROVIDER_OPENCODE = "opencode"
@@ -75,7 +81,7 @@ class OpenCodeAdapter(AgentAdapter):
     permission_approve_input = "y"
     ready_markers = ("Ask anything", "tab agents")
 
-    def is_input_ready(self, capture: str) -> bool:
+    def input_surface(self, capture: str) -> InputSurface:
         """Recognize OpenCode's current composer, independent of answer text.
 
         OpenCode's TUI 1.18.x no longer renders the old ``Ask anything``
@@ -92,8 +98,10 @@ class OpenCodeAdapter(AgentAdapter):
             line.strip().startswith("▣") and "Build" in line for line in lines
         )
         if has_draft:
-            return False
-        return (has_composer and has_footer) or super().is_input_ready(capture)
+            return InputSurface.DRAFT
+        if has_composer and has_footer:
+            return InputSurface.EMPTY
+        return super().input_surface(capture)
 
     @property
     def api_port(self) -> int:

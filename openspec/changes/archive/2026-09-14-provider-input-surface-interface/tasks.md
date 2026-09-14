@@ -1,0 +1,5 @@
+- [x] Add the provider-neutral input-surface interface and contract tests.
+- [x] Move OpenCode draft parsing behind the adapter interface.
+- [x] Make watcher continuation use only the interface result.
+- [x] Verify tests and strict OpenSpec validation.
+- [x] Archive with canonical spec promotion.

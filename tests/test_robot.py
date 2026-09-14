@@ -907,7 +907,7 @@ class ContinuationTest(unittest.TestCase):
         )
         real_check = robot_mod.check_boundary
         robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
-        captures = [READY_OPENCODE, READY_OPENCODE, "blank screen"]
+        captures = [READY_OPENCODE, READY_OPENCODE, READY_OPENCODE, "blank screen"]
         with unittest.mock.patch.object(watcher, "_capture", side_effect=captures):
             try:
                 watcher.poll()  # initial prompt sent
