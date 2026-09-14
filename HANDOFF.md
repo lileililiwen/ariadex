@@ -50,6 +50,18 @@
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-hub-close-button`. The hub window had no way to close
+  itself (no system button under `overrideredirect`, Quit removes only
+  the tab), and worse, the grown detail rows pushed the controls out of
+  the 116px single-widget window — measured 219px content vs 116px
+  window on real Tk, controls mapped 0. A `Close` button (window only;
+  daemons, sessions, watchers persist) plus hub-sized heights
+  (`HUB_COLLAPSED_HEIGHT=230`, `HUB_EXPANDED_HEIGHT=400`; single-widget
+  sizes untouched) fix both. Verified with 1277 tests OK (3 new),
+  real-Tk Xvfb measurement (controls mapped, content fits collapsed and
+  expanded), Ruff check/format clean, mypy clean (35 files), coverage
+  86% (floors pass), and strict change/spec validation green (55 specs).
+- Implemented, verified, and archived:
   `2026-09-14-hub-tab-quit-index`. Quitting a middle hub tab left the
   remaining buttons bound to stale indices, so the next click set an
   out-of-range active index and every render died with `IndexError`
