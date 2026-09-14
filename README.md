@@ -255,9 +255,10 @@ On Linux X11 with Tkinter installed, `ariadex start` opens a small
 always-on-top mini-player near the middle-right edge: a text status
 indicator, the current work label (now including the durable current spec
 and its OpenSpec task progress, kept separate from HANDOFF queue counts),
-and compact Play/Pause/Stop controls. Expanding the widget reveals full
-status text, a read-only chronological diagnostic log with the latest
-watcher event, a hotkey field, and Reconcile/Editor/Session controls.
+and compact Play/Pause/Stop controls. The widget also shows a bounded
+chronological diagnostic log immediately below the controls in both states,
+plus the active-spec count and names. Expanding reveals full status text, a
+hotkey field, and Reconcile/Editor/Session controls.
 `Copy log` places the bounded log on the desktop clipboard and
 `Copy context` places a redacted support snapshot (project, provider and
 session, current spec, OpenSpec queue, boundary decision, exact blocker,

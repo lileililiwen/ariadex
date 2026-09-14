@@ -33,10 +33,10 @@ POLL_INTERVAL_S = 2.0
 WIDGET_WIDTH = 360
 # Four action buttons plus the titlebar, status row, and frame padding need
 # more than the legacy three-button 116px mini-player height.
-WIDGET_COLLAPSED_HEIGHT = 190
+WIDGET_COLLAPSED_HEIGHT = 300
 WIDGET_EXPANDED_HEIGHT = 320
 # Includes both read-only text areas and every expanded action row.
-WIDGET_EXPANDED_WINDOW_HEIGHT = 560
+WIDGET_EXPANDED_WINDOW_HEIGHT = 650
 WIDGET_ACTION_BUTTON_WIDTH = 6
 WIDGET_COPY_BUTTON_WIDTH = 8
 
@@ -558,6 +558,10 @@ def build_view_model(state: dict) -> dict:
         context_latest = str(managed_context.get("latest_text", ""))
         if context_summary:
             work_label += f"\n{context_summary}"
+        queue = managed_context.get("queue", [])
+        if len(queue) > 1:
+            names = ", ".join(str(item.get("name", "?")) for item in queue[:10])
+            work_label += f"\n{len(queue)} active specs ({names})"
     return {
         "indicator": indicator,
         "indicator_text": indicator.upper(),
@@ -1250,6 +1254,17 @@ class CompanionWindow:
         )
         self.copy_log_button.pack(side="left", expand=True, fill="x")
 
+        self.context_log = tk.Text(
+            self.frame,
+            height=6,
+            width=34,
+            wrap="word",
+            takefocus=False,
+            name="context-log-text",
+        )
+        self.context_log.configure(state="disabled")
+        self.context_log.pack(fill="x", pady=(4, 0))
+
         self.details = tk.Frame(self.frame)
         self.status_text = tk.Text(
             self.details,
@@ -1260,16 +1275,6 @@ class CompanionWindow:
         )
         self.status_text.configure(state="disabled")
         self.status_text.pack(fill="x", pady=(4, 0))
-        self.context_log = tk.Text(
-            self.details,
-            height=8,
-            width=34,
-            wrap="word",
-            takefocus=False,
-            name="context-log-text",
-        )
-        self.context_log.configure(state="disabled")
-        self.context_log.pack(fill="x", pady=(4, 0))
         copy_row = tk.Frame(self.details)
         copy_row.pack(fill="x", pady=(4, 0))
         self.copy_context_button = tk.Button(

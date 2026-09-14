@@ -360,6 +360,13 @@ class ManagedWindowTest(unittest.TestCase):
         self.assertIs(window.copy_log_button.master, window.controls)
         self.assertTrue(window.controls.packed)
 
+    def test_collapsed_widget_shows_live_log_and_remaining_specs(self):
+        window = self.make_window(context_state())
+        self.assertFalse(window.expanded)
+        self.assertTrue(window.context_log.packed)
+        self.assertIn("beta", window.context_log.content)
+        self.assertIn("2 active", str(window.work_label.options.get("text", "")))
+
     def test_copy_log_places_bounded_log_on_clipboard(self):
         window = self.make_window(context_state())
         window._on_copy_log()

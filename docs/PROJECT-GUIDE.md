@@ -175,8 +175,9 @@ runtime state directly and does not inject keystrokes into an editor.
 - top-right `×`: requests daemon shutdown, then exits the widget process.
 - expanded controls: reconcile status, open the configured editor, and attach
   to the provider session.
-- expanded log: read-only chronological watcher diagnostics (current spec,
-  OpenSpec task progress, phase, latest event, recent boundary decisions).
+- live log: read-only chronological watcher diagnostics (current spec,
+  OpenSpec task progress, phase, latest event, recent boundary decisions),
+  visible in both compact and expanded states and refreshed on every poll.
   OpenSpec task counts are labeled separately from HANDOFF unresolved counts.
 - `Copy log` is available in the always-visible collapsed controls; `Copy
   context` is available after expansion. They place the bounded log or a
@@ -323,7 +324,9 @@ Behavior:
   dialog and its controls stay reachable on multi-monitor and small
   screens. A Show log/Hide log toggle expands a bounded read-only
   activity log (boundary decisions, prompt selection, readiness, waiting,
-  pause, and error events; never raw provider transcripts or secrets)
+  pause, and error events; never raw provider transcripts or secrets) is
+  visible immediately below the compact controls. The compact summary also
+  lists the active-spec count and names.
   without moving the window or taking focus from the provider editor.
    On Linux X11, `Ctrl+Esc` globally toggles Pause/Resume. `Ctrl+C` cleanly stops the watch
    process and closes the widget without a Python traceback.
