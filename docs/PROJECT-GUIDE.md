@@ -290,16 +290,21 @@ Behavior:
   without moving the window or taking focus from the provider editor.
    On Linux X11, `Ctrl+Esc` globally toggles Pause/Resume. `Ctrl+C` cleanly stops the watch
    process and closes the widget without a Python traceback.
-- The hub (`ariadex watch --hub PROJECT:SESSION[:PROVIDER]`, repeatable)
-  supervises several projects under one middle-right window: one tab per
-  project labeled `folder [provider]` with a per-tab state dot, the shared
-  detail panel (identity with full project path, latest event, expandable
-  read-only log), per-tab Pause/Resume/Quit, and `Pause all`. Quitting a tab
-  detaches only that tab; closing the window quits every watcher in tab
-  order. The hotkey toggles the visible tab only. Every entry is validated
-  before any watcher thread starts, duplicate project+session pairs are
-  refused, and `--no-widget` cannot be combined with `--hub`. An unreachable
-  tab renders UNREACHABLE for that tab only while the others stay live.
+- The hub supervises several projects under one middle-right window with
+  zero extra flags: `ariadex start` in each project auto-registers one tab
+  per project (the first start spawns the shared hub window in the
+  background; later starts reuse it). Each tab is labeled `folder
+  [provider]` with a per-tab state dot and renders daemon truth (mode,
+  provider, session, current spec, queue evidence); Pause/Resume drive
+  that project's daemon, quitting a tab removes only that tab, and closing
+  the window exits only the hub while daemons, sessions, and watchers keep
+  running. `ariadex stop` removes the project's tab. The hotkey toggles
+  the visible tab only. Unknown or uninitialized projects are refused with
+  the exact reason and start nothing; when the hub cannot run (headless,
+  no Tk), `start` keeps the single-widget fallback. An unreachable tab
+  renders UNREACHABLE for that tab only while the others stay live.
+  (`ariadex watch --hub PROJECT:SESSION[:PROVIDER]`, repeatable, remains
+  for explicit watcher-owned multi-project supervision.)
   The detail panel is organized in labeled rows: a header with the state
   dot, phase, and current spec; then the project path, `provider @
   session`, the queue row (`N active · <spec> open/total`, or an honest

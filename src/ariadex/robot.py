@@ -337,12 +337,20 @@ def validate_config(config: RobotConfig) -> RobotConfig:
     return config
 
 
-def queue_summary(project_dir: Path, config: RobotConfig) -> dict:
+def queue_summary(
+    project_dir: Path,
+    *,
+    spec_dir: str = "openspec/changes",
+    handoff_file: str = "HANDOFF.md",
+    finished_change: str = "",
+) -> dict:
     """Per-project queue evidence as a plain dict (never raises).
 
     Keys: `active_count`, `current_spec`, `open_tasks`, `total_tasks`,
     `unavailable` ("" when readable). A missing spec directory means the
-    project carries no OpenSpec queue rather than an empty one.
+    project carries no OpenSpec queue rather than an empty one. Explicit
+    paths (instead of `RobotConfig`) so hub tabs can report queue evidence
+    without owning a watcher.
     """
     summary: dict = {
         "active_count": 0,
@@ -351,24 +359,24 @@ def queue_summary(project_dir: Path, config: RobotConfig) -> dict:
         "total_tasks": 0,
         "unavailable": "",
     }
-    if not (project_dir / config.spec_dir).is_dir():
+    if not (project_dir / spec_dir).is_dir():
         summary["unavailable"] = "not an OpenSpec project"
         return summary
     try:
         active, _ignored = spec_graph_mod.discover_active_changes(
-            project_dir / config.spec_dir
+            project_dir / spec_dir
         )
     except Exception as exc:
         summary["unavailable"] = f"spec queue unreadable: {exc}"
         return summary
     summary["active_count"] = len(active)
     try:
-        handoff = handoff_mod.read_handoff(project_dir / config.handoff_file)
+        handoff = handoff_mod.read_handoff(project_dir / handoff_file)
     except Exception as exc:
         summary["unavailable"] = f"handoff unreadable: {exc}"
         return summary
     try:
-        target = _recorded_target(project_dir, config, handoff)
+        target = _recorded_target_for(project_dir, finished_change, handoff)
     except Exception as exc:
         summary["unavailable"] = str(exc)
         return summary
@@ -376,7 +384,7 @@ def queue_summary(project_dir: Path, config: RobotConfig) -> dict:
         return summary
     summary["current_spec"] = target
     try:
-        text = (project_dir / config.spec_dir / target / "tasks.md").read_text(
+        text = (project_dir / spec_dir / target / "tasks.md").read_text(
             encoding="utf-8"
         )
     except OSError as exc:
@@ -540,7 +548,14 @@ def _recorded_target(
     durable conversation record, then hidden Ariadex state. A stale
     `next_action` is never a target: it describes intent, not evidence.
     """
-    override = (config.finished_change or "").strip()
+    return _recorded_target_for(project_dir, config.finished_change, handoff)
+
+
+def _recorded_target_for(
+    project_dir: Path, finished_change: str, handoff: handoff_mod.Handoff
+) -> str:
+    """`_recorded_target` over explicit fields (no `RobotConfig` needed)."""
+    override = (finished_change or "").strip()
     if override:
         return override
     record = _read_recorded_conversation(project_dir)
@@ -1197,7 +1212,12 @@ class RobotWatcher:
         every refresh. Unreadable pieces yield `unavailable` with the exact
         reason instead of raising.
         """
-        return queue_summary(self.project_dir, self.config)
+        return queue_summary(
+            self.project_dir,
+            spec_dir=self.config.spec_dir,
+            handoff_file=self.config.handoff_file,
+            finished_change=self.config.finished_change,
+        )
 
     def _capture(self) -> str:
         try:

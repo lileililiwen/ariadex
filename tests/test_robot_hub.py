@@ -15,6 +15,10 @@ class FakeTkWidget:
         self.forgotten = False
         self.command = options.get("command")
         self.text = ""
+        self._children: list = []
+        self._destroyed = False
+        if master is not None and hasattr(master, "_children"):
+            master._children.append(self)
 
     def pack(self, **kwargs):
         self.packed = True
@@ -23,6 +27,12 @@ class FakeTkWidget:
     def pack_forget(self):
         self.forgotten = True
         self.packed = False
+
+    def winfo_children(self):
+        return [c for c in self._children if not c._destroyed]
+
+    def destroy(self):
+        self._destroyed = True
 
     def configure(self, **options):
         self.options.update(options)
@@ -283,9 +293,29 @@ class RobotHubWindowTest(unittest.TestCase):
         window = companion_mod.RobotHubWindow(root, tabs)
         return window, root, watchers
 
-    def test_requires_at_least_one_tab(self):
-        with self.assertRaises(ValueError):
-            companion_mod.RobotHubWindow(FakeTkRoot(), [])
+    def test_empty_hub_allowed_for_auto_join(self):
+        window = companion_mod.RobotHubWindow(FakeTkRoot(), [])
+        self.assertEqual(window.tabs, [])
+        self.assertEqual(window.tab_buttons, [])
+
+    def test_add_and_remove_tab(self):
+        root = FakeTkRoot()
+        window = companion_mod.RobotHubWindow(root, [])
+        tab, _watcher = make_tab("/home/u/a")
+        window.add_tab(tab)
+        self.assertEqual(len(window.tabs), 1)
+        self.assertEqual(len(window.tab_buttons), 1)
+        window.add_tab(tab)
+        self.assertEqual(len(window.tabs), 1)
+        window.remove_project("/home/u/a")
+        self.assertEqual(window.tabs, [])
+        self.assertTrue(root.destroyed)
+
+    def test_remove_unknown_project_is_noop(self):
+        window, root, _watchers = self._window()
+        window.remove_project("/home/u/nope")
+        self.assertEqual(len(window.tabs), 3)
+        self.assertFalse(root.destroyed)
 
     def test_tab_buttons_match_entries(self):
         window, _root, _watchers = self._window()
@@ -663,20 +693,13 @@ class WatchHubSuccessTest(unittest.TestCase):
 
 class QueueSummaryTest(unittest.TestCase):
     def _config(self, **overrides):
-        from ariadex import robot as robot_mod
-
         kwargs = {
-            "session": "s",
-            "provider": "opencode",
-            "initial_prompt": "go",
-            "continuation_prompt": "cont",
-            "confirmation_prompt": "conf",
             "spec_dir": "openspec/changes",
             "handoff_file": "HANDOFF.md",
             "finished_change": "",
         }
         kwargs.update(overrides)
-        return robot_mod.RobotConfig(**kwargs)
+        return kwargs
 
     def _project(self, tmp, changes=("a", "b"), current="a", tasks=None):
         from pathlib import Path
@@ -706,7 +729,7 @@ class QueueSummaryTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = self._project(tmp)
-            summary = robot_mod.queue_summary(root, self._config())
+            summary = robot_mod.queue_summary(root, **self._config())
         self.assertEqual(summary["active_count"], 2)
         self.assertEqual(summary["current_spec"], "a")
         self.assertEqual(summary["open_tasks"], 2)
@@ -723,7 +746,7 @@ class QueueSummaryTest(unittest.TestCase):
             (root / "openspec" / "changes" / "b" / "tasks.md").write_text(
                 "- [x] done\n", encoding="utf-8"
             )
-            summary = robot_mod.queue_summary(root, self._config(finished_change="b"))
+            summary = robot_mod.queue_summary(root, **self._config(finished_change="b"))
         self.assertEqual(summary["current_spec"], "b")
         self.assertEqual(summary["open_tasks"], 0)
         self.assertEqual(summary["total_tasks"], 1)
@@ -735,7 +758,7 @@ class QueueSummaryTest(unittest.TestCase):
         from ariadex import robot as robot_mod
 
         with tempfile.TemporaryDirectory() as tmp:
-            summary = robot_mod.queue_summary(Path(tmp), self._config())
+            summary = robot_mod.queue_summary(Path(tmp), **self._config())
         self.assertEqual(summary["active_count"], 0)
         self.assertIn("not an OpenSpec project", summary["unavailable"])
 
@@ -746,7 +769,7 @@ class QueueSummaryTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = self._project(tmp, changes=(), current=None)
-            summary = robot_mod.queue_summary(root, self._config())
+            summary = robot_mod.queue_summary(root, **self._config())
         self.assertEqual(summary["active_count"], 0)
         self.assertEqual(summary["current_spec"], "")
         self.assertEqual(summary["unavailable"], "")
@@ -759,7 +782,7 @@ class QueueSummaryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = self._project(tmp, tasks=None)
             (root / "openspec" / "changes" / "a" / "tasks.md").unlink()
-            summary = robot_mod.queue_summary(root, self._config())
+            summary = robot_mod.queue_summary(root, **self._config())
         self.assertEqual(summary["current_spec"], "a")
         self.assertIn("tasks.md", summary["unavailable"])
 
@@ -773,7 +796,7 @@ class QueueSummaryTest(unittest.TestCase):
             (root / ".ariadex" / "handoff.md").write_text(
                 "---\nversion: 1\ncurrent_spec: a\n", encoding="utf-8"
             )
-            summary = robot_mod.queue_summary(root, self._config())
+            summary = robot_mod.queue_summary(root, **self._config())
         self.assertEqual(summary["active_count"], 2)
         self.assertIn("handoff", summary["unavailable"])
 
@@ -787,13 +810,20 @@ class QueueSummaryTest(unittest.TestCase):
             root = self._project(tmp)
             watcher = robot_mod.RobotWatcher(
                 root,
-                self._config(),
+                robot_mod.RobotConfig(
+                    session="s",
+                    provider="opencode",
+                    initial_prompt="go",
+                    continuation_prompt="cont",
+                    confirmation_prompt="conf",
+                    **self._config(),
+                ),
                 terminal_mod.FakeTerminalDriver(),
                 FakeHubAdapter("opencode"),
             )
             self.assertEqual(
                 watcher.queue_summary(),
-                robot_mod.queue_summary(root, self._config()),
+                robot_mod.queue_summary(root, **self._config()),
             )
 
     def test_never_raises_on_unreadable_tree(self):
@@ -802,7 +832,7 @@ class QueueSummaryTest(unittest.TestCase):
         from ariadex import robot as robot_mod
 
         summary = robot_mod.queue_summary(
-            Path("/nonexistent-ariadex-hub-probe"), self._config()
+            Path("/nonexistent-ariadex-hub-probe"), **self._config()
         )
         self.assertTrue(summary["unavailable"])
 

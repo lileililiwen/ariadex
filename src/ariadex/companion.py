@@ -2266,14 +2266,14 @@ class RobotHubWindow:
         hotkey: str = DEFAULT_HOTKEY,
         poll_interval_s: float = POLL_INTERVAL_S,
         active: int = 0,
+        on_empty: Callable[[], None] | None = None,
     ) -> None:
         import tkinter as tk
 
-        if not tabs:
-            raise ValueError("robot hub requires at least one tab")
+        self._tk = tk
         self.root = root
         self.tabs = list(tabs)
-        self.active = min(max(0, active), len(self.tabs) - 1)
+        self.active = min(max(0, active), max(0, len(self.tabs) - 1))
         self.hotkey_adapter = hotkey_adapter
         self.hotkey = hotkey
         self.poll_interval_ms = max(1, int(poll_interval_s * 1000))
@@ -2283,6 +2283,8 @@ class RobotHubWindow:
         ]
         self.queue_specs: list[str] = ["" for _ in self.tabs]
         self._poll_after: str | None = None
+        #: Called when the last tab leaves (hub server exits itself).
+        self.on_empty = on_empty
 
         assert isinstance(root, tk.Tk)
         root.title(f"Ariadex Robots ({len(self.tabs)})")
@@ -2307,16 +2309,7 @@ class RobotHubWindow:
         self.tab_bar = tk.Frame(self.frame, background="#20242b")
         self.tab_bar.pack(fill="x")
         self.tab_buttons: list[object] = []
-        for index in range(len(self.tabs)):
-            button = tk.Button(
-                self.tab_bar,
-                name=f"robot-hub-tab-{index}",
-                width=8,
-                takefocus=False,
-                command=self._select_fn(index),
-            )
-            button.pack(side="left", expand=True, fill="x")
-            self.tab_buttons.append(button)
+        self._rebuild_tab_bar()
         self.state_label = tk.Label(
             self.frame,
             text="WATCHING",
@@ -2426,6 +2419,64 @@ class RobotHubWindow:
             self._render()
 
         return select
+
+    def _rebuild_tab_bar(self) -> None:
+        """Recreate tab buttons for the current tab list (hub auto-join)."""
+        tk = self._tk
+        for child in list(self.tab_bar.winfo_children()):
+            with contextlib.suppress(Exception):
+                child.destroy()
+        self.tab_buttons = []
+        for index in range(len(self.tabs)):
+            button = tk.Button(
+                self.tab_bar,
+                name=f"robot-hub-tab-{index}",
+                width=8,
+                takefocus=False,
+                command=self._select_fn(index),
+            )
+            button.pack(side="left", expand=True, fill="x")
+            self.tab_buttons.append(button)
+
+    def add_tab(self, tab: RobotHubTab) -> None:
+        """Append one tab (idempotent per project); sends no input."""
+        for existing in self.tabs:
+            if existing.project == tab.project:
+                return
+        self.tabs.append(tab)
+        self.models.append(build_robot_view_model({}))
+        self.queue_texts.append("queue: n/a (no queue source)")
+        self.queue_specs.append("")
+        self._rebuild_tab_bar()
+        self._refresh()
+
+    def remove_project(self, project: str) -> None:
+        """Drop one tab by project; exits the window when none remain."""
+        index = next(
+            (i for i, tab in enumerate(self.tabs) if tab.project == project),
+            None,
+        )
+        if index is None:
+            return
+        del self.tabs[index]
+        for cache in (self.models, self.queue_texts, self.queue_specs):
+            if index < len(cache):
+                del cache[index]
+        self.active = min(self.active, max(0, len(self.tabs) - 1))
+        if not self.tabs:
+            if self.on_empty is not None:
+                with contextlib.suppress(Exception):
+                    self.on_empty()
+            with contextlib.suppress(Exception):
+                self.root.destroy()  # type: ignore[attr-defined]
+            return
+        self._rebuild_tab_bar()
+        self._refresh()
+
+    def _on_close_window(self) -> None:
+        """Close the hub window only; daemons, sessions, watchers persist."""
+        with contextlib.suppress(Exception):
+            self.root.destroy()  # type: ignore[attr-defined]
 
     def _build_log_panel(self, tk):
         """Create the read-only activity log without touching window focus."""

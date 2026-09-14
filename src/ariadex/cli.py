@@ -1991,14 +1991,18 @@ def run_managed_start(
     spawn_widget_fn=None,
     attach_fn=None,
     watcher_factory=None,
+    hub_register_fn=None,
 ) -> int:
     """Compose the managed provider workflow in the documented order.
 
     Prerequisites, one project daemon, one private adapter-owned tmux
-    session, the independent widget, terminal attach, supervision, and
-    reconciled shutdown. The tmux session name is derived internally from
-    durable state and is never a user input. Every injectable defaults to
-    the real handler; tests supply fakes to prove ordering and cleanup.
+    session, hub tab registration (falling back to the independent
+    widget), terminal attach, supervision, and reconciled shutdown. The
+    tmux session name is derived internally from durable state and is
+    never a user input. Every injectable defaults to the real handler;
+    tests supply fakes to prove ordering and cleanup. A `None`
+    `hub_register_fn` skips hub registration (legacy single-widget path);
+    `cmd_start` wires the real hub registration.
     """
     import threading
 
@@ -2047,13 +2051,23 @@ def run_managed_start(
 
     widget_proc = None
     if widget_ready:
-        try:
-            widget_proc = spawn_widget(project_dir)
-        except Exception as exc:
-            print(f"error: widget startup failed: {exc}", file=sys.stderr)
-            _shutdown_managed_session(project_dir, adapter, session, None, "widget")
-            return EXIT_ERROR
-        print("widget: independent widget started")
+        hub_label = None
+        if hub_register_fn is not None:
+            try:
+                hub_label = hub_register_fn(project_dir)
+            except Exception as exc:
+                print(f"hub: registration failed ({exc}); using single widget")
+                hub_label = None
+        if hub_label:
+            print(f"hub tab: {hub_label} (shared hub window)")
+        else:
+            try:
+                widget_proc = spawn_widget(project_dir)
+            except Exception as exc:
+                print(f"error: widget startup failed: {exc}", file=sys.stderr)
+                _shutdown_managed_session(project_dir, adapter, session, None, "widget")
+                return EXIT_ERROR
+            print("widget: independent widget started")
     else:
         print("widget: skipped (unavailable); terminal controls apply")
     make_watcher = watcher_factory or _build_managed_watcher
@@ -2212,7 +2226,28 @@ def cmd_start(
         confirmation_prompt=confirmation,
         interactive=interactive,
         as_json=as_json,
+        hub_register_fn=_register_hub_tab,
     )
+
+
+def _register_hub_tab(project_dir: Path) -> str | None:
+    """Register one hub tab for `start`; None keeps the single widget.
+
+    Ensures the singleton hub (spawning it once when absent) and
+    registers the project. Any failure returns None with a one-line
+    reason instead of raising, so `start` falls back cleanly.
+    """
+    from . import hub as hub_mod
+
+    ready, reason = hub_mod.ensure_hub()
+    if not ready:
+        print(f"hub: unavailable ({reason}); using single widget")
+        return None
+    ok, label = hub_mod.register_project(project_dir)
+    if not ok:
+        print(f"hub: registration refused ({label}); using single widget")
+        return None
+    return label or None
 
 
 def _start_daemon_only(project_dir: Path, as_json: bool = False) -> int:
@@ -2325,6 +2360,9 @@ def cmd_stop(project_dir: Path, as_json: bool = False) -> int:
         return EXIT_ERROR
     if _load_state(project_dir) is None:
         return EXIT_ERROR
+    from . import hub as hub_mod
+
+    hub_mod.unregister_project(project_dir)
     record = daemon_mod.read_record(project_dir)
     if not daemon_mod.daemon_alive(record):
         if record is not None:
@@ -2373,6 +2411,7 @@ def cmd_stop(project_dir: Path, as_json: bool = False) -> int:
 ADMIN_COMMANDS = (
     "companion",
     "widget",
+    "hub-window",
     "install",
     "uninstall",
     "doctor",
@@ -3118,11 +3157,29 @@ def cmd_admin(project_dir: Path, admin_argv: list[str], no_auto_install: bool) -
         return EXIT_ERROR
     if admin_argv[0] in ("widget",):
         return _cmd_admin_widget(project_dir, admin_argv[1:])
+    if admin_argv[0] in ("hub-window",):
+        return cmd_hub_window()
     forwarded: list[str] = []
     if no_auto_install:
         forwarded.append("--no-auto-install")
     forwarded.extend(admin_argv)
     return main(forwarded)
+
+
+def cmd_hub_window() -> int:
+    """Run the singleton hub window (spawned by `start`, not by hand).
+
+    Owns one Tk hub window and serves tab registrations over the
+    user-scoped hub socket until the last tab leaves or the window
+    closes. Fail-closed without a desktop display.
+    """
+    from . import hub as hub_mod
+
+    try:
+        return hub_mod.run_hub_window()
+    except hub_mod.HubError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
 
 
 def _cmd_admin_widget(project_dir: Path, widget_argv: list[str]) -> int:

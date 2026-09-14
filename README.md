@@ -331,11 +331,15 @@ override; otherwise the change in `HANDOFF.md` is checked),
 `--hub PROJECT:SESSION[:PROVIDER]`.
 
 When several projects run continuous work, one tabbed hub window replaces
-one widget per project. Each tab shows the project folder name plus the
-AI-agent provider badge (e.g. `a [opencode]`, `b [codex]`), a per-tab state
-indicator, and the usual per-tab Pause/Resume/Quit; `Pause all` pauses every
-tab and the window close button quits all watchers while leaving every
-provider session attachable. The global hotkey acts on the visible tab only.
+one widget per project — with no extra flags. Just run `ariadex start` in
+each project: the first start opens the shared hub window in the
+background and every later start adds its own tab automatically. Each tab
+shows the project folder name plus the AI-agent provider badge (e.g.
+`a [opencode]`, `b [codex]`), a per-tab state indicator, and per-tab
+Pause/Resume/Quit driven by that project's daemon; `Pause all` pauses
+every tab, quitting a tab removes only that tab, and closing the window
+exits only the hub while supervised work keeps running. The global hotkey
+acts on the visible tab only. `ariadex stop` removes the project's tab.
 Duplicate folder names gain parent segments (then the session name) so no
 two tabs look identical. Each tab's detail panel shows the current spec in
 the header, the active queue size with open/total task counts, the latest
