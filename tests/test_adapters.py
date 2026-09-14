@@ -65,6 +65,12 @@ class LifecycleTest(unittest.TestCase):
         adapter, _ = make_open_code()
         self.assertFalse(adapter.is_idle())
 
+    def test_opencode_draft_is_not_input_ready(self):
+        adapter, _ = make_open_code()
+        self.assertFalse(
+            adapter.is_input_ready("Ask anything\n┃ unfinished request\n▣ Build")
+        )
+
     def test_terminate_removes_session(self):
         adapter, driver = make_open_code()
         adapter.start()

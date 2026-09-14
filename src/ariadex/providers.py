@@ -85,9 +85,14 @@ class OpenCodeAdapter(AgentAdapter):
         """
         lines = [line.rstrip() for line in (capture or "").splitlines()[-16:]]
         has_composer = any(line.strip() == "┃" for line in lines)
+        has_draft = any(
+            line.strip().startswith("┃") and line.strip() != "┃" for line in lines
+        )
         has_footer = any(
             line.strip().startswith("▣") and "Build" in line for line in lines
         )
+        if has_draft:
+            return False
         return (has_composer and has_footer) or super().is_input_ready(capture)
 
     @property

@@ -541,6 +541,24 @@ class WatcherStateTest(unittest.TestCase):
         self.assertEqual(driver.sent_inputs("agent"), [])
         self.assertIn("agent", driver.sessions)
 
+    def test_pause_at_boundary_cancels_new_conversation(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [], "output": self._ready(), "workdir": "/t"
+        }
+        watcher = make_watcher(project, driver, debounce_polls=1)
+        watcher.request_pause()
+        watcher.initial_sent = True
+        watcher.phase = robot_mod.VERIFIED_BOUNDARY
+        check = robot_mod.BoundaryCheck(
+            ok=True, decision="continue", current_spec="change",
+            active=["change"], open_tasks=0, evidence_source="test"
+        )
+        watcher._record_before_prompt = lambda *args: True
+        self.assertEqual(watcher._open_continuation(check), robot_mod.PAUSED)
+        self.assertEqual(driver.sent_inputs("agent"), [])
+
     def test_resume_returns_to_observation_without_input(self) -> None:
         project = make_project(self._tmp)
         driver = FakeDriver()

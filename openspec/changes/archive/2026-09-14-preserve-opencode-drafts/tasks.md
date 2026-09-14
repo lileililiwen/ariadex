@@ -1,0 +1,4 @@
+- [x] Add draft and pause-boundary regression tests.
+- [x] Block automatic continuation during operator pause or draft input.
+- [x] Verify focused tests and strict OpenSpec validation.
+- [x] Archive with canonical spec promotion.

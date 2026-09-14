@@ -1759,6 +1759,12 @@ class RobotWatcher:
             "continuation", next_target, list(check.active)
         ):
             return self.phase
+        if self._paused or (
+            self.mode_requested is not None and self.mode_requested() == "PAUSE"
+        ):
+            self.phase = PAUSED
+            self._record("pause", "automatic continuation cancelled by operator")
+            return self.phase
         self.phase = NEW_CONVERSATION
         try:
             self.adapter.new_conversation()
