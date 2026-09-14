@@ -51,6 +51,20 @@
 
 - The latest boundary fix is implemented, verified, and archived below.
 - Implemented, verified, and archived:
+  `2026-09-14-confirmation-retry-and-watchdog`. After `adapter.new_conversation()`
+  the watcher retries the fresh input-ready surface up to `fresh_ready_attempts`
+  (default 12) with `fresh_ready_interval_s` (default 2.0s) between attempts,
+  still requiring `debounce_polls` consecutive ready observations and sending no
+  prompt without one. A `PAUSE` observed mid-wait parks the watcher in PAUSED so
+  Play resumes it and the open boundary refires; quit/shutdown aborts without
+  input. Root cause of the 2026-09-14 stall: the old wait polled only
+  `debounce_polls` times with no sleep, so the post-`/new` settle gap blocked
+  and the exited watcher left Play with nothing to resume. Verified with 1177
+  tests OK (8 new in `tests/test_fresh_ready_retry.py`), Ruff check clean on
+  touched files (repo-wide format flags at HEAD pre-exist and are untouched),
+  mypy clean (34 files), coverage 86% (floors pass), and strict change/spec
+  validation green.
+- Implemented, verified, and archived:
   `2026-09-13-handoff-revision-and-prompt-delivery` (commit `7fc8fd7`).
   Ariadex structured lifecycle state is stored under `.ariadex/handoff.md`;
   public `HANDOFF.md` remains ordinary user prose and is never a scheduling
