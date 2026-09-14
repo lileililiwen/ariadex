@@ -1798,40 +1798,23 @@ def _stop_widget_process(proc, name: str = "widget") -> None:
 
 
 def _repair_live_runtime(project_dir: Path, cfg, st, as_json: bool = False) -> int:
-    """Reconcile a live daemon without creating a second runtime."""
-    try:
-        _widget_process, created = widget_runtime_mod.ensure_widget(
-            project_dir, cfg, st
+    """Attach to a daemon-owned runtime without creating child processes."""
+    if not daemon_mod.daemon_alive(daemon_mod.read_record(project_dir)):
+        print(
+            "error: managed daemon is not reachable; run `ariadex start` again",
+            file=sys.stderr,
         )
-    except Exception as exc:
-        print(f"error: managed widget repair failed: {exc}", file=sys.stderr)
         return EXIT_ERROR
-    if created:
-        print("widget: repaired managed widget")
-    else:
-        print("managed runtime already running; reusing daemon, session, and widget")
     session = terminal_mod.session_name_for(st.session_id)
     try:
         driver = terminal_mod.TmuxDriver()
-        if not driver.session_alive(session):
-            adapter = providers_mod.get_adapter(
-                cfg.agent_provider, driver, session, project_dir
-            )
-            adapter.start()
-            if not driver.session_alive(session):
-                raise providers_mod.StartupError(
-                    "provider session did not remain alive"
-                )
-            print("provider: restored managed editor")
-        daemon_state = _daemon_ipc_or_none(project_dir, "status")
-        if (
-            daemon_state
-            and daemon_state.get("mode") == "PAUSE"
-            and _daemon_ipc_or_none(project_dir, "resume") is not None
-        ):
-            print("scheduling: resumed")
         if _has_terminal():
-            return _attach_session(driver.attach_command(session))
+            try:
+                return _attach_session(driver.attach_command(session))
+            except KeyboardInterrupt:
+                print("interrupted: requesting managed shutdown")
+                _request_managed_shutdown(project_dir)
+                return EXIT_OK
     except terminal_mod.TerminalError as exc:
         print(
             "Ariadex could not restore the editor automatically; "
@@ -1871,9 +1854,9 @@ def _repair_live_runtime(project_dir: Path, cfg, st, as_json: bool = False) -> i
         )
         return EXIT_ERROR
     if as_json:
-        print('{"ok": true, "reused": true}')
+        print('{"ok": true, "reused": true, "owner": "daemon"}')
     else:
-        print("managed provider session remains running")
+        print("managed runtime remains owned by daemon")
     return EXIT_OK
 
 
@@ -1946,6 +1929,50 @@ def _resolve_managed_config(
         )
         return None
     return provider, first, continuation, confirmation
+
+
+def _persist_managed_runtime_config(
+    project_dir: Path,
+    provider: str,
+    first: str,
+    continuation: str,
+    confirmation: str,
+    *,
+    widget_enabled: bool = True,
+) -> None:
+    """Persist one-run managed options for the daemon child to consume."""
+    import json
+    import tempfile
+
+    path = project_dir / daemon_mod.MANAGED_CONFIG_REL_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        dir=str(path.parent), prefix=".managed-runtime.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "provider": provider,
+                    "first_prompt": first,
+                    "continuation_prompt": continuation,
+                    "confirmation_prompt": confirmation,
+                    "widget_enabled": widget_enabled,
+                },
+                handle,
+                indent=2,
+                sort_keys=True,
+            )
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
+    with contextlib.suppress(OSError):
+        path.chmod(0o600)
 
 
 def _build_managed_watcher(project_dir, cfg, driver, adapter, session, resolved):
@@ -2325,6 +2352,19 @@ def cmd_start(
         return EXIT_ERROR
     provider, first, continuation, confirmation = resolved
     try:
+        interactive = sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    report = prerequisites_mod.coordinate(
+        provider,
+        allow_install=True,
+        confirmed=False,
+        interactive=interactive,
+    )
+    if not report.ready:
+        print(prerequisites_mod.format_report(report), file=sys.stderr)
+        return EXIT_ERROR
+    try:
         active_changes = openspec_evidence_mod.query_changes(project_dir)
     except openspec_evidence_mod.NotOpenSpecRoot:
         active_changes = None
@@ -2357,21 +2397,50 @@ def cmd_start(
     if _live_owner(project_dir, as_json):
         return _repair_live_runtime(project_dir, cfg, st, as_json)
     try:
-        interactive = sys.stdin.isatty()
-    except Exception:
-        interactive = False
-    return run_managed_start(
-        project_dir,
-        cfg,
-        st,
-        provider=provider,
-        first_prompt=first,
-        continuation_prompt=continuation,
-        confirmation_prompt=confirmation,
-        interactive=interactive,
-        as_json=as_json,
-        hub_register_fn=_register_hub_tab,
-    )
+        _persist_managed_runtime_config(
+            project_dir,
+            provider,
+            first,
+            continuation,
+            confirmation,
+            widget_enabled=any(
+                item.name == "widget" and item.ready for item in report.results
+            ),
+        )
+    except OSError as exc:
+        print(f"error: cannot prepare managed runtime: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if _start_daemon_only(project_dir, as_json) != EXIT_OK:
+        return EXIT_ERROR
+    session = terminal_mod.session_name_for(st.session_id)
+    if not _has_terminal():
+        print("managed runtime started; daemon owns provider, watcher, and widget")
+        return EXIT_OK
+    try:
+        return _attach_session(terminal_mod.TmuxDriver().attach_command(session))
+    except KeyboardInterrupt:
+        print("interrupted: requesting managed shutdown")
+        try:
+            _request_managed_shutdown(project_dir)
+        except daemon_mod.DaemonError as exc:
+            print(f"error: shutdown failed: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        return EXIT_OK
+
+
+def _request_managed_shutdown(project_dir: Path) -> None:
+    """Request and bounded-wait for daemon-owned generation cleanup."""
+    import time
+
+    response = daemon_mod.send_request(project_dir, "stop")
+    if not isinstance(response, dict) or not response.get("ok"):
+        raise daemon_mod.DaemonError("daemon refused managed shutdown")
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if not daemon_mod.daemon_alive(daemon_mod.read_record(project_dir)):
+            return
+        time.sleep(0.1)
+    raise daemon_mod.DaemonError("managed shutdown did not finish within 30 seconds")
 
 
 def _register_hub_tab(project_dir: Path) -> str | None:
@@ -2546,6 +2615,13 @@ def cmd_stop(project_dir: Path, as_json: bool = False) -> int:
             detail = f": {response['error']}"
         print(f"error: daemon refused stop{detail}", file=sys.stderr)
         return EXIT_ERROR
+    if (project_dir / daemon_mod.MANAGED_RUNTIME_REL_PATH).exists():
+        try:
+            _wait_for_managed_shutdown(project_dir)
+        except daemon_mod.DaemonError as exc:
+            print(f"error: managed shutdown incomplete: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        response["state"] = daemon_mod.daemon_status_view(project_dir)
     state = response.get("state")
     view = (
         state if isinstance(state, dict) else daemon_mod.daemon_status_view(project_dir)
@@ -2561,6 +2637,18 @@ def cmd_stop(project_dir: Path, as_json: bool = False) -> int:
     else:
         print(daemon_mod.format_status_text(view))
     return EXIT_OK
+
+
+def _wait_for_managed_shutdown(project_dir: Path) -> None:
+    """Wait until the daemon has reconciled all managed child ownership."""
+    import time
+
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if not daemon_mod.daemon_alive(daemon_mod.read_record(project_dir)):
+            return
+        time.sleep(0.1)
+    raise daemon_mod.DaemonError("daemon cleanup exceeded 30 seconds")
 
 
 ADMIN_COMMANDS = (

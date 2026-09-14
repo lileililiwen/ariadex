@@ -7,6 +7,7 @@ import dataclasses
 import json
 import os
 import secrets
+import signal
 import subprocess
 import sys
 import tempfile
@@ -116,6 +117,37 @@ def is_healthy(project_dir: Path, record: WidgetRecord | None) -> bool:
     if identity[0] != record.pid or identity[1] != record.process_start_ticks:
         return False
     return not record.token or identity[2] == record.token
+
+
+def terminate_owned(
+    project_dir: Path, record: WidgetRecord | None = None, *, wait_seconds: float = 2.0
+) -> bool:
+    """Terminate only the widget whose recorded process identity still matches."""
+    record = record or read_record(project_dir)
+    if record is None or record.project != str(project_dir.resolve()):
+        return False
+    try:
+        if process_identity(record.pid) != (
+            record.pid,
+            record.process_start_ticks,
+            record.token,
+        ):
+            return False
+        os.kill(record.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        clear_record(project_dir)
+        return True
+    except (OSError, ValueError):
+        return False
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        with contextlib.suppress(OSError, ValueError):
+            process_identity(record.pid)
+            time.sleep(0.05)
+            continue
+        clear_record(project_dir)
+        return True
+    return False
 
 
 def _default_spawn(project_dir: Path, token: str):

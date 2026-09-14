@@ -60,9 +60,9 @@ entrypoint remains internal and is not part of the normal workflow.
 
 ## The daemon lifecycle
 
-`ariadex start` runs the managed provider workflow for one project: it
-prepares prerequisites, starts one resident daemon, launches the configured
-provider in a private project-scoped tmux session through its declared
+`ariadex start` ensures the managed provider workflow for one project: it
+prepares prerequisites, starts one resident daemon maintainer, and lets that
+daemon launch the configured provider in a private project-scoped tmux session through its declared
 adapter command, opens the independent widget when the desktop supports it,
 attaches your terminal to the provider session, sends the configured first
 prompt once the provider is ready, and supervises verified continuation
@@ -88,9 +88,10 @@ The managed startup sequence is:
 5. Open the owner-only Unix control socket `.ariadex/daemon.sock`.
 6. Create the private provider session, open the movable widget/hub with Copy
    log, attach the
-   terminal, and supervise until queue-empty completion, provider exit, or
-   terminal detach. Completion stops supervision only; the provider, widget,
-   and daemon remain alive until the user quits or sends Ctrl+C.
+   terminal. The daemon watcher supervises until queue-empty completion or
+   provider exit; terminal detach does not stop the daemon. Completion stops
+   scheduling only; the provider, widget, and daemon remain alive until the
+   user quits or sends Ctrl+C.
 
 OpenCode has two related lifecycle objects: the tmux UI and the local API
 backend used for provider state. Ariadex writes `.ariadex/provider.json` only
@@ -118,16 +119,15 @@ not claim provider readiness. Stale provider metadata is cleared after
 cleanup, while `HANDOFF.md`, task files, conversation records, and evidence
 remain intact.
 
-In the managed `start` lifecycle, the daemon is intentionally input-silent:
-the foreground managed watcher is the only component allowed to send provider
-prompts. The daemon remains the single lease, IPC, status, and cancellation
-authority. Its `.ariadex/managed-runtime` marker prevents a second scheduler
-from racing the watcher. Standalone lower-level scheduler paths retain their
-existing behavior.
+In the managed `start` lifecycle, the daemon owns the single managed watcher
+and is the only component allowed to send provider prompts. The daemon remains
+the single lease, IPC, status, and cancellation authority. Its
+`.ariadex/managed-runtime` marker selects this lifecycle; standalone
+lower-level scheduler paths retain their existing behavior.
 
 The managed workflow exits cleanly after an explicit quit or Ctrl+C. Stop is
 graceful: an already-running bounded cycle is allowed to reach its safe
-cancellation boundary, then Ariadex terminates the managed provider UI and
+cancellation boundary, then the daemon terminates the managed provider UI and
 owned backend, waits within a bounded period, and stops the widget and daemon
 together. Queue-empty completion and provider exit do not perform that
 teardown; the editor, widget, and daemon remain available. Cleanup is
@@ -142,9 +142,9 @@ ariadex start        # create, reuse, or repair the managed runtime
 ```
 
 Starting an already-running project is idempotent. It reuses the existing
-daemon and provider session, recreates only a crashed widget, and attaches the
-current terminal to the existing session. Ctrl+C in the provider and the
-widget controls handle normal lifecycle actions. Use `ariadex admin status`,
+daemon-owned generation and attaches the current terminal to the existing
+session. Ctrl+C and the widget controls request the same complete shutdown.
+Use `ariadex admin status`,
 `ariadex admin doctor`, or `ariadex admin recover` only for diagnosis and
 recovery.
 
@@ -390,7 +390,9 @@ provider output.
 | `.ariadex/handoff.md` | Ariadex-owned structured lifecycle state |
 | `.ariadex/state.json` | mode, session ID, current spec, unresolved count, and update time |
 | `.ariadex/daemon.json` | daemon PID, socket endpoint, lease/runtime status |
-| `.ariadex/managed-runtime` | marks the project as using the managed watcher; daemon scheduler input is disabled |
+| `.ariadex/managed-runtime` | selects daemon-owned provider/watcher/widget supervision |
+| `.ariadex/managed-runtime.json` | daemon-consumed provider and prompt configuration for this generation |
+| `.ariadex/managed-generation.json` | daemon/provider/widget identities and terminal shutdown reason |
 | `.ariadex/daemon.sock` | local typed control IPC while the daemon is alive |
 | `.ariadex/runs/` | bounded per-cycle run logs |
 | `.ariadex/metrics.jsonl` | bounded cycle metrics |

@@ -190,7 +190,7 @@ controls, durable files, cycle flow, and troubleshooting, see
 ```bash
 git clone https://github.com/lileililiwen/ariadex.git && cd ariadex
 ./ariadex init         # prompts plus permission policy (blanks keep defaults)
-./ariadex start        # managed workflow: prerequisites, daemon, session, widget
+./ariadex start        # ensure the daemon-owned provider, watcher, and widget
 ```
 
 The generated `.ariadex/config.yaml` contains the prompts used by `start`:
@@ -216,10 +216,9 @@ queue is empty. `--agent`, `--first-prompt`, `--continuation-prompt`, and
 `--confirmation-prompt` override the configuration for one run. A duplicate
 `start` reports the live owner and creates nothing.
 
-`ariadex start` also repairs the managed runtime. If the daemon and provider
-session are healthy but the widget crashed, rerun `ariadex start`: it reuses
-the daemon and session and recreates only the widget. It never creates a
-second daemon, session, supervisor, or prompt.
+`ariadex start` also repairs the managed runtime. The daemon owns the provider,
+watcher, and widget; rerunning start only ensures or attaches to that one
+generation. It never creates a second daemon, session, supervisor, or prompt.
 
 For later accident analysis, inspect `.ariadex/diagnostics/diagnostics.jsonl`
 for structured provider-exit evidence and `.ariadex/daemon.log` for daemon
@@ -241,10 +240,10 @@ reported as an ownership conflict.
 During an interactive install, package-manager output is shown directly in
 the terminal, including apt progress and errors.
 
-The daemon owns persistence, lease, status, cancellation, and local control
-requests. In the managed `start` lifecycle, only its single foreground
-watcher sends provider prompts; the daemon does not inject a second scheduler
-prompt. The
+The daemon owns persistence, lease, status, cancellation, provider lifecycle,
+watcher, widget, and local control requests. In the managed `start` lifecycle,
+the daemon's single watcher sends provider prompts; there is no foreground
+Ariadex supervisor thread. The
 normal user does not need lifecycle commands: Ctrl+C in the provider or the
 widget buttons control the run. Administrative diagnosis remains available
 through `ariadex admin doctor`, `ariadex admin status`, and
@@ -278,9 +277,9 @@ Pause workflow: press the global hotkey (default `Ctrl+Esc`) while the agent
 works — the daemon enters `PAUSE` at the safe cancellation boundary. Edit
 freely, then press Play: the daemon resynchronizes handoff, git, specs, queue,
 lease, and session state, returns to `AUTO`, and continues provider work.
-The top-right close button requests a full managed shutdown: the provider
-session, daemon, and widget exit together while durable work is preserved. The
-Stop action in the expanded controls remains separately confirmation-gated.
+The top-right close button and expanded Close Ariadex button request a full
+managed shutdown: the provider session, daemon, and widget exit together while
+durable work is preserved. Ctrl+C in the attached terminal uses the same path.
 
 Configuration is per user in `$XDG_CONFIG_HOME/ariadex/companion.json`
 (`~/.config/ariadex/companion.json` by default): `hotkey` (e.g. `Alt+F9`)

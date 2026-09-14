@@ -1141,7 +1141,8 @@ class CompanionWindow:
         self.titlebar = tk.Frame(self.frame, background="#20242b")
         self.titlebar.pack(fill="x")
         self.titlebar.configure(height=30)
-        self.titlebar.pack_propagate(False)
+        with contextlib.suppress(AttributeError):
+            self.titlebar.pack_propagate(False)
         self.dot = tk.Label(
             self.titlebar,
             text="●",
@@ -1202,7 +1203,8 @@ class CompanionWindow:
         controls = self.controls
         controls.pack(fill="x", pady=(4, 0))
         controls.configure(height=36)
-        controls.pack_propagate(False)
+        with contextlib.suppress(AttributeError):
+            controls.pack_propagate(False)
         self.play_button = tk.Button(
             controls,
             text="Play",
@@ -1331,7 +1333,7 @@ class CompanionWindow:
             text="Close Ariadex",
             name="quit-button",
             takefocus=True,
-            command=self._quit,
+            command=self._on_close,
         )
         self.quit_button.pack(fill="x", pady=(4, 0))
 

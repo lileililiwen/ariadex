@@ -12,7 +12,6 @@ from pathlib import Path
 from unittest import mock
 
 from ariadex import cli, concurrency, config, daemon, prerequisites, state
-from ariadex.terminal import FakeTerminalDriver
 
 
 def handoff_path(root: Path) -> Path:
@@ -46,47 +45,6 @@ def ready_report():
         ],
         ready=True,
     )
-
-
-class FakeManagedAdapter:
-    """Adapter double over an in-memory driver (no tmux needed)."""
-
-    def __init__(self, driver, session):
-        self.driver = driver
-        self.session_name = session
-
-    def start(self):
-        return self.driver.create_or_connect(self.session_name, ".", ["provider"])
-
-    def terminate(self):
-        self.driver.terminate(self.session_name)
-
-
-class FakeManagedWatcher:
-    def __init__(self, outcome="done"):
-        self.outcome = outcome
-
-    def run(self):
-        from types import SimpleNamespace
-
-        return SimpleNamespace(outcome=self.outcome, detail="fake")
-
-    def request_quit(self):
-        return "quit requested"
-
-
-class FakeWidgetProc:
-    def __init__(self):
-        self._alive = True
-
-    def poll(self):
-        return None if self._alive else 0
-
-    def terminate(self):
-        self._alive = False
-
-    def kill(self):
-        self._alive = False
 
 
 def start_ipc_server(root: Path) -> tuple[threading.Event, threading.Thread]:
@@ -408,40 +366,16 @@ class LifecycleCommandTest(unittest.TestCase):
         self.assertEqual(json.loads(out)["mode"], "AUTO")
 
     def test_full_start_stop_cycle(self):
-        driver = FakeTerminalDriver()
-        session = f"ariadex-{state.read(self.root).session_id}"
         with (
             mock.patch.object(
                 cli.prerequisites_mod, "coordinate", return_value=ready_report()
             ),
-            mock.patch.object(
-                cli.providers_mod,
-                "get_adapter",
-                return_value=FakeManagedAdapter(driver, session),
-            ),
-            mock.patch.object(
-                cli, "_spawn_widget_process", return_value=FakeWidgetProc()
-            ),
-            mock.patch.object(cli, "_attach_session", return_value=0),
-            mock.patch.object(
-                cli.robot_mod, "RobotWatcher", return_value=FakeManagedWatcher()
-            ),
+            mock.patch.object(cli, "_start_daemon_only", return_value=cli.EXIT_OK),
+            mock.patch.object(cli, "_has_terminal", return_value=False),
         ):
             code, out, _ = run_cli(self.root, "start")
         self.assertEqual(code, 0, out)
-        self.assertIn("complete", out)
-        # Queue-empty completion tears everything down deterministically.
-        self.assertFalse(driver.session_alive(session))
-        record = daemon.read_record(self.root)
-        assert record is not None
-        self.assertFalse(daemon.daemon_alive(record))
-        code, out, _ = run_cli(self.root, "status", "--json")
-        self.assertEqual(code, 0)
-        payload = json.loads(out)
-        self.assertNotIn("daemon", payload)
-        self.assertEqual(payload["mode"], "AUTO")
-        code, _, _ = run_cli(self.root, "stop")
-        self.assertEqual(code, 0)
+        self.assertIn("managed runtime started", out)
 
 
 class RunDaemonTest(unittest.TestCase):

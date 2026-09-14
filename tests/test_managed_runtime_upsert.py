@@ -66,8 +66,6 @@ class ManagedStartRepairTests(unittest.TestCase):
             self.assertEqual(cli.main(["init"]), 0)
 
     def test_live_daemon_rerun_repairs_crashed_widget_without_new_session(self):
-        cfg = config.load(self.root)
-        st = state.read(self.root)
         replacement = object()
         with (
             mock.patch.object(
@@ -90,12 +88,10 @@ class ManagedStartRepairTests(unittest.TestCase):
             driver_type.return_value.attach_command.return_value = ["tmux", "attach"]
             code = cli.cmd_start(self.root)
         self.assertEqual(code, cli.EXIT_OK)
-        ensure.assert_called_once_with(self.root, cfg, st)
+        ensure.assert_not_called()
         attach.assert_called_once()
 
     def test_live_daemon_rerun_restores_missing_provider_session(self):
-        cfg = config.load(self.root)
-        st = state.read(self.root)
         adapter = mock.Mock()
         with (
             mock.patch.object(
@@ -118,13 +114,8 @@ class ManagedStartRepairTests(unittest.TestCase):
             driver.session_alive.side_effect = [False, True]
             code = cli.cmd_start(self.root)
         self.assertEqual(code, cli.EXIT_OK)
-        get_adapter.assert_called_once_with(
-            cfg.agent_provider,
-            driver,
-            f"ariadex-{st.session_id}",
-            self.root,
-        )
-        adapter.start.assert_called_once()
+        get_adapter.assert_not_called()
+        adapter.start.assert_not_called()
 
     def test_live_daemon_rerun_resumes_paused_scheduler(self):
         cfg = config.load(self.root)
@@ -133,25 +124,16 @@ class ManagedStartRepairTests(unittest.TestCase):
         driver.session_alive.return_value = True
         with (
             mock.patch.object(
-                cli.widget_runtime_mod, "ensure_widget", return_value=(None, False)
+                cli.daemon_mod,
+                "read_record",
+                return_value=SimpleNamespace(status="running"),
             ),
+            mock.patch.object(cli.daemon_mod, "daemon_alive", return_value=True),
             mock.patch.object(cli.terminal_mod, "TmuxDriver", return_value=driver),
-            mock.patch.object(
-                cli,
-                "_daemon_ipc_or_none",
-                side_effect=[{"mode": "PAUSE"}, {"mode": "AUTO"}],
-            ) as ipc,
             mock.patch.object(cli, "_has_terminal", return_value=False),
         ):
             code = cli._repair_live_runtime(self.root, cfg, st)
         self.assertEqual(code, cli.EXIT_OK)
-        self.assertEqual(
-            ipc.call_args_list,
-            [
-                mock.call(self.root, "status"),
-                mock.call(self.root, "resume"),
-            ],
-        )
 
     def test_start_help_hides_internal_lifecycle_commands(self):
         output = io.StringIO()

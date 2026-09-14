@@ -130,10 +130,10 @@ def is_reusable(project_dir: Path, record: ProviderRuntimeRecord | None) -> bool
         identity = process_identity(record.pid)
     except (OSError, ValueError):
         return False
-    return (
-        identity == (record.pid, record.process_start_ticks)
-        and endpoint_is_responsive(record.endpoint)
-    )
+    return identity == (
+        record.pid,
+        record.process_start_ticks,
+    ) and endpoint_is_responsive(record.endpoint)
 
 
 def terminate_owned(

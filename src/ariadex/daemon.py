@@ -28,6 +28,7 @@ from typing import Protocol
 DAEMON_REL_PATH = Path(".ariadex") / "daemon.json"
 SOCKET_REL_PATH = Path(".ariadex") / "daemon.sock"
 MANAGED_RUNTIME_REL_PATH = Path(".ariadex") / "managed-runtime"
+MANAGED_CONFIG_REL_PATH = Path(".ariadex") / "managed-runtime.json"
 DAEMON_VERSION = 1
 
 REQUEST_TYPES = ("status", "pause", "resume", "stop", "wake")
@@ -55,6 +56,8 @@ class DaemonRecord:
     endpoint: str = str(SOCKET_REL_PATH)
     status: str = "running"
     session_id: str = ""
+    shutdown_reason: str = ""
+    runtime_generation: str = ""
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -392,6 +395,7 @@ def daemon_status_view(project_dir: Path) -> dict:
     from . import concurrency as concurrency_mod
     from . import config as config_mod
     from . import handoff as handoff_mod
+    from . import managed_runtime as managed_runtime_mod
     from . import runner as runner_mod
     from . import state as state_mod
     from . import widget_runtime as widget_runtime_mod
@@ -434,6 +438,7 @@ def daemon_status_view(project_dir: Path) -> dict:
             "notes": [f"diagnostic context unavailable: {exc}"],
         }
     widget_record = widget_runtime_mod.read_record(project_dir)
+    generation = managed_runtime_mod.read_generation(project_dir)
     try:
         from . import upgrade as upgrade_mod
 
@@ -460,6 +465,7 @@ def daemon_status_view(project_dir: Path) -> dict:
             "healthy": widget_runtime_mod.is_healthy(project_dir, widget_record),
             "pid": widget_record.pid if widget_record else None,
         },
+        "generation": generation.to_dict() if generation else None,
     }
 
 
@@ -576,6 +582,7 @@ def handle_request(project_dir: Path, request_type: str) -> dict:
     record = read_record(project_dir)
     if record is not None:
         record.status = "stopping"
+        record.shutdown_reason = "operator"
         write_record(project_dir, record)
     concurrency_mod.request_cancellation(
         project_dir, requested_by="stop", reason="daemon stop requested"
@@ -639,9 +646,8 @@ def _scheduler_poll(project_dir: Path) -> None:
         os.environ.get("ARIADEX_MANAGED_RUNTIME") == "1"
         or (project_dir / MANAGED_RUNTIME_REL_PATH).exists()
     ):
-        # `ariadex start` owns provider input through RobotWatcher. The
-        # resident daemon remains the single lease/IPC/status authority but
-        # must not race the managed watcher by sending Runner prompts.
+        # Managed provider input belongs to the daemon-owned runtime. The
+        # legacy scheduler must never race its watcher with Runner prompts.
         return
     try:
         cfg = config_mod.load(project_dir)
@@ -664,6 +670,76 @@ def _scheduler_poll(project_dir: Path) -> None:
         runner.run_once()
     except Exception:
         return
+
+
+def _managed_runtime(project_dir: Path):
+    """Build the managed runtime owned by this daemon process."""
+    from . import config as config_mod
+    from . import managed_runtime as managed_runtime_mod
+    from . import providers as providers_mod
+    from . import robot as robot_mod
+    from . import state as state_mod
+    from . import terminal as terminal_mod
+    from . import widget_runtime as widget_runtime_mod
+
+    cfg = config_mod.load(project_dir)
+    stored = state_mod.read(project_dir)
+    managed_config = _read_json(project_dir / MANAGED_CONFIG_REL_PATH) or {}
+    provider = str(managed_config.get("provider") or cfg.agent_provider)
+    first_prompt = str(managed_config.get("first_prompt") or cfg.first_prompt)
+    continuation_prompt = str(
+        managed_config.get("continuation_prompt") or cfg.continuation_prompt
+    )
+    confirmation_prompt = str(
+        managed_config.get("confirmation_prompt") or cfg.confirmation_prompt
+    )
+    widget_enabled = bool(managed_config.get("widget_enabled", True))
+    session = terminal_mod.session_name_for(stored.session_id)
+    driver = terminal_mod.TmuxDriver()
+    runtime = None
+
+    def make_adapter():
+        return providers_mod.get_adapter(provider, driver, session, project_dir)
+
+    def make_watcher():
+        watcher_config = robot_mod.validate_config(
+            robot_mod.RobotConfig(
+                session=session,
+                provider=provider,
+                initial_prompt=first_prompt,
+                continuation_prompt=continuation_prompt,
+                confirmation_prompt=confirmation_prompt,
+                spec_dir=cfg.spec_dir,
+                handoff_file=cfg.handoff_file,
+            )
+        )
+        return robot_mod.RobotWatcher(
+            project_dir,
+            watcher_config,
+            driver,
+            runtime.adapter,
+            shutdown_requested=lambda: _managed_shutdown_requested(project_dir),
+            mode_requested=lambda: state_mod.read(project_dir).mode,
+        )
+
+    def make_widget():
+        if not widget_enabled:
+            return None
+        process, _created = widget_runtime_mod.ensure_widget(project_dir, cfg, stored)
+        return process
+
+    runtime = managed_runtime_mod.ManagedRuntime(
+        project_dir,
+        adapter_factory=make_adapter,
+        widget_factory=make_widget,
+        watcher_factory=make_watcher,
+    )
+    return runtime
+
+
+def _managed_shutdown_requested(project_dir: Path) -> bool:
+    record = read_record(project_dir)
+    return record is not None and record.status in ("stopping", "stopped")
 
 
 def run_daemon(
@@ -718,7 +794,11 @@ def run_daemon(
     with contextlib.suppress(OSError):
         sock.unlink()
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    managed_runtime = None
     try:
+        if (project_dir / MANAGED_RUNTIME_REL_PATH).exists():
+            managed_runtime = _managed_runtime(project_dir)
+            managed_runtime.start()
         server.bind(str(sock))
         with contextlib.suppress(OSError):
             os.chmod(sock, 0o600)
@@ -735,7 +815,8 @@ def run_daemon(
                 if record_now is not None and record_now.status == "stopping":
                     stop_event.set()
                     break
-                _scheduler_poll(project_dir)
+                if managed_runtime is None:
+                    _scheduler_poll(project_dir)
                 with contextlib.suppress(Exception):
                     concurrency_mod.heartbeat(project_dir)
                 polls += 1
@@ -746,6 +827,14 @@ def run_daemon(
             stop_event.set()
             worker.join(timeout=DEFAULT_IPC_TIMEOUT_S)
     finally:
+        if managed_runtime is not None:
+            current = read_record(project_dir)
+            reason = (
+                current.shutdown_reason
+                if current is not None and current.shutdown_reason
+                else "daemon-exit"
+            )
+            managed_runtime.stop(reason)
         with contextlib.suppress(OSError):
             server.close()
         with contextlib.suppress(OSError):
