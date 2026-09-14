@@ -1,0 +1,5 @@
+- [x] Reproduce the four-button fixed-width layout conflict from source and tests.
+- [x] Bound action button requested widths and padding.
+- [x] Add a regression test covering the stable button layout contract.
+- [x] Run focused tests, lint, type checks, diff checks, and strict OpenSpec validation.
+- [x] Archive only after promoting requirements into canonical specs.

@@ -56,6 +56,12 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-widget-button-layout-regression`. The collapsed widget keeps
+  Play, Pause, Stop, and Copy log usable within its fixed width after provider
+  startup. Verified with 67 companion tests, Ruff, mypy, diff check, and
+  strict OpenSpec validation.
+
+- Implemented, verified, and archived:
   `2026-09-14-provider-exit-diagnostics-and-daemon-logs`. Managed provider
   exits retain bounded redacted evidence in
   `.ariadex/diagnostics/diagnostics.jsonl`; daemon stdout/stderr is retained

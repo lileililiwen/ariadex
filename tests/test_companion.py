@@ -447,11 +447,20 @@ class WidgetSmokeTest(unittest.TestCase):
                 "play-button",
                 "pause-button",
                 "stop-button",
+                "copy-log-button",
                 "expand-button",
                 "close-button",
                 "status-text",
             ):
                 self.assertTrue(bool(find(widget_name)), widget_name)
+            self.assertEqual(
+                window.play_button.options["width"],
+                companion.WIDGET_ACTION_BUTTON_WIDTH,
+            )
+            self.assertEqual(
+                window.copy_log_button.options["width"],
+                companion.WIDGET_COPY_BUTTON_WIDTH,
+            )
             # Collapsed by default; expand reveals extra controls.
             self.assertFalse(window.expanded)
             window._toggle_expanded()

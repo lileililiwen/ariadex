@@ -34,6 +34,8 @@ WIDGET_WIDTH = 360
 WIDGET_COLLAPSED_HEIGHT = 116
 WIDGET_EXPANDED_HEIGHT = 320
 WIDGET_EXPANDED_WINDOW_HEIGHT = 340
+WIDGET_ACTION_BUTTON_WIDTH = 6
+WIDGET_COPY_BUTTON_WIDTH = 8
 
 #: Hub window heights: the hub detail panel carries a tab bar plus five
 #: detail rows, so the single-widget heights would clip the controls row
@@ -1198,9 +1200,9 @@ class CompanionWindow:
             controls,
             text="Play",
             name="play-button",
-            width=8,
-            padx=6,
-            pady=5,
+            width=WIDGET_ACTION_BUTTON_WIDTH,
+            padx=2,
+            pady=3,
             takefocus=True,
             command=self._on_play,
         )
@@ -1209,9 +1211,9 @@ class CompanionWindow:
             controls,
             text="Pause",
             name="pause-button",
-            width=8,
-            padx=6,
-            pady=5,
+            width=WIDGET_ACTION_BUTTON_WIDTH,
+            padx=2,
+            pady=3,
             takefocus=True,
             command=self._on_pause,
         )
@@ -1220,9 +1222,9 @@ class CompanionWindow:
             controls,
             text="Stop",
             name="stop-button",
-            width=8,
-            padx=6,
-            pady=5,
+            width=WIDGET_ACTION_BUTTON_WIDTH,
+            padx=2,
+            pady=3,
             takefocus=True,
             command=self._on_stop,
         )
@@ -1230,6 +1232,9 @@ class CompanionWindow:
         self.copy_log_button = tk.Button(
             controls,
             text="Copy log",
+            width=WIDGET_COPY_BUTTON_WIDTH,
+            padx=2,
+            pady=3,
             name="copy-log-button",
             takefocus=False,
             command=self._on_copy_log,
