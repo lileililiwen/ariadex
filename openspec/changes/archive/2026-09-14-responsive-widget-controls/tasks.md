@@ -1,0 +1,4 @@
+- [x] Add regression tests for poll/action independence.
+- [x] Make managed reconcile and quit asynchronous.
+- [x] Verify focused tests and strict OpenSpec validation.
+- [x] Archive with canonical spec promotion.

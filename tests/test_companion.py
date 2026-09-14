@@ -840,6 +840,22 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.window._poll()
         self.assertTrue(self.root.after_calls)
 
+    def test_nonblocking_poll_does_not_use_synchronous_refresh(self):
+        window = companion.CompanionWindow(
+            FakeTkRoot(), FakeClient(), FakeAdapter(), "Ctrl+Esc", nonblocking=True
+        )
+        with mock.patch.object(window, "_refresh_async") as refresh:
+            window._poll()
+        refresh.assert_called_once_with()
+
+    def test_nonblocking_reconcile_uses_async_ipc(self):
+        window = companion.CompanionWindow(
+            FakeTkRoot(), FakeClient(), FakeAdapter(), "Ctrl+Esc", nonblocking=True
+        )
+        with mock.patch.object(window, "_run_client_async") as run_client:
+            window._on_reconcile()
+        run_client.assert_called_once_with("reconcile")
+
 
 class RunCompanionHeadlessTest(unittest.TestCase):
     def setUp(self):

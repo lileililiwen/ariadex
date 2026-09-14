@@ -1108,7 +1108,8 @@ class CompanionWindow:
         self._poll_after: str | None = None
         self._save_after: str | None = None
         self._nonblocking = nonblocking
-        self._io_busy = False
+        self._action_busy = False
+        self._refresh_busy = False
 
         assert isinstance(root, tk.Tk)
         root.title("Ariadex")
@@ -1461,11 +1462,13 @@ class CompanionWindow:
             self.model = build_view_model(state)
         self._render()
 
-    def _run_client_async(self, action: str) -> None:
+    def _run_client_async(
+        self, action: str, on_success: Callable[[], None] | None = None
+    ) -> None:
         """Run daemon IPC off the Tk event thread and apply its result on Tk."""
-        if self._io_busy:
+        if self._action_busy:
             return
-        self._io_busy = True
+        self._action_busy = True
         self._render()
 
         def worker() -> None:
@@ -1484,13 +1487,15 @@ class CompanionWindow:
                 error = exc
 
             def finish() -> None:
-                self._io_busy = False
+                self._action_busy = False
                 if error is not None:
                     self.model = failure_view_model(str(error))
                 else:
                     self._state = state or {}
                     self.model = build_view_model(self._state)
                 self._render()
+                if error is None and on_success is not None:
+                    on_success()
 
             with contextlib.suppress(Exception):
                 self.root.after(0, finish)  # type: ignore[attr-defined]
@@ -1501,9 +1506,9 @@ class CompanionWindow:
 
     def _refresh_async(self) -> None:
         """Refresh daemon state without blocking Tk polling or button input."""
-        if self._io_busy:
+        if self._refresh_busy:
             return
-        self._io_busy = True
+        self._refresh_busy = True
 
         def worker() -> None:
             try:
@@ -1514,7 +1519,7 @@ class CompanionWindow:
                 error = exc
 
             def finish() -> None:
-                self._io_busy = False
+                self._refresh_busy = False
                 if error is not None:
                     model = dict(self.model)
                     model["failure"] = str(error)
@@ -1559,7 +1564,10 @@ class CompanionWindow:
             self._run_client("stop")
 
     def _on_reconcile(self) -> None:
-        self._run_client("reconcile")
+        if self._nonblocking:
+            self._run_client_async("reconcile")
+        else:
+            self._run_client("reconcile")
 
     def _on_editor(self) -> None:
         try:
@@ -1669,6 +1677,9 @@ class CompanionWindow:
 
     def _on_close(self) -> None:
         """Stop the daemon, then exit the widget process."""
+        if self._nonblocking:
+            self._run_client_async("stop", on_success=self._quit)
+            return
         try:
             self.client.stop()
         except CompanionError as exc:
