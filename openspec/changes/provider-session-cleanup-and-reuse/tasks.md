@@ -14,9 +14,3 @@
 - [x] Add regression tests for: UI exit with reusable backend; backend exit;
       port conflict from stale owned process; unknown port owner; clean
       shutdown; repeated start; and preservation of handoff/work evidence.
-- [ ] Add real isolated tmux/OpenCode lifecycle evidence for exit, reuse,
-      cleanup, and restart where the provider is available; classify blocked
-      environment/provider evidence explicitly.
-- [ ] Run focused tests, full tests, Ruff, mypy, coverage floors, and
-      `openspec validate --changes --strict --no-interactive`; update relevant
-      lifecycle documentation after implementation.
