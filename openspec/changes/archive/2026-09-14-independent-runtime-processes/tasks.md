@@ -1,0 +1,6 @@
+- [x] Make managed widget IPC and polling non-blocking.
+- [x] Make daemon IPC connections independent.
+- [x] Add regression tests for non-blocking control boundaries.
+- [x] Update docs and lifecycle contract.
+- [x] Run focused and strict verification.
+- [x] Archive with canonical spec promotion.

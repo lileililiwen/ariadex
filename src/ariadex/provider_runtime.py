@@ -123,6 +123,28 @@ def endpoint_is_responsive(endpoint: str, timeout: float = 0.75) -> bool:
         return False
 
 
+def _descendants(pid: int) -> set[int]:
+    """Snapshot descendants before terminating an owned provider."""
+    pending = [pid]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current in seen or current <= 0:
+            continue
+        seen.add(current)
+        try:
+            raw = Path(f"/proc/{current}/task/{current}/children").read_text(
+                encoding="ascii"
+            )
+        except (OSError, UnicodeDecodeError):
+            continue
+        for value in raw.split():
+            with contextlib.suppress(ValueError):
+                pending.append(int(value))
+    seen.discard(pid)
+    return seen
+
+
 def is_reusable(project_dir: Path, record: ProviderRuntimeRecord | None) -> bool:
     if record is None or record.project != str(project_dir.resolve()):
         return False
@@ -145,6 +167,7 @@ def terminate_owned(
     """Terminate only a process whose recorded identity still matches."""
     if record is None or record.project != str(project_dir.resolve()):
         return False
+    descendants = _descendants(record.pid)
     try:
         if process_identity(record.pid) != (record.pid, record.process_start_ticks):
             return False
@@ -160,6 +183,14 @@ def terminate_owned(
             process_identity(record.pid)
             time.sleep(0.05)
             continue
-        clear_record(project_dir)
-        return True
-    return False
+        break
+    remaining = {
+        pid for pid in descendants if Path(f"/proc/{pid}").exists()
+    }
+    if Path(f"/proc/{record.pid}").exists():
+        remaining.add(record.pid)
+    for pid in remaining:
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.kill(pid, signal.SIGKILL)
+    clear_record(project_dir)
+    return True

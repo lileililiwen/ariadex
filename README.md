@@ -4,6 +4,11 @@ Human-supervised runtime for long-running AI coding workflows.
 
 Ariadex keeps Coding CLI work moving across fresh contexts without losing unfinished work. It orchestrates OpenCode and Codex through tmux, with persistent handoffs, verification commands, and explicit human control.
 
+Managed runtime ownership is split across three independently identified
+processes: daemon maintainer, provider session, and widget UI. Widget polling
+and Pause/Stop controls use asynchronous IPC, so a slow provider operation
+cannot freeze the Tk event loop or hide the controls.
+
 ## Status
 
 MVP, all eight post-MVP changes, and all six audit remediation fixes

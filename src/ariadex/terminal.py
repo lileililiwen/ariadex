@@ -9,8 +9,12 @@ attach to the real Coding CLI after a disconnect.
 from __future__ import annotations
 
 import abc
+import contextlib
+import os
 import shutil
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -212,13 +216,55 @@ class TmuxDriver(TerminalDriver):
         except (IndexError, ValueError):
             return None
 
+    @staticmethod
+    def _descendants(pid: int) -> set[int]:
+        """Return a bounded snapshot of descendants from procfs."""
+        pending = [pid]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if current in seen or current <= 0:
+                continue
+            seen.add(current)
+            try:
+                children = Path(f"/proc/{current}/task/{current}/children").read_text(
+                    encoding="ascii"
+                )
+            except (OSError, UnicodeDecodeError):
+                continue
+            for value in children.split():
+                with contextlib.suppress(ValueError):
+                    pending.append(int(value))
+        seen.discard(pid)
+        return seen
+
+    @staticmethod
+    def _terminate_pids(pids: set[int], wait_seconds: float = 2.0) -> None:
+        """Terminate only the already-identified provider process tree."""
+        for pid in sorted(pids, reverse=True):
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                os.kill(pid, signal.SIGTERM)
+        deadline = time.monotonic() + wait_seconds
+        while time.monotonic() < deadline and pids:
+            pids = {
+                pid for pid in pids if Path(f"/proc/{pid}").exists()
+            }
+            if pids:
+                time.sleep(0.05)
+        for pid in sorted(pids, reverse=True):
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                os.kill(pid, signal.SIGKILL)
+
     def terminate(self, name: str) -> None:
         if not self.session_alive(name):
             return
+        pane_pid = self.session_pid(name)
+        descendants = self._descendants(pane_pid) if pane_pid else set()
         self._run(
             ["kill-session", "-t", name],
             f"failed to terminate tmux session `{name}`",
         )
+        self._terminate_pids(descendants)
 
 
 class FakeTerminalDriver(TerminalDriver):

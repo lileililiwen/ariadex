@@ -595,6 +595,33 @@ def _serve_forever(
     server: socket.socket,
     stop_event: threading.Event,
 ) -> None:
+    def handle_connection(conn: socket.socket) -> None:
+        with conn:
+            conn.settimeout(DEFAULT_IPC_TIMEOUT_S)
+            data = b""
+            try:
+                while b"\n" not in data:
+                    part = conn.recv(4096)
+                    if not part:
+                        break
+                    data += part
+                    if len(data) > MAX_MESSAGE_BYTES:
+                        break
+                try:
+                    request_type = parse_request(data.decode("utf-8").strip())
+                except DaemonError as exc:
+                    reply = build_response(
+                        False, daemon_status_view(project_dir), error=str(exc)
+                    )
+                else:
+                    reply = handle_request(project_dir, request_type)
+                    if request_type == "stop":
+                        stop_event.set()
+                with contextlib.suppress(OSError):
+                    conn.sendall(encode_message(reply))
+            except OSError:
+                return
+
     server.settimeout(POLL_INTERVAL_S)
     try:
         while not stop_event.is_set():
@@ -604,31 +631,12 @@ def _serve_forever(
                 continue
             except OSError:
                 continue
-            with conn:
-                conn.settimeout(DEFAULT_IPC_TIMEOUT_S)
-                data = b""
-                try:
-                    while b"\n" not in data:
-                        part = conn.recv(4096)
-                        if not part:
-                            break
-                        data += part
-                        if len(data) > MAX_MESSAGE_BYTES:
-                            break
-                    try:
-                        request_type = parse_request(data.decode("utf-8").strip())
-                    except DaemonError as exc:
-                        reply = build_response(
-                            False, daemon_status_view(project_dir), error=str(exc)
-                        )
-                    else:
-                        reply = handle_request(project_dir, request_type)
-                        if request_type == "stop":
-                            stop_event.set()
-                    with contextlib.suppress(OSError):
-                        conn.sendall(encode_message(reply))
-                except OSError:
-                    continue
+            threading.Thread(
+                target=handle_connection,
+                args=(conn,),
+                name="ariadex-daemon-ipc",
+                daemon=True,
+            ).start()
     finally:
         with contextlib.suppress(OSError):
             server.close()

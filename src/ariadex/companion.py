@@ -1090,6 +1090,7 @@ class CompanionWindow:
         hotkey: str,
         editor: str | None = None,
         poll_interval_s: float = POLL_INTERVAL_S,
+        nonblocking: bool = False,
     ) -> None:
         import tkinter as tk
 
@@ -1106,6 +1107,8 @@ class CompanionWindow:
         self.expanded = False
         self._poll_after: str | None = None
         self._save_after: str | None = None
+        self._nonblocking = nonblocking
+        self._io_busy = False
 
         assert isinstance(root, tk.Tk)
         root.title("Ariadex")
@@ -1458,11 +1461,87 @@ class CompanionWindow:
             self.model = build_view_model(state)
         self._render()
 
+    def _run_client_async(self, action: str) -> None:
+        """Run daemon IPC off the Tk event thread and apply its result on Tk."""
+        if self._io_busy:
+            return
+        self._io_busy = True
+        self._render()
+
+        def worker() -> None:
+            try:
+                if action == "pause":
+                    state = self.client.pause()
+                elif action == "resume":
+                    state = self.client.resume()
+                elif action == "stop":
+                    state = self.client.stop()
+                else:
+                    state = self.client.reconcile()
+                error: Exception | None = None
+            except Exception as exc:  # delivered as a bounded UI failure
+                state = None
+                error = exc
+
+            def finish() -> None:
+                self._io_busy = False
+                if error is not None:
+                    self.model = failure_view_model(str(error))
+                else:
+                    self._state = state or {}
+                    self.model = build_view_model(self._state)
+                self._render()
+
+            with contextlib.suppress(Exception):
+                self.root.after(0, finish)  # type: ignore[attr-defined]
+
+        threading.Thread(
+            target=worker, name=f"ariadex-widget-{action}", daemon=True
+        ).start()
+
+    def _refresh_async(self) -> None:
+        """Refresh daemon state without blocking Tk polling or button input."""
+        if self._io_busy:
+            return
+        self._io_busy = True
+
+        def worker() -> None:
+            try:
+                state = self.client.refresh()
+                error: Exception | None = None
+            except Exception as exc:
+                state = None
+                error = exc
+
+            def finish() -> None:
+                self._io_busy = False
+                if error is not None:
+                    model = dict(self.model)
+                    model["failure"] = str(error)
+                    self.model = model
+                else:
+                    self._state = state or {}
+                    self.model = build_view_model(self._state)
+                self._render()
+
+            with contextlib.suppress(Exception):
+                self.root.after(0, finish)  # type: ignore[attr-defined]
+
+        threading.Thread(
+            target=worker, name="ariadex-widget-refresh", daemon=True
+        ).start()
+
     def _on_pause(self) -> None:
-        self._run_client("pause")
+        if self._nonblocking:
+            self._run_client_async("pause")
+        else:
+            self._run_client("pause")
 
     def _on_play(self) -> None:
-        self._run_client("resume")
+        if self._nonblocking:
+            self._run_client_async("resume")
+        else:
+            self._run_client("resume")
 
     def _on_stop(self) -> None:
         import tkinter.messagebox as messagebox
@@ -1474,7 +1553,10 @@ class CompanionWindow:
             parent=cast(Any, self.root),
         ):
             return
-        self._run_client("stop")
+        if self._nonblocking:
+            self._run_client_async("stop")
+        else:
+            self._run_client("stop")
 
     def _on_reconcile(self) -> None:
         self._run_client("reconcile")
@@ -1614,7 +1696,10 @@ class CompanionWindow:
 
     def _poll(self) -> None:
         self._poll_after = None
-        self._refresh()
+        if self._nonblocking:
+            self._refresh_async()
+        else:
+            self._refresh()
         self._schedule_poll()
 
     def _refresh(self) -> None:
@@ -3009,6 +3094,7 @@ def run_companion(
         selected,
         editor=editor,
         poll_interval_s=poll_interval_s,
+        nonblocking=True,
     )
     with contextlib.suppress(Exception):
         root.mainloop()
