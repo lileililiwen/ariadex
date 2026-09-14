@@ -817,11 +817,35 @@ class HeadlessWidgetTest(unittest.TestCase):
 
     def test_drag_handlers_move_window(self):
         event = mock.Mock(x_root=150, y_root=250)
+        self.assertEqual(self.window.titlebar.options.get("cursor"), "hand2")
+        self.assertIn("<ButtonPress-1>", self.window.titlebar.bindings)
+        self.assertNotIn("<B1-Motion>", self.window.pause_button.bindings)
         self.window._drag_start(event)
         self.window._drag_move(mock.Mock(x_root=160, y_root=260))
         self.assertIn("+", self.root.options["geometry"])
         self.window._drag_stop(event)
         self.assertIsNotNone(self.window._save_after)
+
+    def test_button_press_gives_immediate_feedback(self):
+        companion._button_press(self.window.pause_button)
+        self.assertEqual(self.window.pause_button.options.get("relief"), "sunken")
+        self.assertEqual(
+            self.window.pause_button.options.get("background"), "#3b82f6"
+        )
+        companion._button_release(self.window.pause_button, self.root)
+        self.assertEqual(self.window.pause_button.options.get("relief"), "flat")
+
+    def test_buttons_have_feedback_handlers(self):
+        for button in (
+            self.window.play_button,
+            self.window.pause_button,
+            self.window.stop_button,
+            self.window.copy_log_button,
+            self.window.toggle_button,
+            self.window.close_button,
+        ):
+            self.assertIn("<ButtonPress-1>", button.bindings)
+            self.assertIn("<ButtonRelease-1>", button.bindings)
 
     def test_close_button_stops_daemon_and_exits_widget(self):
         self.assertEqual(self.window.close_button.options.get("text"), "\u00d7")

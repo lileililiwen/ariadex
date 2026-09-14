@@ -301,6 +301,22 @@ class RobotHubWindowTest(unittest.TestCase):
         self.assertEqual(window.tabs, [])
         self.assertEqual(window.tab_buttons, [])
 
+    def test_titlebar_is_drag_surface_and_buttons_are_click_surfaces(self):
+        window, _root, _watchers = self._window()
+        self.assertEqual(window.titlebar.options.get("cursor"), "hand2")
+        self.assertIn("bind:<ButtonPress-1>", window.titlebar.options)
+        self.assertNotIn("bind:<B1-Motion>", window.pause_button.options)
+
+    def test_button_release_shows_success_feedback(self):
+        window, root, _watchers = self._window()
+        companion_mod._button_press(window.pause_button)
+        self.assertEqual(window.pause_button.options.get("relief"), "sunken")
+        companion_mod._button_release(window.pause_button, root)
+        self.assertEqual(
+            window.pause_button.options.get("background"), "#22c55e"
+        )
+        self.assertTrue(root.after_calls)
+
     def test_add_and_remove_tab(self):
         root = FakeTkRoot()
         window = companion_mod.RobotHubWindow(root, [])

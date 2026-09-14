@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Operators can see button activation immediately and can move either widget
+  by dragging its title area without stealing button clicks

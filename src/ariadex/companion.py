@@ -43,7 +43,9 @@ WIDGET_COPY_BUTTON_WIDTH = 8
 #: Hub window heights: the hub detail panel carries a tab bar plus five
 #: detail rows, so the single-widget heights would clip the controls row
 #: out of the window (measured 219px collapsed / 390px expanded on Tk).
-HUB_COLLAPSED_HEIGHT = 230
+# Keep the tab bar, queue/status rows, and complete action row visible when
+# the hub is collapsed; the previous 230px value clipped the controls.
+HUB_COLLAPSED_HEIGHT = 320
 HUB_EXPANDED_HEIGHT = 400
 
 #: Safety margin in pixels keeping the floating widget inside the usable
@@ -60,6 +62,68 @@ SUPPORTED_SESSIONS = ("x11",)
 
 class CompanionError(Exception):
     """A companion, hotkey, or IPC failure (fail-closed, no input sent)."""
+
+
+def _button_press(button: object) -> None:
+    """Give immediate pressed feedback without changing the command."""
+    with contextlib.suppress(Exception):
+        button.configure(  # type: ignore[attr-defined]
+            relief="sunken",
+            background="#3b82f6",
+            activebackground="#2563eb",
+        )
+
+
+def _button_release(button: object, root: object) -> None:
+    """Show a short success flash after Tk dispatches a button release."""
+    with contextlib.suppress(Exception):
+        button.configure(  # type: ignore[attr-defined]
+            relief="flat",
+            background="#22c55e",
+            activebackground="#16a34a",
+        )
+
+    def restore() -> None:
+        with contextlib.suppress(Exception):
+            button.configure(  # type: ignore[attr-defined]
+                relief="flat",
+                background="#2b313a",
+                activebackground="#3b82f6",
+            )
+
+    with contextlib.suppress(Exception):
+        root.after(180, restore)  # type: ignore[attr-defined]
+
+
+def _button_leave(button: object) -> None:
+    """Cancel pressed styling when the pointer leaves without a release."""
+    with contextlib.suppress(Exception):
+        button.configure(  # type: ignore[attr-defined]
+            relief="flat",
+            background="#2b313a",
+            activebackground="#3b82f6",
+        )
+
+
+def _bind_button_feedback(button: object, root: object) -> None:
+    """Bind portable Tk mouse feedback while leaving command dispatch intact."""
+    with contextlib.suppress(Exception):
+        button.configure(  # type: ignore[attr-defined]
+            cursor="hand2",
+            relief="flat",
+            background="#2b313a",
+            activebackground="#3b82f6",
+        )
+        button.bind(  # type: ignore[attr-defined]
+            "<ButtonPress-1>", lambda _event, item=button: _button_press(item)
+        )
+        button.bind(  # type: ignore[attr-defined]
+            "<ButtonRelease-1>",
+            lambda _event, item=button: _button_release(item, root),
+        )
+        button.bind(  # type: ignore[attr-defined]
+            "<Leave>", lambda _event, item=button: _button_leave(item)
+        )
 
 
 @dataclasses.dataclass
@@ -1169,6 +1233,7 @@ class CompanionWindow:
         )
         self.state_label.pack(side="left", fill="x", expand=True)
         for widget in (self.titlebar, self.state_label):
+            widget.configure(cursor="hand2")
             widget.bind("<ButtonPress-1>", self._drag_start)
             widget.bind("<B1-Motion>", self._drag_move)
             widget.bind("<ButtonRelease-1>", self._drag_stop)
@@ -1345,6 +1410,22 @@ class CompanionWindow:
             command=self._on_close,
         )
         self.quit_button.pack(fill="x", pady=(4, 0))
+        self._install_button_feedback(
+            (
+                self.toggle_button,
+                self.close_button,
+                self.play_button,
+                self.pause_button,
+                self.stop_button,
+                self.copy_log_button,
+                self.copy_context_button,
+                self.apply_button,
+                self.reconcile_button,
+                self.editor_button,
+                self.session_button,
+                self.quit_button,
+            )
+        )
 
         self._drag_origin: tuple[int, int] | None = None
         root.bind("<FocusIn>", lambda _e: self._render())
@@ -1358,6 +1439,10 @@ class CompanionWindow:
         if isinstance(saved.get("x"), int) and isinstance(saved.get("y"), int):
             return int(saved["x"]), int(saved["y"])
         return None
+
+    def _install_button_feedback(self, buttons: tuple[object, ...]) -> None:
+        for button in buttons:
+            _bind_button_feedback(button, self.root)
 
     def _drag_start(self, event: object) -> None:
         x = getattr(event, "x_root", 0)
@@ -2441,6 +2526,7 @@ class RobotHubWindow:
         )
         self.title_label.pack(fill="x")
         for widget in (self.titlebar, self.title_label):
+            widget.configure(cursor="hand2")
             widget.bind("<ButtonPress-1>", self._drag_start)
             widget.bind("<B1-Motion>", self._drag_move)
             widget.bind("<ButtonRelease-1>", self._drag_stop)
@@ -2564,10 +2650,24 @@ class RobotHubWindow:
             command=self._on_close_window,
         )
         self.close_button.pack(side="left", expand=True, fill="x")
+        self._install_button_feedback(
+            (
+                self.pause_button,
+                self.pause_all_button,
+                self.quit_button,
+                self.toggle_button,
+                self.copy_log_button,
+                self.close_button,
+            )
+        )
         if self.hotkey_adapter is not None:
             self.hotkey_adapter.register(self.hotkey, self._on_hotkey)
         self._refresh()
         self._schedule_poll()
+
+    def _install_button_feedback(self, buttons: tuple[object, ...]) -> None:
+        for button in buttons:
+            _bind_button_feedback(button, self.root)
 
     def _select_fn(self, index: int) -> Callable[[], None]:
         def select() -> None:
@@ -2592,6 +2692,7 @@ class RobotHubWindow:
                 command=self._select_fn(index),
             )
             button.pack(side="left", expand=True, fill="x")
+            _bind_button_feedback(button, self.root)
             self.tab_buttons.append(button)
 
     def add_tab(self, tab: RobotHubTab) -> None:
