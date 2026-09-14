@@ -337,6 +337,50 @@ class QueryStatusTest(unittest.TestCase):
             for tmp in state:
                 tmp.cleanup()
 
+    def test_exit1_not_found_reports_absent(self) -> None:
+        state: list = []
+        root = make_project(state)
+        try:
+            payload = json.dumps(
+                {
+                    "status": [
+                        {
+                            "severity": "error",
+                            "code": "change_error",
+                            "message": (
+                                "Change 'demo' not found. Available changes:\n"
+                                "  other"
+                            ),
+                        }
+                    ]
+                }
+            )
+            runner = stub_runner(
+                lambda argv, kwargs: StubResult(1, payload, payload)
+            )
+            status = evidence_mod.query_change_status(
+                root, "demo", runner=runner
+            )
+            self.assertFalse(status.found)
+        finally:
+            for tmp in state:
+                tmp.cleanup()
+
+    def test_exit1_unrelated_error_blocks(self) -> None:
+        state: list = []
+        root = make_project(state)
+        try:
+            runner = stub_runner(
+                lambda argv, kwargs: StubResult(1, "", "boom detail")
+            )
+            with self.assertRaises(evidence_mod.EvidenceBlocked):
+                evidence_mod.query_change_status(
+                    root, "demo", runner=runner
+                )
+        finally:
+            for tmp in state:
+                tmp.cleanup()
+
     def test_other_status_errors_block(self) -> None:
         state: list = []
         root = make_project(state)

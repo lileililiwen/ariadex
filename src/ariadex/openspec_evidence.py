@@ -332,12 +332,18 @@ def query_change_status(
     ``EvidenceBlocked`` on unavailable or malformed evidence.
     """
     require_root(project_dir)
-    stdout = run_openspec(
-        project_dir,
-        ["status", "--change", name, "--json"],
-        timeout=timeout,
-        runner=runner,
-    )
+    try:
+        stdout = run_openspec(
+            project_dir,
+            ["status", "--change", name, "--json"],
+            timeout=timeout,
+            runner=runner,
+        )
+    except EvidenceBlocked as exc:
+        lowered = str(exc).lower()
+        if "not found" in lowered and "change" in lowered:
+            return ChangeStatus(found=False, is_complete=False)
+        raise
     data = _payload(stdout, "status --json")
     status_items = data.get("status", [])
     error_messages: list[str] = []
