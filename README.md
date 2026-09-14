@@ -337,7 +337,9 @@ indicator, and the usual per-tab Pause/Resume/Quit; `Pause all` pauses every
 tab and the window close button quits all watchers while leaving every
 provider session attachable. The global hotkey acts on the visible tab only.
 Duplicate folder names gain parent segments (then the session name) so no
-two tabs look identical:
+two tabs look identical. Each tab's detail panel shows the current spec in
+the header, the active queue size with open/total task counts, the latest
+activity event, and (expanded) run stats next to the read-only activity log:
 
 ```bash
 ariadex watch --attach --hub ~/projects/a:agent-a \

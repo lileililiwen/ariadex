@@ -300,6 +300,12 @@ Behavior:
   before any watcher thread starts, duplicate project+session pairs are
   refused, and `--no-widget` cannot be combined with `--hub`. An unreachable
   tab renders UNREACHABLE for that tab only while the others stay live.
+  The detail panel is organized in labeled rows: a header with the state
+  dot, phase, and current spec; then the project path, `provider @
+  session`, the queue row (`N active · <spec> open/total`, or an honest
+  `n/a` reason for non-OpenSpec or unreadable projects), and the latest
+  event. The expanded view adds run stats (prompts, confirmations,
+  approvals) above the read-only activity log.
 
 ## Provider permission policy
 

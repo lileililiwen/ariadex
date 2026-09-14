@@ -3065,6 +3065,7 @@ def cmd_watch_hub(
             on_resume=watcher.request_resume,
             on_quit=watcher.request_quit,
             run_fn=watcher.run,
+            queue_fn=watcher.queue_summary,
         )
         for i, watcher in enumerate(watchers)
     ]

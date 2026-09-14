@@ -89,9 +89,7 @@ AUTH_MARKERS = (
     "no api key",
 )
 
-ERROR_MARKERS = (
-    "failed",
-)
+ERROR_MARKERS = ("failed",)
 
 # Provider-emitted error lines describe the live surface, not scrollback
 # prose: they block even when the same tail carries a ready marker (the
@@ -337,6 +335,59 @@ def validate_config(config: RobotConfig) -> RobotConfig:
     if config.fresh_ready_interval_s < 0:
         raise RobotError("fresh-ready interval must not be negative")
     return config
+
+
+def queue_summary(project_dir: Path, config: RobotConfig) -> dict:
+    """Per-project queue evidence as a plain dict (never raises).
+
+    Keys: `active_count`, `current_spec`, `open_tasks`, `total_tasks`,
+    `unavailable` ("" when readable). A missing spec directory means the
+    project carries no OpenSpec queue rather than an empty one.
+    """
+    summary: dict = {
+        "active_count": 0,
+        "current_spec": "",
+        "open_tasks": 0,
+        "total_tasks": 0,
+        "unavailable": "",
+    }
+    if not (project_dir / config.spec_dir).is_dir():
+        summary["unavailable"] = "not an OpenSpec project"
+        return summary
+    try:
+        active, _ignored = spec_graph_mod.discover_active_changes(
+            project_dir / config.spec_dir
+        )
+    except Exception as exc:
+        summary["unavailable"] = f"spec queue unreadable: {exc}"
+        return summary
+    summary["active_count"] = len(active)
+    try:
+        handoff = handoff_mod.read_handoff(project_dir / config.handoff_file)
+    except Exception as exc:
+        summary["unavailable"] = f"handoff unreadable: {exc}"
+        return summary
+    try:
+        target = _recorded_target(project_dir, config, handoff)
+    except Exception as exc:
+        summary["unavailable"] = str(exc)
+        return summary
+    if not target:
+        return summary
+    summary["current_spec"] = target
+    try:
+        text = (project_dir / config.spec_dir / target / "tasks.md").read_text(
+            encoding="utf-8"
+        )
+    except OSError as exc:
+        summary["unavailable"] = f"tasks.md unreadable: {exc}"
+        return summary
+    lines = [line.strip() for line in text.splitlines()]
+    open_tasks = sum(1 for line in lines if line.startswith("- [ ]"))
+    closed_tasks = sum(1 for line in lines if line[:4] in ("- [x", "- [X"))
+    summary["open_tasks"] = open_tasks
+    summary["total_tasks"] = open_tasks + closed_tasks
+    return summary
 
 
 def list_sessions(driver: TerminalDriver) -> list[str]:
@@ -1132,9 +1183,21 @@ class RobotWatcher:
             "block_reason": self.block_reason,
             "latest_event": latest,
             "activity": [dict(event) for event in visible],
+            "prompts_sent": self.prompts_sent,
             "confirmations_sent": self.confirmations_sent,
             "permissions_granted": self.permissions_granted,
         }
+
+    def queue_summary(self) -> dict:
+        """Per-project queue evidence for supervision surfaces (never raises).
+
+        File reads only: active-change discovery, the recorded
+        conversation, the handoff, and the current spec's tasks.md. No
+        subprocess and no provider I/O, so the hub poll loop can call this
+        every refresh. Unreadable pieces yield `unavailable` with the exact
+        reason instead of raising.
+        """
+        return queue_summary(self.project_dir, self.config)
 
     def _capture(self) -> str:
         try:
@@ -2011,9 +2074,7 @@ class RobotWatcher:
         )
         return self.phase
 
-    def _await_ready(
-        self, sleep: Callable[[float], None] | None = None
-    ) -> bool | None:
+    def _await_ready(self, sleep: Callable[[float], None] | None = None) -> bool | None:
         """Bounded wait for the new input surface (no prompt until ready).
 
         Polls up to `fresh_ready_attempts` times with
@@ -2035,8 +2096,7 @@ class RobotWatcher:
         self._fresh_ready_aborted = ""
         for attempt in range(1, bound + 1):
             if self._quit or (
-                self.shutdown_requested is not None
-                and self.shutdown_requested()
+                self.shutdown_requested is not None and self.shutdown_requested()
             ):
                 self._fresh_ready_aborted = "stopped"
                 return None

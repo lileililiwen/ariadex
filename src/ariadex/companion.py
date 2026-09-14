@@ -1713,12 +1713,28 @@ def build_robot_view_model(status: dict) -> dict:
     work_label = f"{identity} — {phase}"
     if reason and indicator == "blocked":
         work_label += f": {reason}"
+    try:
+        prompts = int(status.get("prompts_sent", 0))
+    except (TypeError, ValueError):
+        prompts = 0
+    try:
+        confirmations = int(status.get("confirmations_sent", 0))
+    except (TypeError, ValueError):
+        confirmations = 0
+    try:
+        approvals = int(status.get("permissions_granted", 0))
+    except (TypeError, ValueError):
+        approvals = 0
+    run_stats = (
+        f"prompts {prompts} · confirmations {confirmations} · approvals {approvals}"
+    )
     return {
         "indicator": indicator,
         "indicator_text": indicator.upper(),
         "phase": phase,
         "identity": identity,
         "work_label": work_label,
+        "run_stats": run_stats,
         "failure": reason if indicator == "blocked" else None,
         "latest_event": latest,
         "latest_text": latest_text,
@@ -2192,17 +2208,43 @@ class RobotWindow:
             self.log_text.configure(state="disabled")
 
 
+def format_hub_queue_text(summary: dict) -> str:
+    """Render one tab's queue evidence as a single row (pure, no I/O)."""
+    reason = str(summary.get("unavailable") or "")
+    if reason:
+        return f"queue: n/a ({reason})"
+    try:
+        active = int(summary.get("active_count", 0))
+    except (TypeError, ValueError):
+        active = 0
+    current = str(summary.get("current_spec") or "")
+    if not current:
+        if active:
+            return f"queue: {active} active · no current spec"
+        return "queue: empty"
+    try:
+        open_tasks = int(summary.get("open_tasks", 0))
+    except (TypeError, ValueError):
+        open_tasks = 0
+    try:
+        total_tasks = int(summary.get("total_tasks", 0))
+    except (TypeError, ValueError):
+        total_tasks = 0
+    return f"queue: {active} active · {current} {open_tasks}/{total_tasks} open"
+
+
 @dataclasses.dataclass
 class RobotHubTab:
-    """One hub entry: project identity plus that watcher's callbacks."""
+    """One supervised project inside the hub window."""
 
     project: str
     label: str
     status_fn: Callable[[], dict]
     on_pause: Callable[[], str]
+    on_resume: Callable[[], str]
     on_quit: Callable[[], str]
-    on_resume: Callable[[], str] | None = None
     run_fn: Callable[[], object] | None = None
+    queue_fn: Callable[[], dict] | None = None
 
 
 class RobotHubWindow:
@@ -2236,6 +2278,10 @@ class RobotHubWindow:
         self.hotkey = hotkey
         self.poll_interval_ms = max(1, int(poll_interval_s * 1000))
         self.models: list[dict] = [build_robot_view_model({}) for _ in self.tabs]
+        self.queue_texts: list[str] = [
+            "queue: n/a (no queue source)" for _ in self.tabs
+        ]
+        self.queue_specs: list[str] = ["" for _ in self.tabs]
         self._poll_after: str | None = None
 
         assert isinstance(root, tk.Tk)
@@ -2290,6 +2336,26 @@ class RobotHubWindow:
             foreground="#c9d1d9",
         )
         self.identity_label.pack(fill="x")
+        self.session_label = tk.Label(
+            self.frame,
+            text="",
+            anchor="w",
+            justify="left",
+            wraplength=WIDGET_WIDTH - 20,
+            background="#20242b",
+            foreground="#c9d1d9",
+        )
+        self.session_label.pack(fill="x")
+        self.queue_label = tk.Label(
+            self.frame,
+            text="queue: n/a (no queue source)",
+            anchor="w",
+            justify="left",
+            wraplength=WIDGET_WIDTH - 20,
+            background="#20242b",
+            foreground="#7db8f0",
+        )
+        self.queue_label.pack(fill="x")
         self.event_label = tk.Label(
             self.frame,
             text="no activity yet",
@@ -2300,6 +2366,15 @@ class RobotHubWindow:
             foreground="#9aa4b2",
         )
         self.event_label.pack(fill="x")
+        self.stats_label = tk.Label(
+            self.frame,
+            text="",
+            anchor="w",
+            justify="left",
+            wraplength=WIDGET_WIDTH - 20,
+            background="#20242b",
+            foreground="#9aa4b2",
+        )
         self.expanded = False
         self.log_text = self._build_log_panel(tk)
         controls = tk.Frame(self.frame, background="#20242b")
@@ -2410,7 +2485,7 @@ class RobotHubWindow:
         tab = self.tabs[self.active]
         model = self.models[self.active]
         with contextlib.suppress(Exception):
-            if model.get("indicator") == "paused" and tab.on_resume:
+            if model.get("indicator") == "paused":
                 tab.on_resume()
             else:
                 tab.on_pause()
@@ -2486,6 +2561,8 @@ class RobotHubWindow:
 
     def _refresh(self) -> None:
         models: list[dict] = []
+        queue_texts: list[str] = []
+        queue_specs: list[str] = []
         for tab in self.tabs:
             try:
                 status = tab.status_fn()
@@ -2497,9 +2574,51 @@ class RobotHubWindow:
                 models.append(model)
             else:
                 models.append(build_robot_view_model(status))
+            summary = self._queue_summary(tab)
+            try:
+                queue_texts.append(format_hub_queue_text(summary))
+            except Exception as exc:
+                queue_texts.append(f"queue: n/a ({exc})")
+            if str(summary.get("unavailable") or ""):
+                queue_specs.append("")
+            else:
+                queue_specs.append(str(summary.get("current_spec") or ""))
         self.models = models
+        self.queue_texts = queue_texts
+        self.queue_specs = queue_specs
         self.active = min(self.active, max(0, len(self.models) - 1))
         self._render()
+
+    @staticmethod
+    def _queue_summary(tab: RobotHubTab) -> dict:
+        """Fetch one tab's queue evidence; never raises into the poll loop."""
+        if tab.queue_fn is None:
+            return {
+                "active_count": 0,
+                "current_spec": "",
+                "open_tasks": 0,
+                "total_tasks": 0,
+                "unavailable": "no queue source",
+            }
+        try:
+            summary = tab.queue_fn()
+        except Exception as exc:
+            return {
+                "active_count": 0,
+                "current_spec": "",
+                "open_tasks": 0,
+                "total_tasks": 0,
+                "unavailable": str(exc),
+            }
+        if not isinstance(summary, dict):
+            return {
+                "active_count": 0,
+                "current_spec": "",
+                "open_tasks": 0,
+                "total_tasks": 0,
+                "unavailable": "invalid queue summary",
+            }
+        return summary
 
     def _render(self) -> None:
         if not self.tabs:
@@ -2518,14 +2637,26 @@ class RobotHubWindow:
                 )
         model = self.models[self.active]
         tab = self.tabs[self.active]
-        self.state_label.configure(text=str(model.get("indicator_text", "?")))
-        self.identity_label.configure(
-            text=f"{tab.project}\n{model.get('work_label', '')}"
-        )
+        dot = HUB_INDICATOR_DOTS.get(str(model.get("indicator", "")), "?")
+        spec = self.queue_specs[self.active] if self.queue_specs else ""
+        header = f"{dot} {model.get('indicator_text', '?')} — {spec or tab.label}"
+        self.state_label.configure(text=header)
+        self.identity_label.configure(text=f"project  {tab.project}")
         with contextlib.suppress(Exception):
-            self.event_label.configure(
-                text=str(model.get("latest_text", "no activity yet"))
+            self.session_label.configure(text=f"session  {model.get('identity', '?')}")
+            self.queue_label.configure(
+                text=self.queue_texts[self.active]
+                if self.queue_texts
+                else "queue: n/a (no queue source)"
             )
+            self.event_label.configure(
+                text=f"latest  {model.get('latest_text', 'no activity yet')}"
+            )
+            self.stats_label.configure(text=str(model.get("run_stats", "")))
+            if self.expanded:
+                self.stats_label.pack(fill="x")
+            else:
+                self.stats_label.pack_forget()
             self.toggle_button.configure(
                 text="Hide log" if self.expanded else "Show log"
             )

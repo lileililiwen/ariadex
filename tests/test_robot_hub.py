@@ -152,7 +152,9 @@ class FakeHotkeyAdapter:
         self.unregistered += 1
 
 
-def make_tab(project, provider="opencode", session="agent", phase="working"):
+def make_tab(
+    project, provider="opencode", session="agent", phase="working", queue=None
+):
     watcher = FakeWatcher({"provider": provider, "session": session, "phase": phase})
     tab = companion_mod.RobotHubTab(
         project=project,
@@ -162,6 +164,7 @@ def make_tab(project, provider="opencode", session="agent", phase="working"):
         on_resume=watcher.request_resume,
         on_quit=watcher.request_quit,
         run_fn=watcher.run,
+        queue_fn=(lambda: dict(queue)) if queue is not None else None,
     )
     return tab, watcher
 
@@ -553,6 +556,11 @@ class WatchHubSuccessTest(unittest.TestCase):
         rc = self._hub(f"{self.root}/a:sa", f"{self.root}/b:sb:codex")
         self.assertEqual(rc, 0)
         (tabs,), _ = self.run_hub.call_args
+        for tab in tabs:
+            self.assertIsNotNone(tab.queue_fn)
+            assert tab.queue_fn is not None
+            summary = tab.queue_fn()
+            self.assertIn("not an OpenSpec project", summary["unavailable"])
         self.assertEqual([t.label for t in tabs], ["a [opencode]", "b [codex]"])
         self.assertEqual(
             [t.project for t in tabs],
@@ -651,6 +659,334 @@ class WatchHubSuccessTest(unittest.TestCase):
             rc = self._hub(f"{self.root}/a:sa")
         self.assertEqual(rc, 0)
         self.assertEqual(len(tabs_holder["tabs"]), 1)
+
+
+class QueueSummaryTest(unittest.TestCase):
+    def _config(self, **overrides):
+        from ariadex import robot as robot_mod
+
+        kwargs = {
+            "session": "s",
+            "provider": "opencode",
+            "initial_prompt": "go",
+            "continuation_prompt": "cont",
+            "confirmation_prompt": "conf",
+            "spec_dir": "openspec/changes",
+            "handoff_file": "HANDOFF.md",
+            "finished_change": "",
+        }
+        kwargs.update(overrides)
+        return robot_mod.RobotConfig(**kwargs)
+
+    def _project(self, tmp, changes=("a", "b"), current="a", tasks=None):
+        from pathlib import Path
+
+        from ariadex import handoff as handoff_mod
+
+        root = Path(tmp) / "proj"
+        root.mkdir()
+        specdir = root / "openspec" / "changes"
+        specdir.mkdir(parents=True)
+        for change in changes:
+            (specdir / change).mkdir()
+        if current is not None and current in changes:
+            (specdir / current / "tasks.md").write_text(
+                tasks if tasks is not None else "- [ ] one\n- [x] two\n- [ ] three\n",
+                encoding="utf-8",
+            )
+        handoff = handoff_mod.empty_handoff()
+        handoff.current_spec = current
+        handoff_mod.write_handoff(root / "HANDOFF.md", handoff)
+        return root
+
+    def test_full_evidence(self):
+        import tempfile
+
+        from ariadex import robot as robot_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+            summary = robot_mod.queue_summary(root, self._config())
+        self.assertEqual(summary["active_count"], 2)
+        self.assertEqual(summary["current_spec"], "a")
+        self.assertEqual(summary["open_tasks"], 2)
+        self.assertEqual(summary["total_tasks"], 3)
+        self.assertEqual(summary["unavailable"], "")
+
+    def test_finished_change_override_selects_target(self):
+        import tempfile
+
+        from ariadex import robot as robot_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+            (root / "openspec" / "changes" / "b" / "tasks.md").write_text(
+                "- [x] done\n", encoding="utf-8"
+            )
+            summary = robot_mod.queue_summary(root, self._config(finished_change="b"))
+        self.assertEqual(summary["current_spec"], "b")
+        self.assertEqual(summary["open_tasks"], 0)
+        self.assertEqual(summary["total_tasks"], 1)
+
+    def test_missing_spec_dir_is_not_openspec(self):
+        import tempfile
+        from pathlib import Path
+
+        from ariadex import robot as robot_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = robot_mod.queue_summary(Path(tmp), self._config())
+        self.assertEqual(summary["active_count"], 0)
+        self.assertIn("not an OpenSpec project", summary["unavailable"])
+
+    def test_empty_queue_has_no_current_spec(self):
+        import tempfile
+
+        from ariadex import robot as robot_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._project(tmp, changes=(), current=None)
+            summary = robot_mod.queue_summary(root, self._config())
+        self.assertEqual(summary["active_count"], 0)
+        self.assertEqual(summary["current_spec"], "")
+        self.assertEqual(summary["unavailable"], "")
+
+    def test_missing_tasks_md_is_unavailable(self):
+        import tempfile
+
+        from ariadex import robot as robot_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._project(tmp, tasks=None)
+            (root / "openspec" / "changes" / "a" / "tasks.md").unlink()
+            summary = robot_mod.queue_summary(root, self._config())
+        self.assertEqual(summary["current_spec"], "a")
+        self.assertIn("tasks.md", summary["unavailable"])
+
+    def test_malformed_handoff_is_unavailable(self):
+        import tempfile
+
+        from ariadex import robot as robot_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+            (root / ".ariadex" / "handoff.md").write_text(
+                "---\nversion: 1\ncurrent_spec: a\n", encoding="utf-8"
+            )
+            summary = robot_mod.queue_summary(root, self._config())
+        self.assertEqual(summary["active_count"], 2)
+        self.assertIn("handoff", summary["unavailable"])
+
+    def test_watcher_method_matches_function(self):
+        import tempfile
+
+        from ariadex import robot as robot_mod
+        from ariadex import terminal as terminal_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+            watcher = robot_mod.RobotWatcher(
+                root,
+                self._config(),
+                terminal_mod.FakeTerminalDriver(),
+                FakeHubAdapter("opencode"),
+            )
+            self.assertEqual(
+                watcher.queue_summary(),
+                robot_mod.queue_summary(root, self._config()),
+            )
+
+    def test_never_raises_on_unreadable_tree(self):
+        from pathlib import Path
+
+        from ariadex import robot as robot_mod
+
+        summary = robot_mod.queue_summary(
+            Path("/nonexistent-ariadex-hub-probe"), self._config()
+        )
+        self.assertTrue(summary["unavailable"])
+
+
+class FormatHubQueueTextTest(unittest.TestCase):
+    def test_full_summary(self):
+        self.assertEqual(
+            companion_mod.format_hub_queue_text(
+                {
+                    "active_count": 2,
+                    "current_spec": "my-change",
+                    "open_tasks": 2,
+                    "total_tasks": 5,
+                    "unavailable": "",
+                }
+            ),
+            "queue: 2 active · my-change 2/5 open",
+        )
+
+    def test_empty_queue(self):
+        self.assertEqual(
+            companion_mod.format_hub_queue_text(
+                {
+                    "active_count": 0,
+                    "current_spec": "",
+                    "open_tasks": 0,
+                    "total_tasks": 0,
+                    "unavailable": "",
+                }
+            ),
+            "queue: empty",
+        )
+
+    def test_active_without_current_spec(self):
+        self.assertEqual(
+            companion_mod.format_hub_queue_text(
+                {
+                    "active_count": 3,
+                    "current_spec": "",
+                    "open_tasks": 0,
+                    "total_tasks": 0,
+                    "unavailable": "",
+                }
+            ),
+            "queue: 3 active · no current spec",
+        )
+
+    def test_unavailable_reason_shown(self):
+        self.assertEqual(
+            companion_mod.format_hub_queue_text(
+                {
+                    "active_count": 0,
+                    "current_spec": "",
+                    "open_tasks": 0,
+                    "total_tasks": 0,
+                    "unavailable": "not an OpenSpec project",
+                }
+            ),
+            "queue: n/a (not an OpenSpec project)",
+        )
+
+    def test_invalid_numbers_coerced(self):
+        text = companion_mod.format_hub_queue_text(
+            {
+                "active_count": "many",
+                "current_spec": "c",
+                "open_tasks": None,
+                "total_tasks": "x",
+                "unavailable": "",
+            }
+        )
+        self.assertEqual(text, "queue: 0 active · c 0/0 open")
+
+
+class HubDetailRowsTest(unittest.TestCase):
+    def setUp(self):
+        install_fake_tk(self)
+
+    def _window(self, queue):
+        tab, _watcher = make_tab("/home/u/a", "opencode", "s1", "working", queue=queue)
+        root = FakeTkRoot()
+        return companion_mod.RobotHubWindow(root, [tab]), root
+
+    def test_rows_render_active_tab(self):
+        window, _root = self._window(
+            {
+                "active_count": 2,
+                "current_spec": "my-change",
+                "open_tasks": 2,
+                "total_tasks": 5,
+                "unavailable": "",
+            }
+        )
+        header = window.state_label.options.get("text", "")
+        self.assertIn("WORKING", header)
+        self.assertIn("my-change", header)
+        self.assertIn("/home/u/a", window.identity_label.options.get("text", ""))
+        self.assertIn("opencode @ s1", window.session_label.options.get("text", ""))
+        self.assertEqual(
+            window.queue_label.options.get("text", ""),
+            "queue: 2 active · my-change 2/5 open",
+        )
+        latest = window.event_label.options.get("text", "")
+        self.assertTrue(latest.startswith("latest"))
+
+    def test_stats_visible_only_when_expanded(self):
+        window, _root = self._window(
+            {
+                "active_count": 0,
+                "current_spec": "",
+                "open_tasks": 0,
+                "total_tasks": 0,
+                "unavailable": "",
+            }
+        )
+        self.assertIn("prompts 0", window.stats_label.options.get("text", ""))
+        self.assertTrue(window.stats_label.forgotten)
+        window._on_toggle()
+        self.assertFalse(window.stats_label.forgotten)
+        window._on_toggle()
+        self.assertTrue(window.stats_label.forgotten)
+
+    def test_failing_queue_fn_isolated(self):
+        tab, _watcher = make_tab("/home/u/a")
+        tab.queue_fn = _raising_queue
+        other, _ = make_tab(
+            "/home/u/b",
+            "codex",
+            "s2",
+            "working",
+            queue={
+                "active_count": 1,
+                "current_spec": "c",
+                "open_tasks": 0,
+                "total_tasks": 1,
+                "unavailable": "",
+            },
+        )
+        root = FakeTkRoot()
+        window = companion_mod.RobotHubWindow(root, [tab, other])
+        self.assertIn("n/a (boom)", window.queue_texts[0])
+        self.assertEqual(window.queue_specs[0], "")
+        self.assertIn("c 0/1 open", window.queue_texts[1])
+        header = window.state_label.options.get("text", "")
+        self.assertIn("a [opencode]", header)
+
+    def test_missing_queue_fn_honest(self):
+        window, _root = self._window(None)
+        self.assertIn("no queue source", window.queue_label.options.get("text", ""))
+
+    def test_tab_switch_updates_rows_without_input(self):
+        first, watcher_a = make_tab(
+            "/home/u/a",
+            queue={
+                "active_count": 1,
+                "current_spec": "spec-a",
+                "open_tasks": 1,
+                "total_tasks": 2,
+                "unavailable": "",
+            },
+        )
+        second, watcher_b = make_tab(
+            "/home/u/b",
+            "codex",
+            "s2",
+            queue={
+                "active_count": 1,
+                "current_spec": "spec-b",
+                "open_tasks": 0,
+                "total_tasks": 1,
+                "unavailable": "",
+            },
+        )
+        root = FakeTkRoot()
+        window = companion_mod.RobotHubWindow(root, [first, second])
+        window._select_fn(1)()
+        self.assertIn("spec-b", window.state_label.options.get("text", ""))
+        self.assertIn("spec-b 0/1 open", window.queue_label.options.get("text", ""))
+        self.assertEqual(watcher_a.calls, [])
+        self.assertEqual(watcher_b.calls, [])
+
+
+def _raising_queue():
+    raise RuntimeError("boom")
 
 
 class RunRobotHubTest(unittest.TestCase):
