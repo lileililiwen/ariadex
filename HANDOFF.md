@@ -56,6 +56,15 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-managed-memory-protection`. Added
+  `scripts/setup-memory-protection.sh`, an idempotent Bash operator script
+  that persists an additional 8 GiB swap file and configures earlyoom to
+  prefer browsers without exempting OpenCode. Verified with Bash syntax,
+  2 stdlib regression tests, compileall, diff check, and strict OpenSpec
+  validation; archive promoted `host-memory-protection` into canonical specs.
+  Host verification showed `/swapfile-ariadex` active and earlyoom enabled.
+
+- Implemented, verified, and archived:
   `2026-09-14-managed-lifecycle-operation-audit`. Managed provider starts and
   termination attempts now write before/after audit records containing actor,
   target session, PID/start identity when known, operation result, and bounded
