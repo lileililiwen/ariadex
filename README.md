@@ -327,7 +327,22 @@ override; otherwise the change in `HANDOFF.md` is checked),
 `--debounce` (default 3), `--poll-interval` (default 5.0s),
 `--max-polls` (0 = unbounded), `--list-sessions`, `--create`, `--attach`,
 `--widget`, and `--no-widget`
-(explicit fallback only).
+(explicit fallback only), plus repeatable
+`--hub PROJECT:SESSION[:PROVIDER]`.
+
+When several projects run continuous work, one tabbed hub window replaces
+one widget per project. Each tab shows the project folder name plus the
+AI-agent provider badge (e.g. `a [opencode]`, `b [codex]`), a per-tab state
+indicator, and the usual per-tab Pause/Resume/Quit; `Pause all` pauses every
+tab and the window close button quits all watchers while leaving every
+provider session attachable. The global hotkey acts on the visible tab only.
+Duplicate folder names gain parent segments (then the session name) so no
+two tabs look identical:
+
+```bash
+ariadex watch --attach --hub ~/projects/a:agent-a \
+  --hub ~/projects/b:agent-b:codex --hub ~/projects/c:agent-c:codebuddy
+```
 
 The robot waits for the provider adapter's stable input-ready signal (debounced,
 default 3 polls), sends the initial prompt once, then verifies the

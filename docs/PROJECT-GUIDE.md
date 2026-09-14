@@ -288,8 +288,18 @@ Behavior:
   activity log (boundary decisions, prompt selection, readiness, waiting,
   pause, and error events; never raw provider transcripts or secrets)
   without moving the window or taking focus from the provider editor.
-  On Linux X11, `Ctrl+Esc` globally toggles Pause/Resume. `Ctrl+C` cleanly stops the watch
-  process and closes the widget without a Python traceback.
+   On Linux X11, `Ctrl+Esc` globally toggles Pause/Resume. `Ctrl+C` cleanly stops the watch
+   process and closes the widget without a Python traceback.
+- The hub (`ariadex watch --hub PROJECT:SESSION[:PROVIDER]`, repeatable)
+  supervises several projects under one middle-right window: one tab per
+  project labeled `folder [provider]` with a per-tab state dot, the shared
+  detail panel (identity with full project path, latest event, expandable
+  read-only log), per-tab Pause/Resume/Quit, and `Pause all`. Quitting a tab
+  detaches only that tab; closing the window quits every watcher in tab
+  order. The hotkey toggles the visible tab only. Every entry is validated
+  before any watcher thread starts, duplicate project+session pairs are
+  refused, and `--no-widget` cannot be combined with `--hub`. An unreachable
+  tab renders UNREACHABLE for that tab only while the others stay live.
 
 ## Provider permission policy
 

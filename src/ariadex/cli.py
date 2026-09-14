@@ -326,6 +326,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="run in the terminal without opening the robot widget",
     )
+    watch_parser.add_argument(
+        "--hub",
+        action="append",
+        default=[],
+        metavar="PROJECT:SESSION[:PROVIDER]",
+        help="repeatable: supervise another project in the same tabbed hub "
+        "window (tab shows the project folder plus the provider badge)",
+    )
     sub.add_parser(
         "takeover",
         help="take manual control: automatic input disabled, observation continues",
@@ -2593,6 +2601,126 @@ def cmd_uninstall(
     return EXIT_OK
 
 
+def parse_hub_entry(spec: str) -> tuple[str, str, str | None]:
+    """Parse one `--hub PROJECT:SESSION[:PROVIDER]` entry.
+
+    Raises RobotError with the exact reason when malformed; never guesses.
+    """
+    parts = spec.split(":")
+    if len(parts) == 2:
+        project, session = parts
+        entry_provider: str | None = None
+    elif len(parts) == 3:
+        project, session, entry_provider = parts
+    else:
+        raise robot_mod.RobotError(
+            f"malformed --hub entry `{spec}`; want PROJECT:SESSION[:PROVIDER]"
+        )
+    if not project.strip():
+        raise robot_mod.RobotError(
+            f"malformed --hub entry `{spec}`; project directory must not be empty"
+        )
+    if not session.strip():
+        raise robot_mod.RobotError(
+            f"malformed --hub entry `{spec}`; tmux session must not be empty"
+        )
+    if entry_provider is not None and not entry_provider.strip():
+        raise robot_mod.RobotError(
+            f"malformed --hub entry `{spec}`; provider must not be empty"
+        )
+    return (
+        project.strip(),
+        session.strip(),
+        entry_provider.strip() if entry_provider else None,
+    )
+
+
+def _build_hub_entry_watcher(
+    project_dir: Path,
+    entry_project: Path,
+    session: str,
+    resolved_provider: str,
+    driver: Any,
+    *,
+    initial_prompt: str,
+    continuation_prompt: str | None,
+    confirmation_prompt: str | None,
+    debounce: int,
+    poll_interval: float,
+    max_polls: int,
+    finished_change: str,
+    create: bool,
+    evidence_runner: Callable[..., Any] | None,
+) -> Any:
+    """Build one hub entry watcher; raises RobotError with the exact reason."""
+    cfg = _load_config(entry_project)
+    entry_continuation = (
+        continuation_prompt
+        if continuation_prompt is not None
+        else (
+            cfg.continuation_prompt
+            if cfg is not None
+            else robot_mod.DEFAULT_CONTINUATION_PROMPT
+        )
+    )
+    entry_confirmation = (
+        confirmation_prompt
+        if confirmation_prompt is not None
+        else (
+            cfg.confirmation_prompt
+            if cfg is not None
+            else robot_mod.DEFAULT_ROBOT_CONFIRMATION_PROMPT
+        )
+    )
+    try:
+        adapter = providers_mod.get_adapter(
+            resolved_provider, driver, session, entry_project
+        )
+    except Exception as exc:
+        raise robot_mod.RobotError(
+            f"hub entry `{entry_project}:{session}`: {exc}"
+        ) from exc
+    try:
+        alive = driver.session_alive(session)
+    except terminal_mod.TerminalError as exc:
+        raise robot_mod.RobotError(
+            f"hub entry `{entry_project}:{session}` unavailable: {exc}"
+        ) from exc
+    if not alive:
+        if not create:
+            raise robot_mod.RobotError(
+                f"tmux session `{session}` does not exist; "
+                "the robot never creates sessions implicitly "
+                "(see `--list-sessions`, or pass `--create` "
+                "to start it explicitly)"
+            )
+        try:
+            adapter.start()
+        except Exception as exc:
+            raise robot_mod.RobotError(
+                f"explicit session creation failed for `{session}`: {exc}"
+            ) from exc
+        print(f"session: created `{session}` (explicit --create fallback)")
+    robot_config = robot_mod.validate_config(
+        robot_mod.RobotConfig(
+            session=session,
+            provider=resolved_provider,
+            initial_prompt=initial_prompt,
+            continuation_prompt=entry_continuation,
+            confirmation_prompt=entry_confirmation,
+            debounce_polls=debounce,
+            poll_interval_s=poll_interval,
+            max_polls=max_polls,
+            spec_dir=cfg.spec_dir if cfg else "openspec/changes",
+            handoff_file=cfg.handoff_file if cfg else "HANDOFF.md",
+            finished_change=finished_change,
+        )
+    )
+    return robot_mod.RobotWatcher(
+        entry_project, robot_config, driver, adapter, evidence_runner=evidence_runner
+    )
+
+
 def cmd_watch(
     project_dir: Path,
     *,
@@ -2609,6 +2737,7 @@ def cmd_watch(
     max_polls: int = 0,
     create: bool = False,
     widget: bool = False,
+    hub: list[str] | None = None,
     auto_install: bool = True,
     evidence_runner: Callable[..., Any] | None = None,
 ) -> int:
@@ -2643,6 +2772,25 @@ def cmd_watch(
         else:
             print("session: (no tmux sessions)")
         return EXIT_OK
+    if hub:
+        return cmd_watch_hub(
+            project_dir,
+            hub,
+            provider=provider,
+            initial_prompt=initial_prompt,
+            attach=attach,
+            continuation_prompt=continuation_prompt,
+            confirmation_prompt=confirmation_prompt,
+            finished_change=finished_change,
+            debounce=debounce,
+            poll_interval=poll_interval,
+            max_polls=max_polls,
+            create=create,
+            widget=widget,
+            auto_install=False,
+            evidence_runner=evidence_runner,
+            driver=driver,
+        )
     cfg = _load_config(project_dir)
     resolved_provider = provider or (cfg.agent_provider if cfg else None)
     if resolved_provider is None:
@@ -2779,6 +2927,173 @@ def cmd_watch(
     if report.outcome in ("done", "stopped"):
         return EXIT_OK
     return EXIT_ERROR
+
+
+def cmd_watch_hub(
+    project_dir: Path,
+    hub: list[str],
+    *,
+    provider: str | None = None,
+    initial_prompt: str | None = None,
+    attach: bool = False,
+    continuation_prompt: str | None = None,
+    confirmation_prompt: str | None = None,
+    finished_change: str = "",
+    debounce: int = 3,
+    poll_interval: float = 5.0,
+    max_polls: int = 0,
+    create: bool = False,
+    widget: bool = True,
+    auto_install: bool = True,
+    evidence_runner: Callable[..., Any] | None = None,
+    driver: Any | None = None,
+) -> int:
+    """Supervise several projects under one tabbed hub window.
+
+    Every entry is validated before any watcher thread starts; any refusal
+    starts nothing. Watchers stay independent: per-project config, session,
+    adapter, prompts, activity log, and diagnostics.
+    """
+    if not widget:
+        print(
+            "error: `--no-widget` cannot be combined with `--hub`; "
+            "multi-watcher headless supervision has no defined foreground "
+            "semantics",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    try:
+        parsed = [parse_hub_entry(spec) for spec in hub]
+    except robot_mod.RobotError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if attach:
+        shared_initial = ""
+    elif initial_prompt is None:
+        print(
+            "error: no initial prompt supplied; pass `--initial-prompt TEXT` "
+            "or use `--attach`",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    else:
+        shared_initial = initial_prompt
+    seen: set[tuple[str, str]] = set()
+    for entry_project_text, entry_session, _entry_provider in parsed:
+        key = (str(Path(entry_project_text).resolve()), entry_session)
+        if key in seen:
+            print(
+                f"error: duplicate --hub entry for project "
+                f"`{entry_project_text}` session `{entry_session}`; "
+                "each project+session pair may appear only once",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        seen.add(key)
+    try:
+        tmux_path = (
+            tmux_setup_mod.ensure_tmux()
+            if auto_install
+            else tmux_setup_mod.require_tmux()
+        )
+    except tmux_setup_mod.TmuxSetupError as exc:
+        print(f"error: watch is unavailable: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    active_driver = driver or terminal_mod.TmuxDriver(executable=tmux_path)
+    watchers: list[Any] = []
+    identities: list[tuple[str, str, str]] = []
+    for entry_project_text, entry_session, entry_provider in parsed:
+        entry_project = Path(entry_project_text)
+        if not entry_project.is_dir():
+            print(
+                f"error: hub project `{entry_project_text}` is not a directory",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        entry_cfg = _load_config(entry_project)
+        resolved = (
+            entry_provider
+            or provider
+            or (entry_cfg.agent_provider if entry_cfg else None)
+        )
+        if resolved is None:
+            print(
+                f"error: hub entry `{entry_project_text}:{entry_session}` "
+                "selects no provider; pass `--provider opencode|codex|codebuddy` "
+                "or use PROJECT:SESSION:PROVIDER",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        if resolved not in robot_mod.SUPPORTED_ROBOT_PROVIDERS:
+            print(
+                f"error: unsupported robot provider `{resolved}`; "
+                f"robot supports: {', '.join(robot_mod.SUPPORTED_ROBOT_PROVIDERS)}",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        try:
+            watcher = _build_hub_entry_watcher(
+                project_dir,
+                entry_project,
+                entry_session,
+                resolved,
+                active_driver,
+                initial_prompt=shared_initial,
+                continuation_prompt=continuation_prompt,
+                confirmation_prompt=confirmation_prompt,
+                debounce=debounce,
+                poll_interval=poll_interval,
+                max_polls=max_polls,
+                finished_change=finished_change,
+                create=create,
+                evidence_runner=evidence_runner,
+            )
+        except robot_mod.RobotError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        watchers.append(watcher)
+        identities.append((str(entry_project.resolve()), resolved, entry_session))
+    labels = companion_mod.disambiguate_hub_labels(
+        [(Path(text), prov, sess) for text, prov, sess in identities]
+    )
+    tabs = [
+        companion_mod.RobotHubTab(
+            project=identities[i][0],
+            label=labels[i],
+            status_fn=watcher.status_view,
+            on_pause=watcher.request_pause,
+            on_resume=watcher.request_resume,
+            on_quit=watcher.request_quit,
+            run_fn=watcher.run,
+        )
+        for i, watcher in enumerate(watchers)
+    ]
+    for (text, prov, sess), _watcher in zip(identities, watchers, strict=True):
+        print(f"watching: {prov} @ {sess} in {text} (hub tab)")
+        with contextlib.suppress(Exception):
+            diagnostics_mod.try_record(
+                Path(text),
+                diagnostics_mod.build_diagnostic(
+                    "widget",
+                    "robot hub opened",
+                    result="opened",
+                    message=f"watching session `{sess}`",
+                    provider=prov,
+                    session=sess,
+                ),
+            )
+    try:
+        return companion_mod.run_robot_hub(
+            tabs, poll_interval_s=max(poll_interval, 0.1)
+        )
+    except KeyboardInterrupt:
+        for tab in tabs:
+            with contextlib.suppress(Exception):
+                print(tab.on_quit())
+        return EXIT_OK
+    except companion_mod.CompanionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
 
 
 def cmd_admin(project_dir: Path, admin_argv: list[str], no_auto_install: bool) -> int:
@@ -3607,6 +3922,7 @@ def main(argv: list[str] | None = None) -> int:
             max_polls=getattr(args, "max_polls", 0),
             create=getattr(args, "create", False),
             widget=getattr(args, "widget", False),
+            hub=getattr(args, "hub", None) or None,
             auto_install=auto_install,
         ),
         "dev": lambda: (

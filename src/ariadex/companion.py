@@ -1737,6 +1737,164 @@ def format_robot_activity_line(entry: dict) -> str:
     return f"{entry.get('category', 'info')}: {entry.get('message', '')}"
 
 
+#: Max characters for the project segment of a hub tab label.
+HUB_TAB_LABEL_MAX = 24
+
+#: Max characters for the session segment appended during disambiguation.
+HUB_TAB_SESSION_MAX = 16
+
+#: Per-tab state dots (text-only, no color dependency).
+HUB_INDICATOR_DOTS = {
+    "blocked": "\u25cf",
+    "working": "\u25cf",
+    "watching": "\u25cb",
+    "waiting": "\u25cc",
+    "paused": "\u275a\u275a",
+    "completed": "\u2713",
+    "stopped": "\u25a0",
+    "unreachable": "\u2715",
+}
+
+#: Per-tab state colors for the tab bar (foreground on dark background).
+HUB_INDICATOR_COLORS = {
+    "blocked": "#f85149",
+    "working": "#3fb950",
+    "watching": "#9aa4b2",
+    "waiting": "#d29922",
+    "paused": "#d29922",
+    "completed": "#3fb950",
+    "stopped": "#6e7681",
+    "unreachable": "#f85149",
+}
+
+#: Hub attention precedence: worst state first (unreachable needs a look,
+#: so it ranks just below blocked).
+HUB_PRECEDENCE = (
+    "blocked",
+    "unreachable",
+    "working",
+    "watching",
+    "waiting",
+    "paused",
+    "completed",
+    "stopped",
+)
+
+
+def _hub_path_segments(project_dir: str | Path) -> list[str]:
+    """Split a project dir into significant path segments (pure, no I/O)."""
+    text = str(project_dir)
+    segments = [seg for seg in Path(text).parts if seg not in ("", "/", ".")]
+    return segments or [text]
+
+
+def _hub_short_name(project_dir: str | Path, depth: int) -> str:
+    """Last `depth` path segments, front-truncated to the label bound."""
+    segments = _hub_path_segments(project_dir)
+    name = "/".join(segments[-max(1, depth) :])
+    if len(name) > HUB_TAB_LABEL_MAX:
+        name = "\u2026" + name[-(HUB_TAB_LABEL_MAX - 1) :]
+    return name
+
+
+def hub_tab_label(project_dir: str | Path, provider: str) -> str:
+    """Short tab label: project folder name plus the AI-agent provider badge."""
+    return f"{_hub_short_name(project_dir, 1)} [{provider}]"
+
+
+def _hub_candidate(
+    project_dir: str | Path,
+    provider: str,
+    session: str,
+    depth: int,
+    with_session: bool,
+) -> str:
+    name = _hub_short_name(project_dir, depth)
+    if with_session:
+        short_session = str(session)
+        if len(short_session) > HUB_TAB_SESSION_MAX:
+            short_session = short_session[: HUB_TAB_SESSION_MAX - 1] + "\u2026"
+        name = f"{name}@{short_session}"
+    return f"{name} [{provider}]"
+
+
+def disambiguate_hub_labels(
+    entries: list[tuple[str | Path, str, str]],
+) -> list[str]:
+    """Unique short tab labels for `(project_dir, provider, session)` entries.
+
+    Basename collisions gain parent segments, then the session name, until
+    unique. A trailing index guarantees termination for fully identical
+    entries (the CLI refuses those earlier; this never guesses silently).
+    """
+    depths = [1] * len(entries)
+    suffixed = [False] * len(entries)
+    while True:
+        labels = [
+            _hub_candidate(project, provider, session, depths[i], suffixed[i])
+            for i, (project, provider, session) in enumerate(entries)
+        ]
+        duplicates = {label for label in labels if labels.count(label) > 1}
+        if not duplicates:
+            return labels
+        progressed = False
+        for i, (project, _provider, _session) in enumerate(entries):
+            if labels[i] not in duplicates:
+                continue
+            if depths[i] < len(_hub_path_segments(project)):
+                depths[i] += 1
+                progressed = True
+            elif not suffixed[i]:
+                suffixed[i] = True
+                progressed = True
+        if not progressed:
+            return [
+                f"{label} #{i + 1}" if label in duplicates else label
+                for i, label in enumerate(labels)
+            ]
+
+
+def _hub_tab_key(model: dict) -> str:
+    """Precedence key for one per-tab view model."""
+    if model.get("indicator_text") == "UNREACHABLE":
+        return "unreachable"
+    return str(model.get("indicator", "unknown"))
+
+
+def build_hub_view_model(
+    tab_models: list[dict], labels: list[str], active: int = 0
+) -> dict:
+    """Aggregate per-tab robot models into one hub model (pure, no I/O)."""
+    tabs = []
+    for i, model in enumerate(tab_models):
+        key = _hub_tab_key(model)
+        tabs.append(
+            {
+                "label": labels[i] if i < len(labels) else f"tab {i + 1}",
+                "indicator": key,
+                "indicator_text": (
+                    "UNREACHABLE"
+                    if key == "unreachable"
+                    else str(model.get("indicator_text", "?"))
+                ),
+            }
+        )
+    order = {key: rank for rank, key in enumerate(HUB_PRECEDENCE)}
+    hub_key = "stopped"
+    for tab in tabs:
+        if order.get(tab["indicator"], len(order)) < order.get(hub_key, len(order)):
+            hub_key = tab["indicator"]
+    hub_text = "UNREACHABLE" if hub_key == "unreachable" else hub_key.upper()
+    return {
+        "count": len(tabs),
+        "active": min(max(0, active), max(0, len(tabs) - 1)),
+        "tabs": tabs,
+        "hub_indicator": hub_key,
+        "hub_indicator_text": hub_text,
+        "title": f"Ariadex Robots ({len(tabs)}) \u2014 {hub_text}",
+    }
+
+
 def format_robot_text(model: dict) -> str:
     """Text status equivalent of the robot widget (screen-reader use)."""
     lines = [
@@ -2034,6 +2192,387 @@ class RobotWindow:
             self.log_text.configure(state="disabled")
 
 
+@dataclasses.dataclass
+class RobotHubTab:
+    """One hub entry: project identity plus that watcher's callbacks."""
+
+    project: str
+    label: str
+    status_fn: Callable[[], dict]
+    on_pause: Callable[[], str]
+    on_quit: Callable[[], str]
+    on_resume: Callable[[], str] | None = None
+    run_fn: Callable[[], object] | None = None
+
+
+class RobotHubWindow:
+    """Multi-project robot hub: tab bar plus one shared detail panel.
+
+    Each tab owns an independent watcher; the hub only polls status
+    functions and forwards Pause/Resume/Quit to the visible tab (or to all
+    tabs for Pause-all). It never touches tmux, leases, or state files;
+    quitting a tab leaves that provider session running and attachable.
+    Switching tabs or expanding the log never sends provider input and
+    never moves the window.
+    """
+
+    def __init__(
+        self,
+        root: object,
+        tabs: list[RobotHubTab],
+        hotkey_adapter: HotkeyAdapter | None = None,
+        hotkey: str = DEFAULT_HOTKEY,
+        poll_interval_s: float = POLL_INTERVAL_S,
+        active: int = 0,
+    ) -> None:
+        import tkinter as tk
+
+        if not tabs:
+            raise ValueError("robot hub requires at least one tab")
+        self.root = root
+        self.tabs = list(tabs)
+        self.active = min(max(0, active), len(self.tabs) - 1)
+        self.hotkey_adapter = hotkey_adapter
+        self.hotkey = hotkey
+        self.poll_interval_ms = max(1, int(poll_interval_s * 1000))
+        self.models: list[dict] = [build_robot_view_model({}) for _ in self.tabs]
+        self._poll_after: str | None = None
+
+        assert isinstance(root, tk.Tk)
+        root.title(f"Ariadex Robots ({len(self.tabs)})")
+        root.overrideredirect(True)
+        root.attributes("-topmost", True)
+        root.geometry(f"{WIDGET_WIDTH}x{WIDGET_COLLAPSED_HEIGHT}")
+        position = default_geometry(root.winfo_screenwidth(), root.winfo_screenheight())
+        position = clamp_to_screen(
+            root, position[0], position[1], WIDGET_WIDTH, WIDGET_COLLAPSED_HEIGHT
+        )
+        root.geometry(f"+{position[0]}+{position[1]}")
+
+        self.frame = tk.Frame(
+            root,
+            background="#20242b",
+            borderwidth=1,
+            relief="solid",
+            padx=10,
+            pady=9,
+        )
+        self.frame.pack(fill="both", expand=True)
+        self.tab_bar = tk.Frame(self.frame, background="#20242b")
+        self.tab_bar.pack(fill="x")
+        self.tab_buttons: list[object] = []
+        for index in range(len(self.tabs)):
+            button = tk.Button(
+                self.tab_bar,
+                name=f"robot-hub-tab-{index}",
+                width=8,
+                takefocus=False,
+                command=self._select_fn(index),
+            )
+            button.pack(side="left", expand=True, fill="x")
+            self.tab_buttons.append(button)
+        self.state_label = tk.Label(
+            self.frame,
+            text="WATCHING",
+            anchor="w",
+            background="#20242b",
+            foreground="#f3f4f6",
+            font=("TkDefaultFont", 10, "bold"),
+        )
+        self.state_label.pack(fill="x")
+        self.identity_label = tk.Label(
+            self.frame,
+            text="(connecting)",
+            anchor="w",
+            justify="left",
+            wraplength=WIDGET_WIDTH - 20,
+            background="#20242b",
+            foreground="#c9d1d9",
+        )
+        self.identity_label.pack(fill="x")
+        self.event_label = tk.Label(
+            self.frame,
+            text="no activity yet",
+            anchor="w",
+            justify="left",
+            wraplength=WIDGET_WIDTH - 20,
+            background="#20242b",
+            foreground="#9aa4b2",
+        )
+        self.event_label.pack(fill="x")
+        self.expanded = False
+        self.log_text = self._build_log_panel(tk)
+        controls = tk.Frame(self.frame, background="#20242b")
+        controls.pack(fill="x", pady=(4, 0))
+        self.pause_button = tk.Button(
+            controls,
+            text="Pause",
+            name="robot-hub-pause-button",
+            width=8,
+            takefocus=True,
+            command=self._on_pause_active,
+        )
+        self.pause_button.pack(side="left", expand=True, fill="x")
+        self.pause_all_button = tk.Button(
+            controls,
+            text="Pause all",
+            name="robot-hub-pause-all-button",
+            width=8,
+            takefocus=False,
+            command=self._on_pause_all,
+        )
+        self.pause_all_button.pack(side="left", expand=True, fill="x")
+        self.quit_button = tk.Button(
+            controls,
+            text="Quit",
+            name="robot-hub-quit-button",
+            width=8,
+            takefocus=True,
+            command=self._on_quit_active,
+        )
+        self.quit_button.pack(side="left", expand=True, fill="x")
+        self.toggle_button = tk.Button(
+            controls,
+            text="Show log",
+            name="robot-hub-log-toggle",
+            width=8,
+            takefocus=False,
+            command=self._on_toggle,
+        )
+        self.toggle_button.pack(side="left", expand=True, fill="x")
+        if self.hotkey_adapter is not None:
+            self.hotkey_adapter.register(self.hotkey, self._on_hotkey)
+        self._refresh()
+        self._schedule_poll()
+
+    def _select_fn(self, index: int) -> Callable[[], None]:
+        def select() -> None:
+            self.active = index
+            self._render()
+
+        return select
+
+    def _build_log_panel(self, tk):
+        """Create the read-only activity log without touching window focus."""
+        text_cls = getattr(tk, "Text", None)
+        if text_cls is None:
+            return None
+        try:
+            widget = text_cls(
+                self.frame,
+                height=8,
+                wrap="word",
+                takefocus=False,
+                background="#14171c",
+                foreground="#c9d1d9",
+            )
+        except Exception:
+            return None
+        with contextlib.suppress(Exception):
+            widget.configure(state="disabled")
+        return widget
+
+    def _hub_model(self) -> dict:
+        return build_hub_view_model(
+            self.models, [tab.label for tab in self.tabs], self.active
+        )
+
+    def _on_toggle(self) -> None:
+        """Expand or collapse the activity log; never sends provider input."""
+        self.expanded = not self.expanded
+        with contextlib.suppress(Exception):
+            if self.expanded and self.log_text is not None:
+                self.log_text.pack(fill="both", expand=True, pady=(4, 0))
+            elif self.log_text is not None:
+                pack_forget = getattr(self.log_text, "pack_forget", None)
+                if callable(pack_forget):
+                    pack_forget()
+        with contextlib.suppress(Exception):
+            height = (
+                WIDGET_EXPANDED_HEIGHT if self.expanded else WIDGET_COLLAPSED_HEIGHT
+            )
+            try:
+                raw_x = int(self.root.winfo_x())  # type: ignore[attr-defined]
+                raw_y = int(self.root.winfo_y())  # type: ignore[attr-defined]
+            except Exception:
+                self.root.geometry(f"{WIDGET_WIDTH}x{height}")  # type: ignore[attr-defined]
+            else:
+                clamped = clamp_to_screen(self.root, raw_x, raw_y, WIDGET_WIDTH, height)
+                self.root.geometry(  # type: ignore[attr-defined]
+                    f"{WIDGET_WIDTH}x{height}+{clamped[0]}+{clamped[1]}"
+                )
+        self._render()
+
+    def _on_pause_active(self) -> None:
+        """Pause or resume the visible tab only; other tabs are untouched."""
+        if not self.tabs:
+            return
+        tab = self.tabs[self.active]
+        model = self.models[self.active]
+        with contextlib.suppress(Exception):
+            if model.get("indicator") == "paused" and tab.on_resume:
+                tab.on_resume()
+            else:
+                tab.on_pause()
+        self._refresh()
+
+    def _on_pause_all(self) -> None:
+        """Pause every non-stopped tab; each watcher records its own pause."""
+        for index, tab in enumerate(self.tabs):
+            model = self.models[index] if index < len(self.models) else {}
+            actions = model.get("actions", {})
+            if actions.get("pause"):
+                with contextlib.suppress(Exception):
+                    tab.on_pause()
+        self._refresh()
+
+    def _on_hotkey(self) -> None:
+        """Marshal the X11 callback onto Tk's UI thread (active tab only)."""
+        with contextlib.suppress(Exception):
+            self.root.after(0, self._on_pause_active)  # type: ignore[attr-defined]
+
+    def _on_quit_active(self) -> None:
+        """Detach the visible tab; the hub stays alive while tabs remain."""
+        if not self.tabs:
+            return
+        tab = self.tabs.pop(self.active)
+        button = self.tab_buttons.pop(self.active)
+        with contextlib.suppress(Exception):
+            tab.on_quit()
+        with contextlib.suppress(Exception):
+            forget = getattr(button, "pack_forget", None)
+            if callable(forget):
+                forget()
+            else:
+                destroy = getattr(button, "destroy", None)
+                if callable(destroy):
+                    destroy()
+        self.models.pop(self.active)
+        if not self.tabs:
+            if self.hotkey_adapter is not None:
+                self.hotkey_adapter.unregister()
+            self._cancel_poll()
+            self.root.destroy()  # type: ignore[attr-defined]
+            return
+        self.active = min(self.active, len(self.tabs) - 1)
+        self._refresh()
+
+    def _on_quit_all(self) -> None:
+        """Quit every watcher in tab order; sessions stay attachable."""
+        for tab in self.tabs:
+            with contextlib.suppress(Exception):
+                tab.on_quit()
+        if self.hotkey_adapter is not None:
+            self.hotkey_adapter.unregister()
+        self._cancel_poll()
+        self.root.destroy()  # type: ignore[attr-defined]
+
+    def _schedule_poll(self) -> None:
+        self._cancel_poll()
+        self._poll_after = self.root.after(  # type: ignore[attr-defined]
+            self.poll_interval_ms, self._poll
+        )
+
+    def _cancel_poll(self) -> None:
+        if self._poll_after is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(self._poll_after)  # type: ignore[attr-defined]
+            self._poll_after = None
+
+    def _poll(self) -> None:
+        self._poll_after = None
+        self._refresh()
+        self._schedule_poll()
+
+    def _refresh(self) -> None:
+        models: list[dict] = []
+        for tab in self.tabs:
+            try:
+                status = tab.status_fn()
+            except Exception as exc:
+                model = build_robot_view_model({})
+                model["indicator"] = "stopped"
+                model["indicator_text"] = "UNREACHABLE"
+                model["failure"] = str(exc)
+                models.append(model)
+            else:
+                models.append(build_robot_view_model(status))
+        self.models = models
+        self.active = min(self.active, max(0, len(self.models) - 1))
+        self._render()
+
+    def _render(self) -> None:
+        if not self.tabs:
+            return
+        hub = self._hub_model()
+        with contextlib.suppress(Exception):
+            self.root.title(str(hub["title"]))  # type: ignore[attr-defined]
+        for index, button in enumerate(self.tab_buttons):
+            info = hub["tabs"][index]
+            dot = HUB_INDICATOR_DOTS.get(info["indicator"], "?")
+            color = HUB_INDICATOR_COLORS.get(info["indicator"], "#f3f4f6")
+            with contextlib.suppress(Exception):
+                button.configure(  # type: ignore[attr-defined]
+                    text=f"{dot} {info['label']}",
+                    foreground=color,
+                )
+        model = self.models[self.active]
+        tab = self.tabs[self.active]
+        self.state_label.configure(text=str(model.get("indicator_text", "?")))
+        self.identity_label.configure(
+            text=f"{tab.project}\n{model.get('work_label', '')}"
+        )
+        with contextlib.suppress(Exception):
+            self.event_label.configure(
+                text=str(model.get("latest_text", "no activity yet"))
+            )
+            self.toggle_button.configure(
+                text="Hide log" if self.expanded else "Show log"
+            )
+        self._render_log(model)
+        actions = model.get("actions", {})
+        self.pause_button.configure(
+            text="Resume" if model.get("indicator") == "paused" else "Pause"
+        )
+        self.pause_button.configure(
+            state=(
+                "normal"
+                if actions.get("pause") or actions.get("resume")
+                else "disabled"
+            )
+        )
+        self.quit_button.configure(
+            state="normal" if actions.get("quit") else "disabled"
+        )
+
+    def _render_log(self, model: dict) -> None:
+        """Write the read-only log; never raises into the poll loop."""
+        if self.log_text is None or not self.expanded:
+            return
+        activity = model.get("activity", [])
+        lines = [format_robot_activity_line(entry) for entry in activity]
+        if not lines:
+            if model.get("indicator_text") == "UNREACHABLE":
+                detail = str(model.get("failure", "") or "").strip()
+                lines = [f"watcher unreachable{': ' + detail if detail else ''}"]
+            elif model.get("failure"):
+                lines = ["(no activity yet)", f"blocked: {model['failure']}"]
+            else:
+                lines = ["(no activity yet)"]
+        lines = lines[-ROBOT_LOG_VIEW_LINES:]
+        with contextlib.suppress(Exception):
+            self.log_text.configure(state="normal")
+        with contextlib.suppress(Exception):
+            delete = getattr(self.log_text, "delete", None)
+            insert = getattr(self.log_text, "insert", None)
+            if callable(delete):
+                delete("1.0", "end")
+            if callable(insert):
+                insert("1.0", "\n".join(lines))
+        with contextlib.suppress(Exception):
+            self.log_text.configure(state="disabled")
+
+
 class RobotWatcherBoundary(Protocol):
     """Structural boundary for watchers driven by the floating widget."""
 
@@ -2094,6 +2633,68 @@ def run_robot_widget(
         root.mainloop()
     except KeyboardInterrupt:
         print(watcher.request_quit())
+        with contextlib.suppress(Exception):
+            root.destroy()
+    finally:
+        hotkey_adapter.unregister()
+    return 0
+
+
+def run_robot_hub(tabs: list[RobotHubTab], *, poll_interval_s: float = 2.0) -> int:
+    """Run one hub window around several watchers in worker threads.
+
+    The desktop probe runs before any watcher thread starts, so an
+    unsupported desktop starts nothing. Each tab's `run_fn` (when set)
+    runs in its own daemon thread; the window only reads tab statuses
+    and invokes pause or quit callbacks. Closing the window quits every
+    watcher in tab order and never terminates provider sessions.
+    """
+    if not tabs:
+        raise CompanionError("robot hub unavailable: no project entries supplied")
+    info = detect_desktop()
+    if not info.supported:
+        raise CompanionError(f"robot hub unavailable: {info.detail}")
+    if not tkinter_available():
+        raise CompanionError("robot hub unavailable: Tkinter is not installed")
+    import tkinter as tk
+
+    try:
+        hotkey = configured_hotkey()
+        parse_hotkey(hotkey)
+        hotkey_adapter = adapter_for_session(info.session)
+    except CompanionError as exc:
+        raise CompanionError(f"robot hub unavailable: {exc}") from exc
+
+    root = tk.Tk()
+    window = RobotHubWindow(
+        root,
+        tabs,
+        hotkey_adapter=hotkey_adapter,
+        hotkey=hotkey,
+        poll_interval_s=poll_interval_s,
+    )
+    root.protocol("WM_DELETE_WINDOW", window._on_quit_all)
+
+    for index, tab in enumerate(tabs):
+        if tab.run_fn is None:
+            continue
+
+        def run_watch(run: Callable[[], object] = tab.run_fn) -> None:
+            with contextlib.suppress(Exception):
+                run()
+
+        thread = threading.Thread(
+            target=run_watch,
+            name=f"ariadex-robot-hub-{index}",
+            daemon=True,
+        )
+        thread.start()
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        for tab in tabs:
+            with contextlib.suppress(Exception):
+                print(tab.on_quit())
         with contextlib.suppress(Exception):
             root.destroy()
     finally:
