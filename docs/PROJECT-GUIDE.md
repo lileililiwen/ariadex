@@ -85,6 +85,21 @@ The managed startup sequence is:
    terminal, and supervise until queue-empty completion, provider exit,
    or terminal detach.
 
+OpenCode has two related lifecycle objects: the tmux UI and the local API
+backend used for provider state. Ariadex writes `.ariadex/provider.json` only
+after recording the project, endpoint, PID, and process-start identity. If the
+UI disappears while that owned backend remains responsive, the next `start`
+uses `opencode attach http://127.0.0.1:<port>` and preserves the backend
+conversation. This avoids the port collision caused by launching a second
+`opencode --port <port>` process.
+
+If neither UI nor backend is reusable, Ariadex performs bounded cleanup only
+when the recorded process identity still matches. A responsive endpoint with
+no matching owner is an ownership conflict: Ariadex does not kill it and does
+not claim provider readiness. Stale provider metadata is cleared after
+cleanup, while `HANDOFF.md`, task files, conversation records, and evidence
+remain intact.
+
 In the managed `start` lifecycle, the daemon is intentionally input-silent:
 the foreground managed watcher is the only component allowed to send provider
 prompts. The daemon remains the single lease, IPC, status, and cancellation
@@ -95,7 +110,9 @@ existing behavior.
 The managed workflow exits cleanly after the widget close button or a terminal
 stop request. Stop is graceful: an already-running bounded cycle is allowed to
 reach its safe cancellation boundary, then Ariadex terminates the managed
-provider session, widget, and daemon together. Durable work is preserved.
+provider UI and owned backend, waits within a bounded period, and stops the
+widget and daemon together. Cleanup is idempotent and durable work is
+preserved. A provider exit is not completion evidence.
 
 The normal lifecycle is intentionally small:
 

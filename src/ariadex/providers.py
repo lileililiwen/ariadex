@@ -23,13 +23,16 @@ interrupt, reset, termination, and restart in isolated tmux sessions):
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 
-from .adapters import AgentAdapter, Capabilities, UnsupportedOperation
+from . import provider_runtime
+from .adapters import AgentAdapter, Capabilities, StartupError, UnsupportedOperation
 from .terminal import TerminalDriver, TmuxDriver
 
 PROVIDER_OPENCODE = "opencode"
@@ -94,6 +97,82 @@ class OpenCodeAdapter(AgentAdapter):
     @property
     def provider_state_required(self) -> bool:
         return isinstance(self.driver, TmuxDriver)
+
+    @property
+    def endpoint(self) -> str:
+        return f"http://127.0.0.1:{self.api_port}"
+
+    def start(self) -> str:
+        """Start normally, or attach when the OpenCode backend survived UI loss."""
+        project_dir = Path(self.workdir)
+        record = provider_runtime.read_record(project_dir)
+        recovered_process = provider_runtime.find_process(self.api_port, project_dir)
+        endpoint = f"{self.endpoint}/session/status"
+        reusable = provider_runtime.is_reusable(project_dir, record)
+        if reusable:
+            command = [*self.launch_command, "attach", self.endpoint]
+            reused = True
+        else:
+            endpoint_responsive = provider_runtime.endpoint_is_responsive(endpoint)
+            if recovered_process is not None and endpoint_responsive:
+                if record is None:
+                    record = self._runtime_record(recovered_process)
+                    provider_runtime.write_record(project_dir, record)
+                command = [*self.launch_command, "attach", self.endpoint]
+                reused = True
+            elif record is not None:
+                provider_runtime.terminate_owned(project_dir, record)
+                provider_runtime.clear_record(project_dir)
+                command = self.launch_command_for_provider()
+                reused = False
+            elif endpoint_responsive:
+                raise StartupError(
+                    f"{self.provider_name} startup refused: ownership conflict "
+                    f"at {endpoint}"
+                )
+            else:
+                command = self.launch_command_for_provider()
+                reused = False
+        try:
+            result = self.driver.create_or_connect(
+                self.session_name, self.workdir, command
+            )
+        except Exception as exc:
+            raise StartupError(f"{self.provider_name} startup failed: {exc}") from exc
+        if isinstance(self.driver, TmuxDriver) and not reused:
+            process = provider_runtime.find_process(self.api_port, project_dir)
+            if process is None:
+                pid = self.driver.session_pid(self.session_name)
+                if pid is not None:
+                    with contextlib.suppress(OSError, ValueError):
+                        process = provider_runtime.process_identity(pid)
+            if process is not None:
+                provider_runtime.write_record(
+                    project_dir, self._runtime_record(process)
+                )
+        return result
+
+    def _runtime_record(
+        self, process: tuple[int, int]
+    ) -> provider_runtime.ProviderRuntimeRecord:
+        return provider_runtime.ProviderRuntimeRecord(
+            provider=self.provider_name,
+            project=str(Path(self.workdir).resolve()),
+            session_id=self.session_name.removeprefix("ariadex-"),
+            tmux_session=self.session_name,
+            endpoint=f"{self.endpoint}/session/status",
+            port=self.api_port,
+            pid=process[0],
+            process_start_ticks=process[1],
+            generation=uuid.uuid4().hex,
+        )
+
+    def terminate(self) -> None:
+        record = provider_runtime.read_record(Path(self.workdir))
+        super().terminate()
+        if record is not None:
+            provider_runtime.terminate_owned(Path(self.workdir), record)
+            provider_runtime.clear_record(Path(self.workdir))
 
     def launch_command_for_provider(self) -> list[str]:
         return [*self.launch_command, "--port", str(self.api_port)]

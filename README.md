@@ -221,6 +221,14 @@ session are healthy but the widget crashed, rerun `ariadex start`: it reuses
 the daemon and session and recreates only the widget. It never creates a
 second daemon, session, supervisor, or prompt.
 
+For OpenCode, the terminal UI and API backend are tracked separately. If the
+tmux UI exits but the Ariadex-owned OpenCode backend is still responsive,
+rerunning `ariadex start` attaches a replacement UI to the same backend rather
+than starting a second server on the project port. If the backend is gone,
+Ariadex removes only a process whose recorded PID and process-start identity
+match the project. An unknown process using the endpoint is left untouched and
+reported as an ownership conflict.
+
 During an interactive install, package-manager output is shown directly in
 the terminal, including apt progress and errors.
 
@@ -469,7 +477,9 @@ The normal lifecycle is:
    continuation until the queue is empty. `--agent`, `--first-prompt`, and
    `--continuation-prompt` override the configuration for one run; session
    names and watcher options are never user inputs. A duplicate `start`
-   reports the live owner and creates nothing.
+   reports the live owner and creates nothing. For OpenCode, a surviving
+   owned backend is reused with `opencode attach`; it is not started again
+   with the same `--port`.
 3. In `AUTO`, the daemon selects the next durable action, starts or connects
    to the configured provider through tmux, sends the provider prompt,
    captures the result, runs every configured verifier, and persists the
@@ -479,7 +489,9 @@ The normal lifecycle is:
    with its reason and is never silently discarded.
 5. The managed workflow stops the provider session, widget, and daemon when
    the queue is empty; when the provider exits normally it reconciles the
-   stop without claiming completion. The daemon also stops when a blocker
+   stop without claiming completion. UI loss is reported separately from
+   backend loss, and stale owned backend cleanup preserves handoff, task, and
+   evidence files. The daemon also stops when a blocker
    needs human attention, the cycle limit is reached, or the operator
    changes the mode.
 
@@ -536,6 +548,10 @@ durable state:
   `.ariadex/config.yaml`.
 - `.ariadex/state.json` — mode (`AUTO`/`MANUAL`/`PAUSE`), session,
   unresolved count.
+- `.ariadex/provider.json` — versioned managed-provider ownership record:
+  provider, project, tmux session, OpenCode endpoint/port, process identity,
+  and launch generation. It is used to distinguish reusable backend state
+  from an unknown process and is cleared after managed cleanup.
 - `.ariadex/conversation.json` — versioned record of the conversation a
   provider prompt was sent into (conversation id, role, current spec,
   queue snapshot); written before every prompt, read back on recovery.

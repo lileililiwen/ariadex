@@ -79,6 +79,10 @@ class TerminalDriver(abc.ABC):
         """
         raise TerminalError("this terminal driver cannot list sessions")
 
+    def session_pid(self, name: str) -> int | None:
+        """Return the foreground process PID when the driver can observe it."""
+        return None
+
 
 class TmuxDriver(TerminalDriver):
     """tmux transport over subprocess. No LLM API involvement."""
@@ -198,6 +202,16 @@ class TmuxDriver(TerminalDriver):
             raise TerminalError(f"session discovery failed: {detail}")
         return sorted(line.strip() for line in proc.stdout.splitlines() if line.strip())
 
+    def session_pid(self, name: str) -> int | None:
+        proc = self._run(
+            ["list-panes", "-t", name, "-F", "#{pane_pid}"],
+            f"failed to inspect tmux session `{name}`",
+        )
+        try:
+            return int(proc.stdout.strip().splitlines()[0])
+        except (IndexError, ValueError):
+            return None
+
     def terminate(self, name: str) -> None:
         if not self.session_alive(name):
             return
@@ -239,6 +253,10 @@ class FakeTerminalDriver(TerminalDriver):
     def session_alive(self, name: str) -> bool:
         self._check_binary()
         return name in self.sessions
+
+    def session_pid(self, name: str) -> int | None:
+        self._check_binary()
+        return self.sessions.get(name, {}).get("pid")
 
     def kill_session(self, name: str) -> None:
         """Test helper: simulate a dead session without going through terminate."""

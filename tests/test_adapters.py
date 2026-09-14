@@ -1,8 +1,10 @@
 """Tests for the AgentAdapter lifecycle contract and reset selection."""
 
 import unittest
+from pathlib import Path
+from unittest import mock
 
-from ariadex import providers
+from ariadex import provider_runtime, providers
 from ariadex.adapters import (
     AdapterError,
     Capabilities,
@@ -67,6 +69,49 @@ class LifecycleTest(unittest.TestCase):
         adapter, driver = make_open_code()
         adapter.start()
         adapter.terminate()
+        self.assertNotIn("test-session", driver.sessions)
+
+    def test_start_attaches_to_surviving_owned_backend_after_ui_exit(self):
+        adapter, driver = make_open_code()
+        record = provider_runtime.ProviderRuntimeRecord(
+            provider="opencode",
+            project=str(Path("/tmp").resolve()),
+            session_id="test-session",
+            tmux_session="test-session",
+            endpoint=f"http://127.0.0.1:{adapter.api_port}/session/status",
+            port=adapter.api_port,
+            pid=1234,
+            process_start_ticks=5678,
+            generation="generation-1",
+        )
+        with (
+            mock.patch.object(provider_runtime, "read_record", return_value=record),
+            mock.patch.object(provider_runtime, "is_reusable", return_value=True),
+        ):
+            self.assertEqual(adapter.start(), "created")
+        self.assertEqual(
+            driver.sessions["test-session"]["command"],
+            ["opencode", "attach", f"http://127.0.0.1:{adapter.api_port}"],
+        )
+
+    def test_start_refuses_responsive_unknown_backend(self):
+        adapter, driver = make_open_code()
+        with (
+            mock.patch.object(
+                providers.provider_runtime, "read_record", return_value=None
+            ),
+            mock.patch.object(
+                providers.provider_runtime, "find_process", return_value=None
+            ),
+            mock.patch.object(
+                providers.provider_runtime,
+                "endpoint_is_responsive",
+                return_value=True,
+            ),
+            self.assertRaises(StartupError) as raised,
+        ):
+            adapter.start()
+        self.assertIn("ownership conflict", str(raised.exception))
         self.assertNotIn("test-session", driver.sessions)
 
 

@@ -49,6 +49,10 @@
 
 ## Current state
 
+- In progress: `provider-session-cleanup-and-reuse`. Project-scoped provider
+  ownership metadata and OpenCode UI/backend reconciliation are implemented;
+  live tmux/OpenCode verification remains environment-blocked and must pass
+  before this change is archived.
 - Implemented, verified, and archived:
   `2026-09-14-hub-close-button`. The hub window had no way to close
   itself (no system button under `overrideredirect`, Quit removes only
@@ -495,8 +499,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active changes remain. Select the next spec with `openspec list` when new
-work is planned.
+`provider-session-cleanup-and-reuse` — finish live provider lifecycle
+verification, then archive the change with its final evidence.
 
 ## Latest verification evidence
 
