@@ -559,6 +559,27 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 No active changes remain. Select the next spec with `openspec list` when new
 work is planned.
 
+## Latest change: daemon-owned managed runtime
+
+- Implemented and archived `explicit-managed-shutdown` as
+  `2026-09-14-explicit-managed-shutdown`. The resident daemon now owns the
+  managed provider adapter, watcher, widget child, first prompt, and ordered
+  explicit shutdown. `ariadex start` only validates prerequisites, persists
+  one-run prompt settings, ensures the daemon, and optionally attaches.
+- Added `.ariadex/managed-runtime.json` for daemon-consumed prompt/provider
+  settings and `.ariadex/managed-generation.json` for daemon/provider/widget
+  identity plus shutdown reason. Operator stop, widget Quit, and attached
+  Ctrl+C use the daemon stop path; provider restoration is not attempted after
+  deliberate shutdown. Expanded `Close Ariadex` now uses the same IPC path.
+- Verification: focused managed lifecycle gate passed 75 tests with host
+  Unix-socket permission. Full suite ran 1296 tests; 1294 passed and two
+  environment/test-fixture failures remain: `test_mini_player_widgets_and_names`
+  (host Tk object lacks the fixture's `options` attribute) and
+  `test_create_send_capture_terminate` (host tmux stub lacks `list-panes`).
+  Ruff check/format and `git diff --check` passed. Strict change validation
+  passed before archive; canonical spec validation passed after archive (57
+  specs).
+
 ## Latest verification evidence
 
 - `openspec-authoritative-current-spec-lifecycle` was implemented and
