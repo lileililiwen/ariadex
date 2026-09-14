@@ -56,6 +56,13 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-automatic-provider-recovery`. A live daemon with a missing
+  managed provider session now restores the provider through its configured
+  ownership-aware adapter; normal users receive a concise safe-retry message
+  only when recovery fails. Verified with 6 focused tests, docs consistency,
+  Ruff, mypy, diff check, and strict OpenSpec validation.
+
+- Implemented, verified, and archived:
   `2026-09-14-widget-collapsed-height-regression`. The collapsed widget is now
   148px tall so the four action buttons are not clipped. Verified with 150
   focused companion/placement/hub tests, Ruff, mypy, diff check, and strict

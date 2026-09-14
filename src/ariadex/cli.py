@@ -1814,16 +1814,54 @@ def _repair_live_runtime(project_dir: Path, cfg, st, as_json: bool = False) -> i
     try:
         driver = terminal_mod.TmuxDriver()
         if not driver.session_alive(session):
-            print(
-                f"error: managed provider session `{session}` is missing; "
-                "run `ariadex admin recover` before retrying",
-                file=sys.stderr,
+            adapter = providers_mod.get_adapter(
+                cfg.agent_provider, driver, session, project_dir
             )
-            return EXIT_ERROR
+            adapter.start()
+            if not driver.session_alive(session):
+                raise providers_mod.StartupError(
+                    "provider session did not remain alive"
+                )
+            print("provider: restored managed editor")
         if _has_terminal():
             return _attach_session(driver.attach_command(session))
     except terminal_mod.TerminalError as exc:
-        print(f"error: managed session reconciliation failed: {exc}", file=sys.stderr)
+        print(
+            "Ariadex could not restore the editor automatically; "
+            "your work is safe. Try `ariadex start` again.",
+            file=sys.stderr,
+        )
+        diagnostics_mod.try_record(
+            project_dir,
+            diagnostics_mod.build_diagnostic(
+                "error",
+                "managed provider recovery failed",
+                result="blocked",
+                provider=cfg.agent_provider,
+                session=session,
+                message=str(exc),
+                next_action="retry `ariadex start`",
+            ),
+        )
+        return EXIT_ERROR
+    except Exception as exc:
+        print(
+            "Ariadex could not restore the editor automatically; "
+            "your work is safe. Try `ariadex start` again.",
+            file=sys.stderr,
+        )
+        diagnostics_mod.try_record(
+            project_dir,
+            diagnostics_mod.build_diagnostic(
+                "error",
+                "managed provider recovery failed",
+                result="blocked",
+                provider=cfg.agent_provider,
+                session=session,
+                message=str(exc),
+                next_action="retry `ariadex start`",
+            ),
+        )
         return EXIT_ERROR
     if as_json:
         print('{"ok": true, "reused": true}')

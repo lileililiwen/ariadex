@@ -93,6 +93,39 @@ class ManagedStartRepairTests(unittest.TestCase):
         ensure.assert_called_once_with(self.root, cfg, st)
         attach.assert_called_once()
 
+    def test_live_daemon_rerun_restores_missing_provider_session(self):
+        cfg = config.load(self.root)
+        st = state.read(self.root)
+        adapter = mock.Mock()
+        with (
+            mock.patch.object(
+                cli.daemon_mod,
+                "read_record",
+                return_value=SimpleNamespace(pid=10, endpoint="sock", status="running"),
+            ),
+            mock.patch.object(cli.daemon_mod, "daemon_alive", return_value=True),
+            mock.patch.object(cli, "_daemon_ipc_or_none", return_value={"ok": True}),
+            mock.patch.object(
+                cli.widget_runtime_mod, "ensure_widget", return_value=(None, False)
+            ),
+            mock.patch.object(cli.terminal_mod, "TmuxDriver") as driver_type,
+            mock.patch.object(
+                cli.providers_mod, "get_adapter", return_value=adapter
+            ) as get_adapter,
+            mock.patch.object(cli, "_has_terminal", return_value=False),
+        ):
+            driver = driver_type.return_value
+            driver.session_alive.side_effect = [False, True]
+            code = cli.cmd_start(self.root)
+        self.assertEqual(code, cli.EXIT_OK)
+        get_adapter.assert_called_once_with(
+            cfg.agent_provider,
+            driver,
+            f"ariadex-{st.session_id}",
+            self.root,
+        )
+        adapter.start.assert_called_once()
+
     def test_start_help_hides_internal_lifecycle_commands(self):
         output = io.StringIO()
         with redirect_stdout(output), self.assertRaises(SystemExit) as raised:

@@ -1,0 +1,5 @@
+- [x] Add regression coverage for a live daemon with a missing provider session.
+- [x] Restore the provider through its configured ownership-aware adapter.
+- [x] Hide internal recovery details from normal user output and retain diagnostics.
+- [x] Run focused tests, lint, type checks, diff checks, and strict OpenSpec validation.
+- [x] Archive only after canonical spec promotion.

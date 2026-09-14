@@ -45,7 +45,10 @@ lifecycle below. `--agent`, `--first-prompt`, `--continuation-prompt`, and
 
 The current directory is the project. The managed `start` command owns the
 widget lifecycle. Maintainers can diagnose the widget through
-`ariadex admin doctor` and repair it by rerunning `ariadex start`.
+`ariadex admin doctor` and repair it by rerunning `ariadex start`. If the
+daemon is healthy but the provider session disappeared, the same rerun also
+reconnects or recreates the provider through its configured adapter; users do
+not need to run an internal recovery command.
 
 `ariadex init` never overwrites existing configuration, handoff, or state.
 The managed `start` command preserves existing work when it is run again.
