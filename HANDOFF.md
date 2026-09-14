@@ -56,6 +56,12 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-widget-collapsed-height-regression`. The collapsed widget is now
+  148px tall so the four action buttons are not clipped. Verified with 150
+  focused companion/placement/hub tests, Ruff, mypy, diff check, and strict
+  OpenSpec validation.
+
+- Implemented, verified, and archived:
   `2026-09-14-widget-button-layout-regression`. The collapsed widget keeps
   Play, Pause, Stop, and Copy log usable within its fixed width after provider
   startup. Verified with 67 companion tests, Ruff, mypy, diff check, and

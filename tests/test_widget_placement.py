@@ -87,22 +87,31 @@ class PlacementPathTest(unittest.TestCase):
         geometry = window.root.options["geometry"]
         self.assertIn("+", geometry)
         # Corrected to the nearest valid collapsed position.
-        self.assertEqual(geometry, f"+{1920 - 360 - 8}+{1080 - 116 - 8}")
+        self.assertEqual(
+            geometry,
+            f"+{1920 - 360 - 8}+{1080 - companion.WIDGET_COLLAPSED_HEIGHT - 8}",
+        )
         saved = companion.load_user_config()
-        self.assertEqual((saved["x"], saved["y"]), (1920 - 360 - 8, 1080 - 116 - 8))
+        self.assertEqual(
+            (saved["x"], saved["y"]),
+            (1920 - 360 - 8, 1080 - companion.WIDGET_COLLAPSED_HEIGHT - 8),
+        )
 
     def test_drag_motion_is_clamped(self):
         window = self._window()
         window._drag_start(mock.Mock(x_root=150, y_root=250))
         window._drag_move(mock.Mock(x_root=9000, y_root=9000))
         geometry = window.root.options["geometry"]
-        self.assertEqual(geometry, f"+{1920 - 360 - 8}+{1080 - 116 - 8}")
+        self.assertEqual(
+            geometry,
+            f"+{1920 - 360 - 8}+{1080 - companion.WIDGET_COLLAPSED_HEIGHT - 8}",
+        )
 
     def test_expanded_transition_keeps_dialog_visible(self):
         window = self._window()
         # Move near the bottom edge, then expand: position must move up.
         window.root.winfo_x = lambda: 100
-        window.root.winfo_y = lambda: 1080 - 116 - 8
+        window.root.winfo_y = lambda: 1080 - companion.WIDGET_COLLAPSED_HEIGHT - 8
         window._toggle_expanded()
         self.assertTrue(window.expanded)
         geometry = window.root.options["geometry"]
@@ -125,7 +134,10 @@ class PlacementPathTest(unittest.TestCase):
         ):
             window._persist_geometry()
         saved = companion.load_user_config()
-        self.assertEqual((saved["x"], saved["y"]), (1920 - 360 - 8, 1080 - 116 - 8))
+        self.assertEqual(
+            (saved["x"], saved["y"]),
+            (1920 - 360 - 8, 1080 - companion.WIDGET_COLLAPSED_HEIGHT - 8),
+        )
 
     def test_titlebar_close_reachable_after_clamp(self):
         # Every clamped position keeps the top-left (title bar) on-screen.

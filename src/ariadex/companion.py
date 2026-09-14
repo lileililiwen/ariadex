@@ -31,7 +31,9 @@ POLL_INTERVAL_S = 2.0
 
 #: Collapsed mini-player target width in pixels.
 WIDGET_WIDTH = 360
-WIDGET_COLLAPSED_HEIGHT = 116
+# Four action buttons plus the titlebar, status row, and frame padding need
+# more than the legacy three-button 116px mini-player height.
+WIDGET_COLLAPSED_HEIGHT = 148
 WIDGET_EXPANDED_HEIGHT = 320
 WIDGET_EXPANDED_WINDOW_HEIGHT = 340
 WIDGET_ACTION_BUTTON_WIDTH = 6

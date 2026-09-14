@@ -1,0 +1,5 @@
+- [x] Confirm the legacy height clips the four-button collapsed layout.
+- [x] Increase the collapsed widget height and preserve placement clamping.
+- [x] Add an initial geometry regression test.
+- [x] Run focused tests, lint, type checks, diff checks, and strict OpenSpec validation.
+- [x] Archive only after canonical spec promotion.

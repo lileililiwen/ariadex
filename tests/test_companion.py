@@ -694,6 +694,9 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.client.calls.clear()
 
     def test_initial_render_reflects_daemon_truth(self):
+        self.assertEqual(
+            self.window._active_window_height(), companion.WIDGET_COLLAPSED_HEIGHT
+        )
         self.assertEqual(self.window.state_label.options["text"], "WORKING")
         self.assertEqual(self.window.pause_button.options.get("state"), "normal")
         self.assertEqual(self.window.play_button.options.get("state"), "disabled")
