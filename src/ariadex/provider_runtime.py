@@ -138,7 +138,7 @@ def is_reusable(project_dir: Path, record: ProviderRuntimeRecord | None) -> bool
         return False
     try:
         identity = process_identity(record.pid)
-    except (OSError, ValueError):
+    except (OSError, ValueError, psutil.Error):
         return False
     return identity == (
         record.pid,

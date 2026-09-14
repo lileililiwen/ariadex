@@ -88,6 +88,27 @@ class ProviderRuntimeRecordTests(unittest.TestCase):
             ):
                 self.assertFalse(provider_runtime.is_reusable(root, record))
 
+    def test_missing_process_record_is_not_reusable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            record = provider_runtime.ProviderRuntimeRecord(
+                provider="opencode",
+                project=str(root.resolve()),
+                session_id="session-1",
+                tmux_session="ariadex-session-1",
+                endpoint="http://127.0.0.1:43123",
+                port=43123,
+                pid=1234,
+                process_start_ticks=5678,
+                generation="generation-1",
+            )
+            with mock.patch.object(
+                provider_runtime,
+                "process_identity",
+                side_effect=provider_runtime.psutil.NoSuchProcess(1234),
+            ):
+                self.assertFalse(provider_runtime.is_reusable(root, record))
+
 
 if __name__ == "__main__":
     unittest.main()

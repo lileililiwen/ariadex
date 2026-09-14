@@ -1,0 +1,4 @@
+- [x] Add a regression test for a missing provider PID.
+- [x] Catch psutil lookup failures during provider reuse.
+- [x] Verify focused tests and strict OpenSpec validation.
+- [x] Archive with canonical spec promotion.
