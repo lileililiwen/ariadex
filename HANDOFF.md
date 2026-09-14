@@ -56,6 +56,17 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-managed-lifecycle-operation-audit`. Managed provider starts and
+  termination attempts now write before/after audit records containing actor,
+  target session, PID/start identity when known, operation result, and bounded
+  redacted evidence. An unexpected provider disappearance records watcher
+  outcome and final pane evidence while leaving the daemon available for
+  inspection. Verified with 34 focused lifecycle/provider tests, Ruff, compile
+  checks, diff check, and strict validation of 57 canonical specs. The live
+  OpenCode incident remains unassignable retrospectively because its old
+  runtime had already destroyed the pane and recorded no operation audit.
+
+- Implemented, verified, and archived:
   `2026-09-14-widget-geometry-and-auto-resume`. Collapsed and expanded widget
   heights now fit all controls and diagnostic text areas; titlebar and action
   rows have stable layout heights; live-daemon start resumes PAUSE after
