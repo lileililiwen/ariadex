@@ -251,7 +251,7 @@ class RoutingTest(unittest.TestCase):
             "output": READY_OPENCODE,
             "workdir": "/t",
         }
-        watcher = make_watcher(project, driver)
+        watcher = make_watcher(project, driver, fresh_ready_attempts=1)
         watcher.initial_sent = True
         with (
             self._clean_git(),

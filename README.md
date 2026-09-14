@@ -337,10 +337,13 @@ user-owned prose; Git is outside the robot scheduler. When the current spec's ta
 are complete it sends the continuation prompt (default `Please read the
 HANDOFF.md, and implement the next spec.`; override with
 `--continuation-prompt`); when valid tasks remain open it sends the
-confirmation prompt instead (default `Please finish the remaining open
-tasks from HANDOFF.md and the active spec's tasks.md, then update the
-handoff.`; override with `--confirmation-prompt`) and repeats bounded
-confirmation attempts until the tasks complete or a real blocker occurs.
+  confirmation prompt instead (default `Please finish the remaining open
+  tasks from HANDOFF.md and the active spec's tasks.md, then update the
+  handoff.`; override with `--confirmation-prompt`) and repeats bounded
+  confirmation attempts until the tasks complete or a real blocker occurs.
+  After the adapter opens the fresh conversation, the watcher retries the
+  fresh input-ready surface within a bound while the provider settles;
+  only a still-missing surface after the bound blocks with no prompt sent.
 Missing or malformed task metadata stays blocked with the exact reason
 and sends no prompt. Before every first, continuation, or confirmation
 prompt, Ariadex records the selected change as a versioned conversation

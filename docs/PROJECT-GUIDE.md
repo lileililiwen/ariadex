@@ -236,7 +236,10 @@ Behavior:
   update the handoff.`) is sent to a fresh conversation when valid tasks
   remain open, and repeats in bounded attempts until the tasks complete or
   a real blocker occurs. Neither prompt is sent before the fresh
-  input-ready surface is observed.
+  input-ready surface is observed: after the adapter opens the fresh
+  conversation, the watcher retries that surface up to a bounded number of
+  attempts with a short sleep between them, so a transient post-reset
+  settle gap does not stop the run.
 - Before each continuation, the robot checks the durable boundary:
   task-marker completion for the current spec (`--finished-change` overrides
   the recorded current spec) and the active OpenSpec list. Ariadex's
@@ -269,7 +272,8 @@ Behavior:
   operation; Codex and CodeBuddy restart the provider inside the selected
   tmux session (provider-safe terminate/restart, same session name) and
   the watcher waits for the fresh input-ready surface before sending the
-  continuation prompt. A failed restart or missing readiness enters
+  continuation prompt, retrying within a bound while the provider settles.
+  A failed restart or still-missing readiness after the bound enters
   `BLOCKED` with the provider, operation, and recovery reason, and no
   prompt is sent.
 - The robot widget is minimal: fixed middle-right, provider/session
@@ -432,6 +436,10 @@ Common interpretations:
 - permission waiting/deny: the provider asked for file access outside the
   policy; answer it in the provider session, or widen `permission_policy`,
   `permission_actions`, or `permission_allowlist` deliberately.
+- fresh input-ready surface never observed: the fresh conversation needed
+  longer than the bounded wait to settle; confirm the provider session
+  shows its ready surface (OpenCode composer plus idle status), then rerun
+  the watcher — no prompt was sent, so retrying is safe.
 
 ## Developer map
 

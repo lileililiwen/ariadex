@@ -884,7 +884,9 @@ class ContinuationTest(unittest.TestCase):
             "output": READY_OPENCODE,
             "workdir": "/t",
         }
-        watcher = make_watcher(project, driver, debounce_polls=1)
+        watcher = make_watcher(
+            project, driver, debounce_polls=1, fresh_ready_attempts=1
+        )
         real_check = robot_mod.check_boundary
         robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
         captures = [READY_OPENCODE, READY_OPENCODE, "blank screen"]

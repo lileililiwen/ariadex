@@ -239,7 +239,7 @@ class NoAdvanceEvidenceTest(unittest.TestCase):
         project = make_project(self._tmp)
         make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
-        watcher = make_watcher(project, driver)
+        watcher = make_watcher(project, driver, fresh_ready_attempts=1)
         watcher.initial_sent = True
         with (
             clean_git(),

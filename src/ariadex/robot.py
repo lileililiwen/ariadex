@@ -298,6 +298,8 @@ class RobotConfig:
     debounce_polls: int = 3
     poll_interval_s: float = 5.0
     max_polls: int = 0  # 0 means unbounded; widgets quit explicitly
+    fresh_ready_attempts: int = 12
+    fresh_ready_interval_s: float = 2.0
     spec_dir: str = "openspec/changes"
     handoff_file: str = "HANDOFF.md"
     finished_change: str = ""
@@ -330,6 +332,10 @@ def validate_config(config: RobotConfig) -> RobotConfig:
         raise RobotError("poll interval must be positive")
     if config.max_polls < 0:
         raise RobotError("max polls must not be negative")
+    if config.fresh_ready_attempts < 1:
+        raise RobotError("fresh-ready attempts must be at least 1")
+    if config.fresh_ready_interval_s < 0:
+        raise RobotError("fresh-ready interval must not be negative")
     return config
 
 
@@ -808,6 +814,11 @@ class RobotWatcher:
         self.block_reason = ""
         self._paused = False
         self._quit = False
+        #: Attempts used by the latest `_await_ready` fresh-surface wait.
+        self.last_fresh_ready_attempts = 0
+        #: Abort reason of the latest `_await_ready` wait (`""`, `"paused"`,
+        #: or `"stopped"`); empty unless the wait was operator-aborted.
+        self._fresh_ready_aborted = ""
         self._events: list[dict] = []
         self._event_seq = 0
         self._recovery_logged = False
@@ -1714,11 +1725,18 @@ class RobotWatcher:
             )
             return self.phase
         ready = self._await_ready()
+        if ready is None:
+            return self._abort_fresh_wait(next_target, list(check.active))
         if not ready:
             self.phase = BLOCKED
             self.block_reason = (
                 "new conversation never reported an input-ready surface; "
                 "no prompt was sent"
+            )
+            self._record(
+                "readiness",
+                "fresh input-ready surface not observed after "
+                f"{self.last_fresh_ready_attempts} attempt(s); no prompt sent",
             )
             self._record("error", self.block_reason)
             self._diag(
@@ -1736,6 +1754,11 @@ class RobotWatcher:
                 "input-ready surface, then resume watching",
             )
             return self.phase
+        self._record(
+            "readiness",
+            "fresh input-ready surface observed after "
+            f"{self.last_fresh_ready_attempts} attempt(s)",
+        )
         self._send(self.config.continuation_prompt)
         self.prompts_sent += 1
         self.stable_polls = 0
@@ -1876,11 +1899,18 @@ class RobotWatcher:
             return self.phase
         self._record("readiness", "waiting for the fresh input-ready surface")
         ready = self._await_ready()
+        if ready is None:
+            return self._abort_fresh_wait(target, list(check.active))
         if not ready:
             self.phase = BLOCKED
             self.block_reason = (
                 "new conversation never reported an input-ready surface; "
                 "no prompt was sent"
+            )
+            self._record(
+                "readiness",
+                "fresh input-ready surface not observed after "
+                f"{self.last_fresh_ready_attempts} attempt(s); no prompt sent",
             )
             self._record("error", self.block_reason)
             self._diag(
@@ -1899,6 +1929,11 @@ class RobotWatcher:
                 "input-ready surface, then resume watching",
             )
             return self.phase
+        self._record(
+            "readiness",
+            "fresh input-ready surface observed after "
+            f"{self.last_fresh_ready_attempts} attempt(s)",
+        )
         self._send(self.config.confirmation_prompt)
         self.prompts_sent += 1
         self.confirmations_sent += 1
@@ -1928,11 +1963,87 @@ class RobotWatcher:
         self.boundary_error_category = ""
         return self.phase
 
-    def _await_ready(self) -> bool:
-        """Bounded wait for the new input surface (no prompt until ready)."""
-        bound = max(self.config.debounce_polls, 1)
+    def _abort_fresh_wait(self, target: str, active: list[str]) -> str:
+        """Handle an operator-aborted fresh-ready wait without prompting.
+
+        A `PAUSE` abort parks the watcher in PAUSED so Play resumes it and
+        the still-open boundary refires on the next stable surface;
+        quit/shutdown parks it BLOCKED with the exact reason so the run
+        loop can stop. Never sends provider input.
+        """
+        if self._fresh_ready_aborted == "paused":
+            self.phase = PAUSED
+            self.stable_polls = 0
+            self._record(
+                "pause",
+                "daemon mode PAUSE observed during fresh-ready wait; "
+                "no prompt was sent",
+            )
+            self._diag(
+                "pause",
+                "fresh-ready wait paused",
+                result="paused",
+                message="daemon mode PAUSE observed during fresh-ready wait; "
+                "no prompt was sent",
+                current_spec=target,
+                active_queue=tuple(active),
+                decision="paused",
+                operation="new-conversation",
+                next_action="resume watching to retry the fresh conversation",
+            )
+            return self.phase
+        self.phase = BLOCKED
+        self.block_reason = (
+            "fresh-ready wait interrupted by shutdown; no prompt was sent"
+        )
+        self._record("error", self.block_reason)
+        self._diag(
+            "shutdown",
+            "fresh-ready wait interrupted",
+            result="blocked",
+            message=self.block_reason,
+            current_spec=target,
+            active_queue=tuple(active),
+            decision="blocked",
+            blocker=self.block_reason,
+            operation="new-conversation",
+            next_action="resolve the shutdown, then resume watching",
+        )
+        return self.phase
+
+    def _await_ready(
+        self, sleep: Callable[[float], None] | None = None
+    ) -> bool | None:
+        """Bounded wait for the new input surface (no prompt until ready).
+
+        Polls up to `fresh_ready_attempts` times with
+        `fresh_ready_interval_s` between attempts so a transient
+        post-`new_conversation` settle gap does not block the recovery.
+        Still requires `debounce_polls` consecutive ready observations
+        before reporting ready. Returns True when ready, False when the
+        bound is exhausted, and None when quit, managed shutdown, or
+        observed `PAUSE` aborts the wait (`_fresh_ready_aborted` names
+        the abort as `"paused"` or `"stopped"`). The attempt count of
+        the latest wait is kept on `last_fresh_ready_attempts` for
+        activity records.
+        """
+        do_sleep = sleep if sleep is not None else time.sleep
+        bound = max(self.config.fresh_ready_attempts, 1)
+        needed = max(self.config.debounce_polls, 1)
         stable = 0
-        for _ in range(bound):
+        self.last_fresh_ready_attempts = 0
+        self._fresh_ready_aborted = ""
+        for attempt in range(1, bound + 1):
+            if self._quit or (
+                self.shutdown_requested is not None
+                and self.shutdown_requested()
+            ):
+                self._fresh_ready_aborted = "stopped"
+                return None
+            if self.mode_requested is not None and self.mode_requested() == "PAUSE":
+                self._fresh_ready_aborted = "paused"
+                return None
+            self.last_fresh_ready_attempts = attempt
             capture = self._capture()
             provider_state = self.adapter.provider_state()
             if self.adapter.provider_state_required:
@@ -1948,10 +2059,12 @@ class RobotWatcher:
                 )
             if ready:
                 stable += 1
-                if stable >= self.config.debounce_polls:
+                if stable >= needed:
                     return True
             else:
                 stable = 0
+            if attempt < bound:
+                do_sleep(self.config.fresh_ready_interval_s)
         return False
 
     def run(

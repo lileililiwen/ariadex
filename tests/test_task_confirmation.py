@@ -337,7 +337,7 @@ class PromptSelectionTest(unittest.TestCase):
         make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
         driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
-        watcher = make_watcher(project, driver)
+        watcher = make_watcher(project, driver, fresh_ready_attempts=1)
         with clean_git(self):
             watcher.poll()  # initial prompt
             with unittest.mock.patch.object(
