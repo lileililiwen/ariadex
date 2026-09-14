@@ -6,12 +6,13 @@ import contextlib
 import dataclasses
 import json
 import os
-import signal
 import tempfile
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+import psutil
 
 RUNTIME_REL_PATH = Path(".ariadex") / "provider.json"
 RECORD_VERSION = 1
@@ -47,15 +48,15 @@ def write_record(
         dir=str(path.parent), prefix=".provider.", suffix=".tmp"
     )
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with open(fd, "w", encoding="utf-8", closefd=True) as handle:
             json.dump(record.to_dict(), handle, indent=2, sort_keys=True)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        Path(temporary).replace(path)
     except BaseException:
         with contextlib.suppress(OSError):
-            os.unlink(temporary)
+            Path(temporary).unlink(missing_ok=True)
         raise
     with contextlib.suppress(OSError):
         path.chmod(0o600)
@@ -88,29 +89,30 @@ def clear_record(project_dir: Path) -> None:
 
 
 def process_identity(pid: int) -> tuple[int, int]:
-    """Return PID and Linux process start ticks, or raise when unavailable."""
+    """Return PID and portable process creation identity."""
     if pid <= 0:
         raise OSError("invalid provider pid")
-    stat_path = Path("/proc") / str(pid) / "stat"
-    fields = stat_path.read_text(encoding="utf-8").split()
-    return pid, int(fields[21])
+    process = psutil.Process(pid)
+    return pid, int(process.create_time() * 1000)
 
 
 def find_process(port: int, project_dir: Path) -> tuple[int, int] | None:
     """Find an OpenCode process launched for this project and port."""
     expected = str(project_dir.resolve())
-    for proc_dir in Path("/proc").glob("[0-9]*"):
+    for process in psutil.process_iter(["pid", "name", "cmdline", "cwd"]):
         try:
-            pid = int(proc_dir.name)
-            args = proc_dir.joinpath("cmdline").read_bytes().split(b"\0")
-            command = [arg.decode("utf-8", "replace") for arg in args if arg]
-            if "opencode" not in Path(command[0]).name or str(port) not in command:
+            command = process.info.get("cmdline") or []
+            name = process.info.get("name") or ""
+            if "opencode" not in Path(name).name and not any(
+                "opencode" in Path(arg).name for arg in command
+            ):
                 continue
-            cwd = os.readlink(proc_dir / "cwd")
-            if cwd != expected:
+            if str(port) not in command:
                 continue
-            return process_identity(pid)
-        except (OSError, ValueError, IndexError):
+            if process.info.get("cwd") != expected:
+                continue
+            return process_identity(process.pid)
+        except (OSError, ValueError, psutil.Error):
             continue
     return None
 
@@ -125,24 +127,10 @@ def endpoint_is_responsive(endpoint: str, timeout: float = 0.75) -> bool:
 
 def _descendants(pid: int) -> set[int]:
     """Snapshot descendants before terminating an owned provider."""
-    pending = [pid]
-    seen: set[int] = set()
-    while pending:
-        current = pending.pop()
-        if current in seen or current <= 0:
-            continue
-        seen.add(current)
-        try:
-            raw = Path(f"/proc/{current}/task/{current}/children").read_text(
-                encoding="ascii"
-            )
-        except (OSError, UnicodeDecodeError):
-            continue
-        for value in raw.split():
-            with contextlib.suppress(ValueError):
-                pending.append(int(value))
-    seen.discard(pid)
-    return seen
+    try:
+        return {child.pid for child in psutil.Process(pid).children(recursive=True)}
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return set()
 
 
 def is_reusable(project_dir: Path, record: ProviderRuntimeRecord | None) -> bool:
@@ -169,28 +157,23 @@ def terminate_owned(
         return False
     descendants = _descendants(record.pid)
     try:
+        process = psutil.Process(record.pid)
         if process_identity(record.pid) != (record.pid, record.process_start_ticks):
             return False
-        os.kill(record.pid, signal.SIGTERM)
-    except ProcessLookupError:
+        process.terminate()
+    except psutil.NoSuchProcess:
         clear_record(project_dir)
         return True
     except (OSError, ValueError):
         return False
     deadline = time.monotonic() + wait_seconds
-    while time.monotonic() < deadline:
-        with contextlib.suppress(OSError, ValueError):
-            process_identity(record.pid)
-            time.sleep(0.05)
-            continue
-        break
-    remaining = {
-        pid for pid in descendants if Path(f"/proc/{pid}").exists()
-    }
-    if Path(f"/proc/{record.pid}").exists():
-        remaining.add(record.pid)
-    for pid in remaining:
-        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-            os.kill(pid, signal.SIGKILL)
+    while time.monotonic() < deadline and psutil.pid_exists(record.pid):
+        time.sleep(0.05)
+    remaining = [psutil.Process(pid) for pid in descendants if psutil.pid_exists(pid)]
+    if psutil.pid_exists(record.pid):
+        remaining.append(psutil.Process(record.pid))
+    for child in remaining:
+        with contextlib.suppress(psutil.Error):
+            child.kill()
     clear_record(project_dir)
     return True

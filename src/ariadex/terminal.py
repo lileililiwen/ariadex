@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import abc
 import contextlib
-import os
 import shutil
-import signal
 import subprocess
 import time
 from pathlib import Path
+
+import psutil
 
 
 def session_name_for(ariadex_session_id: str) -> str:
@@ -219,41 +219,26 @@ class TmuxDriver(TerminalDriver):
     @staticmethod
     def _descendants(pid: int) -> set[int]:
         """Return a bounded snapshot of descendants from procfs."""
-        pending = [pid]
-        seen: set[int] = set()
-        while pending:
-            current = pending.pop()
-            if current in seen or current <= 0:
-                continue
-            seen.add(current)
-            try:
-                children = Path(f"/proc/{current}/task/{current}/children").read_text(
-                    encoding="ascii"
-                )
-            except (OSError, UnicodeDecodeError):
-                continue
-            for value in children.split():
-                with contextlib.suppress(ValueError):
-                    pending.append(int(value))
-        seen.discard(pid)
-        return seen
+        try:
+            return {child.pid for child in psutil.Process(pid).children(recursive=True)}
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return set()
 
     @staticmethod
     def _terminate_pids(pids: set[int], wait_seconds: float = 2.0) -> None:
         """Terminate only the already-identified provider process tree."""
-        for pid in sorted(pids, reverse=True):
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                os.kill(pid, signal.SIGTERM)
+        processes = [psutil.Process(pid) for pid in pids if psutil.pid_exists(pid)]
+        for process in processes:
+            with contextlib.suppress(psutil.Error):
+                process.terminate()
         deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline and pids:
-            pids = {
-                pid for pid in pids if Path(f"/proc/{pid}").exists()
-            }
+            pids = {pid for pid in pids if psutil.pid_exists(pid)}
             if pids:
                 time.sleep(0.05)
-        for pid in sorted(pids, reverse=True):
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                os.kill(pid, signal.SIGKILL)
+        for pid in pids:
+            with contextlib.suppress(psutil.Error):
+                psutil.Process(pid).kill()
 
     def terminate(self, name: str) -> None:
         if not self.session_alive(name):

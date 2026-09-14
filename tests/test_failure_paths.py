@@ -486,7 +486,7 @@ class ConcurrencyFailureTest(unittest.TestCase):
         owner = concurrency_mod.LockInfo(
             pid=999999999, heartbeat_at=concurrency_mod.now_iso()
         )
-        self.assertTrue(concurrency_mod.is_live(owner))
+        self.assertFalse(concurrency_mod.is_live(owner))
 
     def test_heartbeat_age_unparsable(self):
         owner = concurrency_mod.LockInfo(pid=1, heartbeat_at="not-a-time")

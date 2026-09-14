@@ -25,6 +25,8 @@ import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import psutil
+
 LOCK_REL_PATH = Path(".ariadex") / "runner.lock"
 CYCLE_REL_PATH = Path(".ariadex") / "cycle.json"
 CANCEL_REL_PATH = Path(".ariadex") / "cancel.json"
@@ -132,15 +134,15 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
         dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
     )
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with open(fd, "w", encoding="utf-8", closefd=True) as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp_name, path)
+        Path(tmp_name).replace(path)
     except BaseException:
         with contextlib.suppress(OSError):
-            os.unlink(tmp_name)
+            Path(tmp_name).unlink(missing_ok=True)
         raise
 
 
@@ -179,24 +181,12 @@ def read_lock(project_dir: Path) -> LockInfo | None:
 
 
 def pid_alive(pid: int) -> bool:
-    # On Linux, inspectability is stronger than kill(2)'s permission result.
-    # Sandboxed supervisors can return EPERM for a PID that is not visible in
-    # this process namespace; treating that as live strands stale ownership.
-    if (
-        os.name == "posix"
-        and Path("/proc").is_dir()
-        and not (Path("/proc") / str(pid)).exists()
-    ):
+    if pid <= 0 or not psutil.pid_exists(pid):
         return False
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+        return psutil.Process(pid).is_running()
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
         return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
 
 
 def heartbeat_age_s(owner: LockInfo, now: datetime | None = None) -> float | None:
@@ -208,18 +198,8 @@ def heartbeat_age_s(owner: LockInfo, now: datetime | None = None) -> float | Non
 
 
 def is_live(owner: LockInfo, now: datetime | None = None) -> bool:
-    """A lock is live when its owner PID runs or its heartbeat is fresh.
-
-    Stale requires both: PID dead AND heartbeat expired (or unreadable only
-    when the PID is also dead). A live PID is never treated as stale, so a
-    live owner is never deleted.
-    """
-    if pid_alive(owner.pid):
-        return True
-    age = heartbeat_age_s(owner, now)
-    if age is None:
-        return False
-    return age < STALE_AFTER_S
+    """A lock is live only while its recorded owner process is live."""
+    return bool(pid_alive(owner.pid))
 
 
 def describe_owner(owner: LockInfo) -> str:

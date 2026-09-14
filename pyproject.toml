@@ -22,7 +22,7 @@ classifiers = [
   "Topic :: Software Development",
   "Typing :: Typed",
 ]
-dependencies = ["PyYAML>=6"]
+dependencies = ["PyYAML>=6", "psutil>=7"]
 
 [project.optional-dependencies]
 # Pinned quality-gate toolchain (see [tool.ruff], [tool.mypy],

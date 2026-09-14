@@ -55,33 +55,17 @@ remain local control layers and will never call a provider LLM API itself.
 
 ### Host memory protection
 
-OpenCode can be terminated by the host's `earlyoom` service when both RAM and
-swap are low. The repository includes one idempotent setup script that adds an
-8 GiB swap file and makes earlyoom prefer browser processes:
-
-```bash
-./scripts/setup-memory-protection.sh
-```
-
-The script uses `sudo`, preserves existing swap, persists `/swapfile-ariadex`
-in `/etc/fstab`, enables earlyoom at boot, and never uses `swapoff -a` or
-exempts OpenCode from emergency protection. Verify after setup with:
-
-```bash
-swapon --show
-systemctl is-enabled earlyoom
-systemctl is-active earlyoom
-```
-
-This does not assume that `.opencodeignore`, `NODE_OPTIONS`, or a global
-`dotnet` parallelism limit are supported by every provider version. Configure
-those separately only after verifying them against the installed provider.
+Ariadex does not install or configure host swap, earlyoom, or other
+OS-specific memory services. Configure those independently using the host's
+documented tools if needed. Provider and widget process ownership is handled
+through the portable Python `psutil` SDK, with no `/proc` or signal-shell
+implementation in Ariadex.
 
 ## Installation
 
 Prerequisites (never bundled, never silently downloaded as packages):
 
-- Python 3.11+ and PyYAML (installed automatically as a dependency)
+- Python 3.11+, PyYAML, and psutil (installed automatically as dependencies)
 - A Coding CLI: `opencode` or `codex` on PATH
 - tmux: installed automatically on first `run`/`attach` via the system
   package manager, or install it yourself (see Requirements above).

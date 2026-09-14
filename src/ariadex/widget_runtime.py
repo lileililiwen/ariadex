@@ -7,13 +7,14 @@ import dataclasses
 import json
 import os
 import secrets
-import signal
 import subprocess
 import sys
 import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
+
+import psutil
 
 WIDGET_REL_PATH = Path(".ariadex") / "widget.json"
 
@@ -81,28 +82,13 @@ def clear_record(project_dir: Path) -> None:
         record_path(project_dir).unlink()
 
 
-def _proc_start_ticks(pid: int) -> int:
-    stat_path = Path("/proc") / str(pid) / "stat"
-    fields = stat_path.read_text(encoding="utf-8").split()
-    return int(fields[21])
-
-
-def _proc_token(pid: int) -> str:
-    raw = (Path("/proc") / str(pid) / "environ").read_bytes()
-    for entry in raw.split(b"\0"):
-        if entry.startswith(b"ARIADEX_WIDGET_TOKEN="):
-            return entry.split(b"=", 1)[1].decode("utf-8", "replace")
-    return ""
-
-
 def process_identity(pid: int) -> tuple[int, int, str]:
-    """Return PID, kernel start ticks, and Ariadex ownership token."""
+    """Return PID, portable creation identity, and ownership token."""
     if pid <= 0:
         raise OSError("invalid widget pid")
-    if os.name == "posix" and Path("/proc").is_dir():
-        return pid, _proc_start_ticks(pid), _proc_token(pid)
-    os.kill(pid, 0)
-    return pid, 0, ""
+    process = psutil.Process(pid)
+    token = process.environ().get("ARIADEX_WIDGET_TOKEN", "")
+    return pid, int(process.create_time() * 1000), token
 
 
 def is_healthy(project_dir: Path, record: WidgetRecord | None) -> bool:
@@ -133,21 +119,22 @@ def terminate_owned(
             record.token,
         ):
             return False
-        os.kill(record.pid, signal.SIGTERM)
-    except ProcessLookupError:
+        psutil.Process(record.pid).terminate()
+    except psutil.NoSuchProcess:
         clear_record(project_dir)
         return True
     except (OSError, ValueError):
         return False
     deadline = time.monotonic() + wait_seconds
-    while time.monotonic() < deadline:
-        with contextlib.suppress(OSError, ValueError):
-            process_identity(record.pid)
-            time.sleep(0.05)
-            continue
+    while time.monotonic() < deadline and psutil.pid_exists(record.pid):
+        time.sleep(0.05)
+    if not psutil.pid_exists(record.pid):
         clear_record(project_dir)
         return True
-    return False
+    with contextlib.suppress(psutil.Error):
+        psutil.Process(record.pid).kill()
+    clear_record(project_dir)
+    return True
 
 
 def _default_spawn(project_dir: Path, token: str):

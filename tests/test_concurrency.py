@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import socket
 import tempfile
 import unittest
 from contextlib import chdir, redirect_stderr, redirect_stdout
@@ -134,6 +135,24 @@ class OwnershipTest(unittest.TestCase):
         write_stale_lock(self.root)
         diag = concurrency.diagnose(self.root)
         self.assertEqual(diag["state"], "stale")
+
+    def test_dead_local_pid_is_stale_even_with_fresh_heartbeat(self):
+        path = self.root / concurrency.LOCK_REL_PATH
+        stamp = concurrency.now_iso()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "pid": 999999,
+                    "hostname": socket.gethostname(),
+                    "session_id": "dead-local",
+                    "started_at": stamp,
+                    "heartbeat_at": stamp,
+                }
+            )
+        )
+        self.assertEqual(concurrency.diagnose(self.root)["state"], "stale")
 
 
 class GuardTest(unittest.TestCase):

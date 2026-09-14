@@ -1,0 +1,5 @@
+- [x] Fix local dead-PID classification.
+- [x] Add a fresh-heartbeat regression test.
+- [x] Add proposal, design, and requirement documentation.
+- [x] Run focused verification.
+- [x] Archive with canonical spec promotion.
