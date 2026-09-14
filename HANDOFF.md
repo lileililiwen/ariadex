@@ -100,6 +100,15 @@ that promotion has been skipped or failed.
   during archive without `--skip-specs`.
 
 - Implemented, verified, and archived:
+  `2026-09-14-widget-click-feedback-and-drag-gesture`. Both the single
+  widget and multi-project hub now give immediate pressed and short success
+  feedback for clicks. Titlebars advertise a `hand2` drag gesture, while
+  buttons remain click-only and cannot move the window. Hub collapsed height
+  is 320px so the complete action row remains visible. Verified with 143
+  companion/hub tests, Ruff, diff check, and 65 strict canonical specs;
+  archive promoted the canonical spec without `--skip-specs`.
+
+- Implemented, verified, and archived:
   `2026-09-14-dead-owner-lease-recovery`. Scheduler, provider, terminal, and
   widget process ownership now use portable psutil identity/liveness and
   termination APIs. A dead local PID is stale immediately even with a fresh
