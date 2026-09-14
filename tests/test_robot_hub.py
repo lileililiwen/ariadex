@@ -385,6 +385,22 @@ class RobotHubWindowTest(unittest.TestCase):
         self.assertFalse(root.destroyed)
         self.assertEqual(len(window.tabs), 2)
 
+    def test_quit_middle_tab_keeps_buttons_consistent(self):
+        window, _root, watchers = self._window()
+        window.active = 1
+        window._on_quit_active()
+        self.assertIn("quit", watchers[1].calls)
+        self.assertEqual(len(window.tabs), 2)
+        self.assertEqual(len(window.tab_buttons), 2)
+        self.assertEqual(len(window.models), 2)
+        self.assertEqual(len(window.queue_texts), 2)
+        window.tab_buttons[1].invoke()
+        self.assertEqual(window.active, 1)
+        self.assertIn("/home/u/c", window.identity_label.options.get("text", ""))
+        window._on_toggle()
+        self.assertTrue(window.expanded)
+        self.assertIn("prompts", window.stats_label.options.get("text", ""))
+
     def test_quit_last_tab_destroys_hub(self):
         window, root, watchers = self._window((("a", "opencode", "s1", "working"),))
         adapter = FakeHotkeyAdapter()

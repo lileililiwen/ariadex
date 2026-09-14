@@ -2561,27 +2561,15 @@ class RobotHubWindow:
         """Detach the visible tab; the hub stays alive while tabs remain."""
         if not self.tabs:
             return
-        tab = self.tabs.pop(self.active)
-        button = self.tab_buttons.pop(self.active)
+        tab = self.tabs[self.active]
         with contextlib.suppress(Exception):
             tab.on_quit()
-        with contextlib.suppress(Exception):
-            forget = getattr(button, "pack_forget", None)
-            if callable(forget):
-                forget()
-            else:
-                destroy = getattr(button, "destroy", None)
-                if callable(destroy):
-                    destroy()
-        self.models.pop(self.active)
+        self.remove_project(tab.project)
         if not self.tabs:
             if self.hotkey_adapter is not None:
-                self.hotkey_adapter.unregister()
+                with contextlib.suppress(Exception):
+                    self.hotkey_adapter.unregister()
             self._cancel_poll()
-            self.root.destroy()  # type: ignore[attr-defined]
-            return
-        self.active = min(self.active, len(self.tabs) - 1)
-        self._refresh()
 
     def _on_quit_all(self) -> None:
         """Quit every watcher in tab order; sessions stay attachable."""
@@ -2674,6 +2662,9 @@ class RobotHubWindow:
     def _render(self) -> None:
         if not self.tabs:
             return
+        # Clamp first: a stale active index must render the nearest tab,
+        # never kill the poll loop with IndexError.
+        self.active = min(self.active, len(self.tabs) - 1)
         hub = self._hub_model()
         with contextlib.suppress(Exception):
             self.root.title(str(hub["title"]))  # type: ignore[attr-defined]
