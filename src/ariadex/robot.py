@@ -2004,7 +2004,7 @@ class RobotWatcher:
                     result=outcome,
                     message=detail,
                     decision=outcome,
-                    blocker=detail,
+                    blocker="" if outcome == "done" else detail,
                     operation="shutdown",
                     next_action="stop the managed workflow"
                     if outcome == "done"

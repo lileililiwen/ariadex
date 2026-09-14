@@ -93,6 +93,13 @@ class SelectionTest(unittest.TestCase):
         kind, _ = select_next_action(doc, inspect_repository(self.root, cfg.spec_dir))
         self.assertEqual(kind, "stop")
 
+    def test_stale_current_spec_with_drained_queue_is_idle(self):
+        cfg = make_project(self.root, specs=())
+        doc = handoff.empty_handoff()
+        doc.current_spec = "ghost"
+        kind, _ = select_next_action(doc, inspect_repository(self.root, cfg.spec_dir))
+        self.assertEqual(kind, "idle")
+
     def test_nothing_to_do_is_idle(self):
         cfg = make_project(self.root, specs=())
         kind, _ = select_next_action(

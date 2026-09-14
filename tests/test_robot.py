@@ -679,6 +679,17 @@ class ContinuationTest(unittest.TestCase):
         self.assertEqual(report.outcome, "done")
         self.assertEqual(driver.sent_inputs("agent"), [])
         self.assertEqual(report.prompts_sent, 0)
+        from ariadex import diagnostics as diagnostics_mod
+
+        recent, _ = diagnostics_mod.read_diagnostics(project, limit=50)
+        done_shutdown = [
+            entry
+            for entry in recent
+            if entry.get("decision") == "done"
+            and entry.get("operation") == "shutdown"
+        ]
+        self.assertTrue(done_shutdown)
+        self.assertEqual(done_shutdown[-1].get("blocker", ""), "")
 
     def test_unfinished_work_blocks_with_reason(self) -> None:
         project = make_project(self._tmp)

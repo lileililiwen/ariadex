@@ -135,6 +135,11 @@ def select_next_action(
             ACTION_STOP,
             f"spec `{name}` dependency metadata invalid: {repo.graph_errors[name]}",
         )
+    if not repo.specs:
+        # The queue is drained: a stale explicit target naming an archived
+        # change must not hold the daemon status on blocked. Open issues
+        # and graph errors above still precede.
+        return ACTION_IDLE, "no active changes; queue drained"
     graph = (
         dict(repo.dependencies)
         if repo.dependencies
