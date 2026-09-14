@@ -467,7 +467,10 @@ The normal lifecycle is:
    fields are stored only under `.ariadex/`.
    Plain `init` refuses when the project is already initialized;
    `init --force` confirms, then removes only `.ariadex/` and reinitializes.
-2. `ariadex start` runs the managed provider workflow: it prepares
+2. `ariadex start` first reads the authoritative OpenSpec queue. If no active
+   changes exist, it reports `no active OpenSpec changes; provider not started`
+   and exits without creating a daemon, tmux session, widget, or provider.
+   Otherwise it runs the managed provider workflow: it prepares
    prerequisites (tmux is installed automatically when a supported package
    manager exists), starts one resident daemon, launches the configured
    provider in a private project-scoped tmux session through its declared
@@ -487,13 +490,14 @@ The normal lifecycle is:
 4. A verified cycle can advance the current spec, resolve an unresolved item,
    or start the next eligible spec. A failed or uncertain cycle is recorded
    with its reason and is never silently discarded.
-5. The managed workflow stops the provider session, widget, and daemon when
-   the queue is empty; when the provider exits normally it reconciles the
-   stop without claiming completion. UI loss is reported separately from
-   backend loss, and stale owned backend cleanup preserves handoff, task, and
-   evidence files. The daemon also stops when a blocker
+5. The watcher stops supervising when the queue is empty, but the provider
+   session, widget, and daemon remain available until the user quits or sends
+   Ctrl+C. A provider exit is reported without Ariadex killing the widget or
+   daemon. UI loss is reported separately from backend loss, and stale owned
+   backend cleanup preserves handoff, task, and evidence files. The daemon also stops when a blocker
    needs human attention, the cycle limit is reached, or the operator
-   changes the mode.
+   changes the mode. The multi-project hub remains draggable and exposes Copy
+   log for the bounded activity log of the active tab.
 
 Quota and rate-limit responses are recoverable waiting states. Ariadex sends
 no further prompt while the provider reports the limit, giving the operator

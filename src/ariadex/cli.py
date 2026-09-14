@@ -27,6 +27,7 @@ from . import handoff as handoff_mod
 from . import live_evidence as live_evidence_mod
 from . import logging as logging_mod
 from . import observability as observability_mod
+from . import openspec_evidence as openspec_evidence_mod
 from . import operator as operator_mod
 from . import preflight as preflight_mod
 from . import prerequisites as prerequisites_mod
@@ -1947,10 +1948,15 @@ def _shutdown_managed_session(
     widget_proc,
     reason: str,
 ) -> None:
-    """Best-effort managed teardown: session, widget, then daemon.
+    """Best-effort teardown for explicit shutdown or startup failure.
 
-    Cleanup failures are reported, never hidden; durable work is preserved.
+    Normal watcher completion and provider exit are observational states: the
+    editor, widget, and daemon remain available until the operator quits or
+    interrupts the provider. Cleanup failures are reported, never hidden;
+    durable work is preserved.
     """
+    if reason in ("complete", "exit"):
+        return
     if adapter is not None:
         try:
             adapter.terminate()
@@ -1961,6 +1967,13 @@ def _shutdown_managed_session(
             )
     _stop_widget_process(widget_proc)
     widget_runtime_mod.clear_record(project_dir)
+    daemon_record = daemon_mod.read_record(project_dir)
+    if not daemon_mod.daemon_alive(daemon_record):
+        # The daemon may have already completed its own shutdown and removed
+        # the socket. That is a clean terminal state, not a teardown error.
+        with contextlib.suppress(OSError):
+            daemon_mod.socket_path(project_dir).unlink()
+        return
     try:
         response = daemon_mod.send_request(project_dir, "stop")
     except daemon_mod.DaemonError as exc:
@@ -2127,7 +2140,10 @@ def run_managed_start(
         )
         return EXIT_OK
     if finished is not None and finished.outcome == "done":
-        print("complete: no active specs remain; stopping managed workflow")
+        print(
+            "complete: no active specs remain; provider, widget, and daemon "
+            "remain running (quit or Ctrl+C to exit)"
+        )
         _shutdown_managed_session(
             project_dir, adapter, session, widget_proc, "complete"
         )
@@ -2137,7 +2153,10 @@ def run_managed_start(
     except Exception:
         alive = False
     if not alive:
-        print("provider session ended; managed workflow stopped")
+        print(
+            "provider session ended; widget and daemon remain running "
+            "(quit or Ctrl+C to exit)"
+        )
         _shutdown_managed_session(project_dir, adapter, session, widget_proc, "exit")
         return EXIT_OK
     if attach_rc != 0 and not terminal:
@@ -2190,6 +2209,16 @@ def cmd_start(
     if resolved is None:
         return EXIT_ERROR
     provider, first, continuation, confirmation = resolved
+    try:
+        active_changes = openspec_evidence_mod.query_changes(project_dir)
+    except openspec_evidence_mod.NotOpenSpecRoot:
+        active_changes = None
+    except openspec_evidence_mod.EvidenceBlocked as exc:
+        print(f"error: OpenSpec queue unavailable: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if active_changes is not None and not active_changes.order:
+        print("no active OpenSpec changes; provider not started")
+        return EXIT_OK
     try:
         (project_dir / daemon_mod.MANAGED_RUNTIME_REL_PATH).touch(exist_ok=True)
     except OSError as exc:

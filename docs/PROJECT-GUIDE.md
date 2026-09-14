@@ -73,7 +73,9 @@ and creates no second daemon, provider session, supervisor, or prompt.
 The managed startup sequence is:
 
 1. Refuse when initialization is missing; resolve config and one-run
-   overrides.
+   overrides. Query the authoritative OpenSpec queue before creating runtime
+   processes; an empty queue reports `no active OpenSpec changes; provider not
+   started` and exits cleanly.
 2. Run the prerequisite coordinator (runtime, provider CLI, tmux with
    automatic preparation, desktop/Tkinter widget readiness). Failures
    report the affected prerequisite plus manual recovery and start nothing.
@@ -81,9 +83,11 @@ The managed startup sequence is:
    stale ownership before spawning.
 4. Start a background process and create `.ariadex/daemon.json`.
 5. Open the owner-only Unix control socket `.ariadex/daemon.sock`.
-6. Create the private provider session, open the widget, attach the
-   terminal, and supervise until queue-empty completion, provider exit,
-   or terminal detach.
+6. Create the private provider session, open the movable widget/hub with Copy
+   log, attach the
+   terminal, and supervise until queue-empty completion, provider exit, or
+   terminal detach. Completion stops supervision only; the provider, widget,
+   and daemon remain alive until the user quits or sends Ctrl+C.
 
 OpenCode has two related lifecycle objects: the tmux UI and the local API
 backend used for provider state. Ariadex writes `.ariadex/provider.json` only
@@ -107,12 +111,14 @@ authority. Its `.ariadex/managed-runtime` marker prevents a second scheduler
 from racing the watcher. Standalone lower-level scheduler paths retain their
 existing behavior.
 
-The managed workflow exits cleanly after the widget close button or a terminal
-stop request. Stop is graceful: an already-running bounded cycle is allowed to
-reach its safe cancellation boundary, then Ariadex terminates the managed
-provider UI and owned backend, waits within a bounded period, and stops the
-widget and daemon together. Cleanup is idempotent and durable work is
-preserved. A provider exit is not completion evidence.
+The managed workflow exits cleanly after an explicit quit or Ctrl+C. Stop is
+graceful: an already-running bounded cycle is allowed to reach its safe
+cancellation boundary, then Ariadex terminates the managed provider UI and
+owned backend, waits within a bounded period, and stops the widget and daemon
+together. Queue-empty completion and provider exit do not perform that
+teardown; the editor, widget, and daemon remain available. Cleanup is
+idempotent and durable work is preserved. A provider exit is not completion
+evidence.
 
 The normal lifecycle is intentionally small:
 

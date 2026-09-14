@@ -238,6 +238,21 @@ class OverrideResolutionTest(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertEqual(seen["provider"], "codex")
 
+    def test_start_does_not_launch_provider_for_empty_openspec_queue(self):
+        with mock.patch.object(
+            cli.openspec_evidence_mod,
+            "query_changes",
+            return_value=SimpleNamespace(order=[]),
+        ), mock.patch.object(cli, "run_managed_start") as run_start:
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = cli.cmd_start(self.root)
+        self.assertEqual(code, cli.EXIT_OK)
+        self.assertIn(
+            "no active OpenSpec changes; provider not started", out.getvalue()
+        )
+        run_start.assert_not_called()
+
 
 class OrderingTest(unittest.TestCase):
     def setUp(self):
@@ -264,9 +279,6 @@ class OrderingTest(unittest.TestCase):
                 "watcher.run",
                 "attach",
                 "watcher.request_quit",
-                # queue-empty completion teardown:
-                "adapter.terminate",
-                "widget.terminate",
             ],
         )
 
@@ -364,7 +376,7 @@ class ReconcileTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         make_project(self.root)
 
-    def test_provider_exit_stops_widget_and_daemon(self):
+    def test_provider_exit_keeps_widget_and_daemon_alive(self):
         harness = Harness(self.root, watcher_outcome="max-polls")
 
         def attach(argv):
@@ -381,8 +393,8 @@ class ReconcileTest(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         self.assertIn("provider session ended", out.getvalue())
-        self.assertIn("adapter.terminate", harness.calls)
-        self.assertIn("widget.terminate", harness.calls)
+        self.assertNotIn("adapter.terminate", harness.calls)
+        self.assertNotIn("widget.terminate", harness.calls)
 
     def test_daemon_stop_request_tears_down_managed_provider(self):
         harness = Harness(self.root, watcher_outcome="stopped")
@@ -404,6 +416,30 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("adapter.terminate", harness.calls)
         self.assertIn("widget.terminate", harness.calls)
+
+    def test_already_stopped_daemon_does_not_report_missing_socket(self):
+        harness = Harness(self.root, watcher_outcome="max-polls")
+        out = io.StringIO()
+        with (
+            redirect_stdout(out),
+            redirect_stderr(io.StringIO()) as err,
+            mock.patch.object(cli.daemon_mod, "read_record", return_value=None),
+            mock.patch.object(
+                cli.daemon_mod,
+                "send_request",
+                side_effect=AssertionError("stopped daemon must not be queried"),
+            ),
+        ):
+            code = harness.run(
+                attach_fn=lambda _argv: (
+                    harness.driver.kill_session(
+                        f"ariadex-{state.read(self.root).session_id}"
+                    )
+                    or 0
+                )
+            )
+        self.assertEqual(code, 0)
+        self.assertNotIn("missing", err.getvalue().lower())
 
     def test_detach_leaves_workflow_running(self):
         harness = Harness(self.root, watcher_outcome="max-polls")

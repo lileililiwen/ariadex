@@ -2260,8 +2260,9 @@ class RobotHubWindow:
     functions and forwards Pause/Resume/Quit to the visible tab (or to all
     tabs for Pause-all). It never touches tmux, leases, or state files;
     quitting a tab leaves that provider session running and attachable.
-    Switching tabs or expanding the log never sends provider input and
-    never moves the window.
+    Switching tabs or expanding the log never sends provider input. The
+    titlebar remains draggable and the bounded log can be copied while the
+    hub is collapsed or expanded.
     """
 
     def __init__(
@@ -2289,6 +2290,7 @@ class RobotHubWindow:
         ]
         self.queue_specs: list[str] = ["" for _ in self.tabs]
         self._poll_after: str | None = None
+        self._drag_origin: tuple[int, int] | None = None
         #: Called when the last tab leaves (hub server exits itself).
         self.on_empty = on_empty
 
@@ -2312,6 +2314,21 @@ class RobotHubWindow:
             pady=9,
         )
         self.frame.pack(fill="both", expand=True)
+        self.titlebar = tk.Frame(self.frame, background="#20242b")
+        self.titlebar.pack(fill="x")
+        self.title_label = tk.Label(
+            self.titlebar,
+            text="Ariadex Robots",
+            anchor="w",
+            background="#20242b",
+            foreground="#f3f4f6",
+            font=("TkDefaultFont", 10, "bold"),
+        )
+        self.title_label.pack(fill="x")
+        for widget in (self.titlebar, self.title_label):
+            widget.bind("<ButtonPress-1>", self._drag_start)
+            widget.bind("<B1-Motion>", self._drag_move)
+            widget.bind("<ButtonRelease-1>", self._drag_stop)
         self.tab_bar = tk.Frame(self.frame, background="#20242b")
         self.tab_bar.pack(fill="x")
         self.tab_buttons: list[object] = []
@@ -2414,6 +2431,15 @@ class RobotHubWindow:
             command=self._on_toggle,
         )
         self.toggle_button.pack(side="left", expand=True, fill="x")
+        self.copy_log_button = tk.Button(
+            controls,
+            text="Copy log",
+            name="robot-hub-copy-log-button",
+            width=8,
+            takefocus=False,
+            command=self._on_copy_log,
+        )
+        self.copy_log_button.pack(side="left", expand=True, fill="x")
         self.close_button = tk.Button(
             controls,
             text="Close",
@@ -2492,6 +2518,49 @@ class RobotHubWindow:
         """Close the hub window only; daemons, sessions, watchers persist."""
         with contextlib.suppress(Exception):
             self.root.destroy()  # type: ignore[attr-defined]
+
+    def _drag_start(self, event: object) -> None:
+        x = getattr(event, "x_root", 0)
+        y = getattr(event, "y_root", 0)
+        origin_x = self.root.winfo_x()  # type: ignore[attr-defined]
+        origin_y = self.root.winfo_y()  # type: ignore[attr-defined]
+        self._drag_origin = (int(x) - int(origin_x), int(y) - int(origin_y))
+
+    def _drag_move(self, event: object) -> None:
+        if self._drag_origin is None:
+            return
+        x = int(getattr(event, "x_root", 0)) - self._drag_origin[0]
+        y = int(getattr(event, "y_root", 0)) - self._drag_origin[1]
+        height = HUB_EXPANDED_HEIGHT if self.expanded else HUB_COLLAPSED_HEIGHT
+        clamped = clamp_to_screen(self.root, x, y, WIDGET_WIDTH, height)
+        self.root.geometry(f"+{clamped[0]}+{clamped[1]}")  # type: ignore[attr-defined]
+
+    def _drag_stop(self, _event: object) -> None:
+        self._drag_origin = None
+
+    def _hub_log_text(self, model: dict) -> str:
+        activity = model.get("activity", [])
+        lines = [format_robot_activity_line(entry) for entry in activity]
+        if not lines:
+            if model.get("indicator_text") == "UNREACHABLE":
+                detail = str(model.get("failure", "") or "").strip()
+                lines = [f"watcher unreachable{': ' + detail if detail else ''}"]
+            elif model.get("failure"):
+                lines = ["(no activity yet)", f"blocked: {model['failure']}"]
+            else:
+                lines = ["(no activity yet)"]
+        return "\n".join(lines[-ROBOT_LOG_VIEW_LINES:])
+
+    def _on_copy_log(self) -> None:
+        if not self.models:
+            return
+        error = copy_to_clipboard(
+            self.root, self._hub_log_text(self.models[self.active])
+        )
+        if error is None:
+            self.event_label.configure(text="latest  log copied to clipboard")
+        else:
+            self.event_label.configure(text=f"latest  {error}")
 
     def _build_log_panel(self, tk):
         """Create the read-only activity log without touching window focus."""
@@ -2735,17 +2804,7 @@ class RobotHubWindow:
         """Write the read-only log; never raises into the poll loop."""
         if self.log_text is None or not self.expanded:
             return
-        activity = model.get("activity", [])
-        lines = [format_robot_activity_line(entry) for entry in activity]
-        if not lines:
-            if model.get("indicator_text") == "UNREACHABLE":
-                detail = str(model.get("failure", "") or "").strip()
-                lines = [f"watcher unreachable{': ' + detail if detail else ''}"]
-            elif model.get("failure"):
-                lines = ["(no activity yet)", f"blocked: {model['failure']}"]
-            else:
-                lines = ["(no activity yet)"]
-        lines = lines[-ROBOT_LOG_VIEW_LINES:]
+        lines = self._hub_log_text(model).splitlines()
         with contextlib.suppress(Exception):
             self.log_text.configure(state="normal")
         with contextlib.suppress(Exception):

@@ -39,6 +39,9 @@ class FakeTkWidget:
 
     config = configure
 
+    def bind(self, sequence, callback):
+        self.options[f"bind:{sequence}"] = callback
+
     def delete(self, start, end=None):
         self.text = ""
 
@@ -461,6 +464,25 @@ class RobotHubWindowTest(unittest.TestCase):
         self.assertTrue(root.destroyed)
         for watcher in watchers:
             self.assertEqual(watcher.calls, [])
+
+    def test_hub_titlebar_drag_moves_window(self):
+        window, root, _watchers = self._window()
+        window._drag_start(mock.Mock(x_root=150, y_root=250))
+        window._drag_move(mock.Mock(x_root=300, y_root=400))
+        self.assertIn("+", root.options["geometry"])
+        window._drag_stop(mock.Mock())
+
+    def test_hub_copy_log_button_copies_active_log(self):
+        window, _root, _watchers = self._window()
+        window.models[0]["activity"] = [
+            {"category": "provider", "message": "backend is ready"}
+        ]
+        with mock.patch.object(
+            companion_mod, "copy_to_clipboard", return_value=None
+        ) as copy:
+            window.copy_log_button.invoke()
+        copy.assert_called_once()
+        self.assertIn("backend is ready", copy.call_args.args[1])
 
     def test_toggle_expands_without_input(self):
         window, _root, watchers = self._window()

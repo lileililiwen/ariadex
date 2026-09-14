@@ -56,6 +56,19 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-preserve-provider-and-widget-until-explicit-quit`. Normal
+  watcher completion and independent provider exit now leave the editor,
+  widget, and daemon alive; explicit quit/Ctrl+C remains the shutdown path.
+  Verified with 139 focused managed-start, hub, widget, placement, and
+  documentation tests, Ruff, mypy, diff check, and strict OpenSpec validation.
+- Implemented, verified, and archived:
+  `2026-09-14-managed-start-empty-queue-and-hub-controls`. Empty authoritative
+  OpenSpec queues no longer launch a provider; the hub restores bounded
+  titlebar dragging and Copy log; already-stopped daemon teardown is quiet and
+  idempotent. Verified with 139 focused managed-start, hub, widget, placement,
+  and documentation tests, Ruff, mypy, diff check, and strict OpenSpec
+  validation.
+- Implemented, verified, and archived:
   `2026-09-14-provider-session-cleanup-and-reuse`. Project-scoped provider
   ownership metadata and OpenCode UI/backend reconciliation now distinguish
   UI loss from backend loss, reuse a responsive owned backend with attach,
