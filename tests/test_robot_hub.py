@@ -429,7 +429,38 @@ class RobotHubWindowTest(unittest.TestCase):
         coords = geometry.split("+")[1:]
         x, y = int(coords[0]), int(coords[1])
         self.assertLessEqual(x + companion_mod.WIDGET_WIDTH, 1920)
-        self.assertLessEqual(y + companion_mod.WIDGET_COLLAPSED_HEIGHT, 1080)
+        self.assertLessEqual(y + companion_mod.HUB_COLLAPSED_HEIGHT, 1080)
+
+    def test_geometry_uses_hub_heights(self):
+        window, root, _watchers = self._window()
+        self.assertGreater(
+            companion_mod.HUB_COLLAPSED_HEIGHT,
+            companion_mod.WIDGET_COLLAPSED_HEIGHT,
+        )
+        window._on_toggle()
+        size = root.options["geometry"].split("+")[0]
+        self.assertTrue(
+            size.startswith(
+                f"{companion_mod.WIDGET_WIDTH}x{companion_mod.HUB_EXPANDED_HEIGHT}"
+            ),
+            size,
+        )
+        window._on_toggle()
+        size = root.options["geometry"].split("+")[0]
+        self.assertTrue(
+            size.startswith(
+                f"{companion_mod.WIDGET_WIDTH}x{companion_mod.HUB_COLLAPSED_HEIGHT}"
+            ),
+            size,
+        )
+
+    def test_close_button_closes_only_the_window(self):
+        window, root, watchers = self._window()
+        self.assertEqual(window.close_button.options.get("text"), "Close")
+        window.close_button.invoke()
+        self.assertTrue(root.destroyed)
+        for watcher in watchers:
+            self.assertEqual(watcher.calls, [])
 
     def test_toggle_expands_without_input(self):
         window, _root, watchers = self._window()

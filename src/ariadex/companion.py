@@ -35,6 +35,12 @@ WIDGET_COLLAPSED_HEIGHT = 116
 WIDGET_EXPANDED_HEIGHT = 320
 WIDGET_EXPANDED_WINDOW_HEIGHT = 340
 
+#: Hub window heights: the hub detail panel carries a tab bar plus five
+#: detail rows, so the single-widget heights would clip the controls row
+#: out of the window (measured 219px collapsed / 390px expanded on Tk).
+HUB_COLLAPSED_HEIGHT = 230
+HUB_EXPANDED_HEIGHT = 400
+
 #: Safety margin in pixels keeping the floating widget inside the usable
 #: virtual-screen bounds (title bar and close control stay reachable).
 WIDGET_SCREEN_MARGIN = 8
@@ -2290,10 +2296,10 @@ class RobotHubWindow:
         root.title(f"Ariadex Robots ({len(self.tabs)})")
         root.overrideredirect(True)
         root.attributes("-topmost", True)
-        root.geometry(f"{WIDGET_WIDTH}x{WIDGET_COLLAPSED_HEIGHT}")
+        root.geometry(f"{WIDGET_WIDTH}x{HUB_COLLAPSED_HEIGHT}")
         position = default_geometry(root.winfo_screenwidth(), root.winfo_screenheight())
         position = clamp_to_screen(
-            root, position[0], position[1], WIDGET_WIDTH, WIDGET_COLLAPSED_HEIGHT
+            root, position[0], position[1], WIDGET_WIDTH, HUB_COLLAPSED_HEIGHT
         )
         root.geometry(f"+{position[0]}+{position[1]}")
 
@@ -2408,6 +2414,15 @@ class RobotHubWindow:
             command=self._on_toggle,
         )
         self.toggle_button.pack(side="left", expand=True, fill="x")
+        self.close_button = tk.Button(
+            controls,
+            text="Close",
+            name="robot-hub-close-button",
+            width=8,
+            takefocus=False,
+            command=self._on_close_window,
+        )
+        self.close_button.pack(side="left", expand=True, fill="x")
         if self.hotkey_adapter is not None:
             self.hotkey_adapter.register(self.hotkey, self._on_hotkey)
         self._refresh()
@@ -2514,9 +2529,7 @@ class RobotHubWindow:
                 if callable(pack_forget):
                     pack_forget()
         with contextlib.suppress(Exception):
-            height = (
-                WIDGET_EXPANDED_HEIGHT if self.expanded else WIDGET_COLLAPSED_HEIGHT
-            )
+            height = HUB_EXPANDED_HEIGHT if self.expanded else HUB_COLLAPSED_HEIGHT
             try:
                 raw_x = int(self.root.winfo_x())  # type: ignore[attr-defined]
                 raw_y = int(self.root.winfo_y())  # type: ignore[attr-defined]

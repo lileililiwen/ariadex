@@ -296,9 +296,11 @@ Behavior:
   background; later starts reuse it). Each tab is labeled `folder
   [provider]` with a per-tab state dot and renders daemon truth (mode,
   provider, session, current spec, queue evidence); Pause/Resume drive
-  that project's daemon, quitting a tab removes only that tab, and closing
-  the window exits only the hub while daemons, sessions, and watchers keep
-  running. `ariadex stop` removes the project's tab. The hotkey toggles
+  that project's daemon, quitting a tab removes only that tab, and the
+  `Close` button (or closing the window) exits only the hub while daemons,
+  sessions, and watchers keep running. `ariadex stop` removes the
+  project's tab. The hub window is sized to its detail rows so Pause,
+  Pause all, Quit, Show log, and Close stay visible. The hotkey toggles
   the visible tab only. Unknown or uninitialized projects are refused with
   the exact reason and start nothing; when the hub cannot run (headless,
   no Tk), `start` keeps the single-widget fallback. An unreachable tab

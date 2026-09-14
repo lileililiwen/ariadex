@@ -337,9 +337,10 @@ background and every later start adds its own tab automatically. Each tab
 shows the project folder name plus the AI-agent provider badge (e.g.
 `a [opencode]`, `b [codex]`), a per-tab state indicator, and per-tab
 Pause/Resume/Quit driven by that project's daemon; `Pause all` pauses
-every tab, quitting a tab removes only that tab, and closing the window
-exits only the hub while supervised work keeps running. The global hotkey
-acts on the visible tab only. `ariadex stop` removes the project's tab.
+every tab, quitting a tab removes only that tab, and the `Close` button
+(or closing the window) exits only the hub while supervised work keeps
+running. The global hotkey acts on the visible tab only. `ariadex stop`
+removes the project's tab.
 Duplicate folder names gain parent segments (then the session name) so no
 two tabs look identical. Each tab's detail panel shows the current spec in
 the header, the active queue size with open/total task counts, the latest
