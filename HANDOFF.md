@@ -56,6 +56,14 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-14-independent-runtime-processes`. Managed widget IPC and polling
+  now run outside the Tk event thread; daemon socket clients are handled by
+  independent workers; provider termination snapshots and cleans only the
+  verified provider process tree. Verified with 46 focused lifecycle/provider
+  tests, compileall, Ruff, diff check, and strict OpenSpec validation. The
+  full daemon socket tests remain sandbox-blocked by local socket permission.
+
+- Implemented, verified, and archived:
   `2026-09-14-managed-memory-protection`. Added
   `scripts/setup-memory-protection.sh`, an idempotent Bash operator script
   that persists an additional 8 GiB swap file and configures earlyoom to
