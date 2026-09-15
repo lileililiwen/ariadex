@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Finished detection requires a byte-identical capture tail across
+  the debounce window, so pausing models never read as finished.

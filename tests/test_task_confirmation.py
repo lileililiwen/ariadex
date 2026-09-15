@@ -224,6 +224,9 @@ class PromptSelectionTest(unittest.TestCase):
         watcher = make_watcher(project, driver)
         with clean_git(self):
             watcher.poll()  # initial prompt
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
+            watcher.poll()
             self.assertEqual(watcher.poll(), "continuing")
         sent = driver.sent_inputs("agent")
         self.assertEqual(sent[0], "please start")
@@ -245,6 +248,9 @@ class PromptSelectionTest(unittest.TestCase):
             robot_mod, "_git_tree_clean", return_value=(False, "uncommitted changes")
         ):
             watcher.poll()  # initial prompt
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
+            watcher.poll()
             self.assertEqual(watcher.poll(), "continuing")
         self.assertEqual(driver.sent_inputs("agent")[-1], "please finish the rest")
         self.assertEqual(watcher.confirmations_sent, 1)
@@ -256,6 +262,9 @@ class PromptSelectionTest(unittest.TestCase):
         driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
         watcher = make_watcher(project, driver)
         with clean_git(self):
+            watcher.poll()
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
             watcher.poll()
             self.assertEqual(watcher.poll(), "continuing")
         sent = driver.sent_inputs("agent")
@@ -290,15 +299,23 @@ class PromptSelectionTest(unittest.TestCase):
         watcher = make_watcher(project, driver)
         with clean_git(self):
             watcher.poll()
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
+            watcher.poll()
             self.assertEqual(watcher.poll(), "continuing")
             self.assertEqual(watcher.confirmations_sent, 1)
             driver.sessions["agent"]["output"] = READY
             watcher.stable_polls = 0
+            # Resetting the session output changes the tail again; settle
+            # before the boundary can fire.
+            watcher.poll()
             self.assertEqual(watcher.poll(), "continuing")
             self.assertEqual(watcher.confirmations_sent, 2)
             tasks.write_text("# Tasks\n\n- [x] One\n- [x] Two\n", encoding="utf-8")
             driver.sessions["agent"]["output"] = READY
             watcher.stable_polls = 0
+            # Identical bytes mean no screen change: quiescence passes and
+            # the boundary fires without a settling poll.
             self.assertEqual(watcher.poll(), "continuing")
         sent = driver.sent_inputs("agent")
         # Two task-recovery confirmations plus the archival follow-up: a
@@ -374,6 +391,9 @@ class PromptSelectionTest(unittest.TestCase):
         driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
         watcher = make_watcher(project, driver)
         with clean_git(self):
+            watcher.poll()
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
             watcher.poll()
             self.assertEqual(watcher.poll(), "blocked")
         self.assertIn("tasks.md", watcher.block_reason)
@@ -643,7 +663,9 @@ class ConfirmationDraftGuardTest(unittest.TestCase):
             driver.sessions["agent"]["output"] = DRAFT
             # Production TmuxDriver path: the backend reports idle while the
             # composer holds a draft, so the boundary fires and the guard
-            # must defer instead of sending `/new` over the draft.
+            # must defer instead of sending `/new` over the draft. The
+            # replaced output restarts quiescence first; the next quiet
+            # poll reaches the guard.
             with (
                 unittest.mock.patch.object(
                     watcher.adapter, "provider_state", return_value="idle"
@@ -655,6 +677,7 @@ class ConfirmationDraftGuardTest(unittest.TestCase):
                     return_value=True,
                 ),
             ):
+                watcher.poll()
                 self.assertEqual(watcher.poll(), robot_mod.PAUSED)
         sent = driver.sent_inputs("agent")
         self.assertEqual(sent, ["please start"])

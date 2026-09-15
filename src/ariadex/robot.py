@@ -873,6 +873,12 @@ class RobotWatcher:
         self.evidence_runner = evidence_runner
         self.phase = ATTACHED
         self.stable_polls = 0
+        #: Tail of the last finished-classified capture. Quiescence demands
+        #: a byte-identical tail across the debounce window; any on-screen
+        #: change restarts the count. Stale memory is harmless: a changed
+        #: tail resets the count on sight, and an identical tail still
+        #: needs a full run of consecutive finished polls.
+        self._last_finished_tail: str | None = None
         # Empty initial prompt means attach to the current conversation and
         # never inject a synthetic first request.
         self.initial_sent = not self.config.initial_prompt.strip()
@@ -1322,6 +1328,26 @@ class RobotWatcher:
         except Exception as exc:
             raise RobotError(f"capture failed: {exc}") from exc
 
+    def _quiescent(self, capture: str) -> bool:
+        """Dead-screen gate for finished classifications (pure accounting).
+
+        Returns True only when the classifier tail is byte-identical to
+        the previous finished-classified poll. Any change stores the new
+        tail, restarts the debounce count, and returns False so the poll
+        stays a candidate without evaluating the boundary. The first
+        finished poll stores and passes through to preserve debounce
+        timing for genuinely idle providers.
+        """
+        tail = "\n".join((capture or "").splitlines()[-CLASSIFICATION_TAIL_LINES:])
+        if self._last_finished_tail is None:
+            self._last_finished_tail = tail
+            return True
+        if tail != self._last_finished_tail:
+            self._last_finished_tail = tail
+            self.stable_polls = 0
+            return False
+        return True
+
     def _send(self, text: str) -> None:
         try:
             self.adapter.send(text)
@@ -1423,6 +1449,8 @@ class RobotWatcher:
         if observed == CLASS_MAX_STEPS:
             self.phase = FINISHED_CANDIDATE
             self.boundary_error_category = "max-steps"
+            if not self._quiescent(capture):
+                return self.phase
             self.stable_polls += 1
             self._record(
                 "boundary",
@@ -1434,6 +1462,8 @@ class RobotWatcher:
         if observed == CLASS_TERMINAL_ERROR:
             self.phase = FINISHED_CANDIDATE
             self.boundary_error_category = "terminal-error"
+            if not self._quiescent(capture):
+                return self.phase
             self.stable_polls += 1
             self._record(
                 "boundary",
@@ -1461,6 +1491,9 @@ class RobotWatcher:
             self.stable_polls = 0
             return self.phase
         self.boundary_error_category = ""
+        if not self._quiescent(capture):
+            self.phase = FINISHED_CANDIDATE
+            return self.phase
         self.stable_polls += 1
         if self.stable_polls < self.config.debounce_polls:
             self.phase = FINISHED_CANDIDATE

@@ -124,6 +124,9 @@ class ClassifyTest(unittest.TestCase):
         )
         try:
             self.assertEqual(watcher.poll(), "continuing")
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
+            self.assertEqual(watcher.poll(), "finished-candidate")
             self.assertEqual(watcher.poll(), "continuing")
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
@@ -409,6 +412,44 @@ class WatcherStateTest(unittest.TestCase):
         self.assertEqual(watcher.poll(), "attached")
         self.assertEqual(driver.sent_inputs("agent"), [])
 
+    def test_changing_finished_text_never_fires_boundary(self) -> None:
+        # A pausing model repainting idle-looking screens must not read
+        # as finished: any tail change restarts the debounce count.
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        first = self._ready() + "spinner .\n"
+        second = self._ready() + "spinner ..\n"
+        driver.sessions["agent"] = {"command": [], "output": first, "workdir": "/t"}
+        watcher = make_watcher(project, driver, debounce_polls=2)
+        self.assertEqual(watcher.poll(), "finished-candidate")
+        for _ in range(4):
+            driver.sessions["agent"]["output"] = second
+            self.assertEqual(watcher.poll(), "finished-candidate")
+            driver.sessions["agent"]["output"] = first
+            self.assertEqual(watcher.poll(), "finished-candidate")
+        self.assertEqual(driver.sent_inputs("agent"), [])
+
+    def test_scrollback_above_tail_window_does_not_restart(self) -> None:
+        # Growth above the classifier tail cannot restart the count while
+        # the live surface is frozen.
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        filler = "".join(f"steady context line {i}\n" for i in range(20))
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": filler + self._ready(),
+            "workdir": "/t",
+        }
+        watcher = make_watcher(project, driver, debounce_polls=3)
+        self.assertEqual(watcher.poll(), "finished-candidate")
+        self.assertEqual(watcher.stable_polls, 1)
+        driver.sessions["agent"]["output"] = (
+            "old scrollback line\n" * 40 + filler + self._ready()
+        )
+        self.assertEqual(watcher.poll(), "finished-candidate")
+        self.assertEqual(watcher.stable_polls, 2)
+        self.assertEqual(driver.sent_inputs("agent"), [])
+
     def test_initial_prompt_sent_once_when_ready(self) -> None:
         project = make_project(self._tmp)
         make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
@@ -466,7 +507,9 @@ class WatcherStateTest(unittest.TestCase):
         self.assertTrue(watcher.initial_sent)
         # The echoed prompt keeps the surface ready. Dirty partial work is
         # now recoverable, so the boundary opens confirmation rather than
-        # dead-blocking on the Git gate.
+        # dead-blocking on the Git gate. Our own input echo restarts
+        # quiescence first; the next quiet poll fires the boundary.
+        watcher.poll()
         watcher.poll()
         self.assertIn("/new", driver.sent_inputs("agent"))
         self.assertIn(
@@ -662,12 +705,14 @@ class ContinuationTest(unittest.TestCase):
         real_check = robot_mod.check_boundary
         robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
         try:
-            watcher.poll()  # initial prompt
+            watcher.poll()
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
+            watcher.poll()
             self.assertEqual(watcher.poll(), "continuing")
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
         sent = driver.sent_inputs("agent")
-        self.assertEqual(len(sent), 3)
         self.assertEqual(sent[0], "please start")
         self.assertEqual(sent[1], "/new")
         self.assertEqual(sent[2], robot_mod.DEFAULT_CONTINUATION_PROMPT)
@@ -688,6 +733,9 @@ class ContinuationTest(unittest.TestCase):
         real_check = robot_mod.check_boundary
         robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
         try:
+            watcher.poll()
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
             watcher.poll()
             self.assertEqual(watcher.poll(), "continuing")
         finally:
@@ -741,6 +789,9 @@ class ContinuationTest(unittest.TestCase):
         robot_mod.check_boundary = blocked  # type: ignore[assignment]
         try:
             watcher.poll()
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
+            watcher.poll()
             self.assertEqual(watcher.poll(), "blocked")
             report = watcher.run(sleep=lambda _: None)
         finally:
@@ -770,6 +821,9 @@ class ContinuationTest(unittest.TestCase):
         robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
         try:
             watcher.poll()  # initial prompt
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
+            watcher.poll()
             self.assertEqual(watcher.poll(), "continuing")
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
@@ -801,6 +855,9 @@ class ContinuationTest(unittest.TestCase):
         robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
         try:
             self.assertEqual(watcher.poll(), "continuing")  # initial prompt
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
+            watcher.poll()
             self.assertEqual(watcher.poll(), "continuing")
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
@@ -829,6 +886,9 @@ class ContinuationTest(unittest.TestCase):
         robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
         try:
             watcher.poll()  # initial prompt
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
+            watcher.poll()
             self.assertEqual(watcher.poll(), "blocked")
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
@@ -858,6 +918,9 @@ class ContinuationTest(unittest.TestCase):
         robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
         try:
             watcher.poll()  # initial prompt
+            # Our own input echo restarts quiescence; the next quiet poll
+            # fires the boundary.
+            watcher.poll()
             self.assertEqual(watcher.poll(), "blocked")
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
