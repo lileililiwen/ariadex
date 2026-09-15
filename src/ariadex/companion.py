@@ -31,12 +31,12 @@ POLL_INTERVAL_S = 2.0
 
 #: Collapsed mini-player target width in pixels.
 WIDGET_WIDTH = 360
-# Four action buttons plus the titlebar, status row, and frame padding need
-# more than the legacy three-button 116px mini-player height.
-WIDGET_COLLAPSED_HEIGHT = 300
-WIDGET_EXPANDED_HEIGHT = 320
+# Four action buttons plus the titlebar, version row, status bar, and frame
+# padding need more than the legacy three-button 116px mini-player height.
+WIDGET_COLLAPSED_HEIGHT = 344
+WIDGET_EXPANDED_HEIGHT = 364
 # Includes both read-only text areas and every expanded action row.
-WIDGET_EXPANDED_WINDOW_HEIGHT = 650
+WIDGET_EXPANDED_WINDOW_HEIGHT = 694
 WIDGET_ACTION_BUTTON_WIDTH = 6
 WIDGET_COPY_BUTTON_WIDTH = 8
 
@@ -45,8 +45,10 @@ WIDGET_COPY_BUTTON_WIDTH = 8
 #: out of the window (measured 219px collapsed / 390px expanded on Tk).
 # Keep the tab bar, queue/status rows, and complete action row visible when
 # the hub is collapsed; the previous 230px value clipped the controls.
-HUB_COLLAPSED_HEIGHT = 320
-HUB_EXPANDED_HEIGHT = 400
+# The hub version row below the title adds one slim line; hub heights keep
+# their offsets over the mini player (tab bar plus detail rows).
+HUB_COLLAPSED_HEIGHT = 364
+HUB_EXPANDED_HEIGHT = 444
 
 #: Safety margin in pixels keeping the floating widget inside the usable
 #: virtual-screen bounds (title bar and close control stay reachable).
@@ -591,7 +593,40 @@ STOP_CONFIRM_TIMEOUT_MS = 5000
 WAITING_DECISIONS = ("waiting", "refire", "switched")
 
 
-def build_view_model(state: dict) -> dict:
+def describe_version(state: dict, local_version: str = "") -> str:
+    """Display-only version text for the widget menu row (pure, no I/O).
+
+    Prefers the supervision's running version from daemon IPC (what the
+    operator is actually debugging), falls back to the local code
+    version, and reports drift against the installed distribution so a
+    mismatched install is visible at a glance. Never raises.
+    """
+    try:
+        running = str(state.get("package_version") or "").strip()
+    except Exception:
+        running = ""
+    if not running:
+        try:
+            running = str(local_version or "").strip()
+        except Exception:
+            running = ""
+    if not running:
+        running = "unknown"
+    try:
+        installed = str(state.get("installed_version") or "").strip()
+        drift = bool(state.get("package_drift", False))
+    except Exception:
+        installed, drift = "", False
+    if installed and installed != running:
+        drift = True
+    if drift and installed and installed != running:
+        return f"v{running} (installed v{installed})"
+    return f"v{running}"
+
+
+def build_view_model(
+    state: dict, *, project_name: str = "", local_version: str = ""
+) -> dict:
     """Map one IPC status response to widget state (pure, no I/O).
 
     Every indicator has a text equivalent; colors are decorative only.
@@ -645,14 +680,21 @@ def build_view_model(state: dict) -> dict:
         if context_summary:
             work_label += f"\n{context_summary}"
         queue = managed_context.get("queue", [])
+        active_spec_count = len(queue) if isinstance(queue, list) else 0
         if queue:
-            parts = [
-                f"{item.get('name', '?')!s} "
-                f"{item.get('completed', 0)}/{item.get('total', 0)}"
-                for item in queue[:10]
-                if isinstance(item, dict)
-            ]
-            work_label += f"\n{len(queue)} active specs ({', '.join(parts)})"
+            work_label += f"\n{active_spec_count} active specs"
+    else:
+        active_spec_count = 0
+    try:
+        project_text = str(project_name or "").strip()
+    except Exception:
+        project_text = ""
+    if active_spec_count:
+        status_line = f"{active_spec_count} active specs"
+    else:
+        status_line = "no active specs"
+    if project_text:
+        status_line = f"{project_text} — {status_line}"
     return {
         "indicator": indicator,
         "indicator_text": indicator.upper(),
@@ -665,6 +707,11 @@ def build_view_model(state: dict) -> dict:
         "context_summary": context_summary,
         "context_latest": context_latest,
         "managed_context": managed_context,
+        "active_spec_count": active_spec_count,
+        "status_line": status_line,
+        "version_text": describe_version(
+            state if isinstance(state, dict) else {}, local_version
+        ),
     }
 
 
@@ -684,6 +731,12 @@ def format_view_text(model: dict) -> str:
         f"companion: {model.get('indicator_text')} (mode {model.get('mode')})",
         f"work: {model.get('work_label')}",
     ]
+    status_line = str(model.get("status_line", "") or "")
+    if status_line:
+        lines.append(f"status: {status_line}")
+    version_text = str(model.get("version_text", "") or "")
+    if version_text:
+        lines.append(f"version: {version_text}")
     context_summary = str(model.get("context_summary", "") or "")
     if context_summary:
         lines.append(f"context: {context_summary}")
@@ -1241,6 +1294,17 @@ class CompanionWindow:
         )
         self.frame.pack(fill="both", expand=True)
 
+        self.status_bar = tk.Label(
+            self.frame,
+            text="",
+            anchor="w",
+            background="#20242b",
+            foreground="#8b949e",
+            font=("TkDefaultFont", 9),
+            name="status-bar",
+        )
+        self.status_bar.pack(side="bottom", fill="x", pady=(4, 0))
+
         self.titlebar = tk.Frame(self.frame, background="#20242b")
         self.titlebar.pack(fill="x")
         self.titlebar.configure(height=30)
@@ -1291,6 +1355,17 @@ class CompanionWindow:
             command=self._on_close,
         )
         self.close_button.pack(side="right")
+
+        self.version_label = tk.Label(
+            self.frame,
+            text="",
+            anchor="w",
+            background="#20242b",
+            foreground="#8b949e",
+            font=("TkDefaultFont", 9),
+            name="version-label",
+        )
+        self.version_label.pack(fill="x")
 
         self.work_label = tk.Label(
             self.frame,
@@ -1575,7 +1650,7 @@ class CompanionWindow:
             self.model = failure_view_model(str(exc))
         else:
             self._state = state
-            self.model = build_view_model(state)
+            self.model = self._view_model(state)
         self._render()
 
     def _run_client_async(
@@ -1611,7 +1686,7 @@ class CompanionWindow:
                     self.model = failure_view_model(str(error))
                 else:
                     self._state = state or {}
-                    self.model = build_view_model(self._state)
+                    self.model = self._view_model(self._state)
                 self._render()
                 if error is None and on_success is not None:
                     on_success()
@@ -1645,7 +1720,7 @@ class CompanionWindow:
                     self.model = model
                 else:
                     self._state = state or {}
-                    self.model = build_view_model(self._state)
+                    self.model = self._view_model(self._state)
                 self._render()
 
             with contextlib.suppress(Exception):
@@ -1860,8 +1935,26 @@ class CompanionWindow:
                 self.model = model
         else:
             self._state = state
-            self.model = build_view_model(state)
+            self.model = self._view_model(state)
         self._render()
+
+    def _view_model(self, state: dict) -> dict:
+        """Build the widget model with project identity and version."""
+        try:
+            from . import upgrade as upgrade_mod
+
+            local_version = upgrade_mod.running_version()
+        except Exception:
+            local_version = ""
+        try:
+            project_name = Path(self.client.project_dir).name
+        except Exception:
+            project_name = ""
+        if not isinstance(state, dict):
+            state = {}
+        return build_view_model(
+            state, project_name=project_name, local_version=local_version
+        )
 
     def _render(self) -> None:
         model = self.model
@@ -1882,6 +1975,8 @@ class CompanionWindow:
             suffix = " (hotkey unavailable)"
         self.state_label.configure(text=f"{indicator}{suffix}")
         self.work_label.configure(text=str(model.get("work_label", "")))
+        self.version_label.configure(text=str(model.get("version_text", "")))
+        self.status_bar.configure(text=str(model.get("status_line", "")))
         actions = model.get("actions", {})
         self.pause_button.configure(text="Pause")
         self.pause_button.configure(
@@ -2581,6 +2676,22 @@ class RobotHubWindow:
             widget.bind("<ButtonPress-1>", self._drag_start)
             widget.bind("<B1-Motion>", self._drag_move)
             widget.bind("<ButtonRelease-1>", self._drag_stop)
+        try:
+            from . import upgrade as upgrade_mod
+
+            hub_version = upgrade_mod.running_version()
+        except Exception:
+            hub_version = "unknown"
+        self.hub_version_label = tk.Label(
+            self.frame,
+            text=f"v{hub_version}",
+            anchor="w",
+            background="#20242b",
+            foreground="#8b949e",
+            font=("TkDefaultFont", 9),
+            name="hub-version-label",
+        )
+        self.hub_version_label.pack(fill="x")
         self.tab_bar = tk.Frame(self.frame, background="#20242b")
         self.tab_bar.pack(fill="x")
         self.tab_buttons: list[object] = []

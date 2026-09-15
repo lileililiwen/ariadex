@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Bottom status bar (project name + active-specs count only) and a
+  display-only version menu below the title; compact summary drops the
+  name list.

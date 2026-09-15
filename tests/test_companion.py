@@ -451,6 +451,8 @@ class WidgetSmokeTest(unittest.TestCase):
                 "expand-button",
                 "close-button",
                 "status-text",
+                "status-bar",
+                "version-label",
             ):
                 self.assertTrue(bool(find(widget_name)), widget_name)
             self.assertEqual(
@@ -1075,7 +1077,7 @@ class ControlRoomTest(unittest.TestCase):
         self.assertEqual(model["indicator"], "waiting")
         self.assertEqual(model["indicator_text"], "WAITING")
 
-    def test_job_pile_lists_per_spec_progress(self):
+    def test_job_pile_shows_count_only_in_summary(self):
         state = live_state(
             next_action="advance-spec demo",
             diagnostic_context={
@@ -1089,10 +1091,39 @@ class ControlRoomTest(unittest.TestCase):
                 "notes": [],
             },
         )
-        model = companion.build_view_model(state)
+        model = companion.build_view_model(state, project_name="demo-proj")
         self.assertIn("2 active specs", model["work_label"])
-        self.assertIn("demo 0/12", model["work_label"])
-        self.assertIn("next 3/10", model["work_label"])
+        self.assertNotIn("demo 0/12", model["work_label"])
+        self.assertNotIn("next 3/10", model["work_label"])
+        self.assertEqual(model["active_spec_count"], 2)
+        self.assertEqual(model["status_line"], "demo-proj — 2 active specs")
+        queue = (model["managed_context"] or {}).get("queue", [])
+        self.assertEqual([item["name"] for item in queue], ["demo", "next"])
+
+    def test_status_line_without_project_or_specs(self):
+        model = companion.build_view_model(live_state())
+        self.assertEqual(model["active_spec_count"], 0)
+        self.assertEqual(model["status_line"], "no active specs")
+
+    def test_version_text_prefers_daemon_running(self):
+        state = live_state()
+        state["package_version"] = "0.2.0"
+        state["installed_version"] = "0.2.0"
+        state["package_drift"] = False
+        model = companion.build_view_model(state, local_version="0.1.0")
+        self.assertEqual(model["version_text"], "v0.2.0")
+
+    def test_version_text_reports_drift(self):
+        state = live_state()
+        state["package_version"] = "0.1.0"
+        state["installed_version"] = "0.2.0"
+        state["package_drift"] = True
+        model = companion.build_view_model(state)
+        self.assertEqual(model["version_text"], "v0.1.0 (installed v0.2.0)")
+
+    def test_version_text_falls_back_to_unknown(self):
+        model = companion.build_view_model(live_state())
+        self.assertEqual(model["version_text"], "vunknown")
 
     def test_busy_click_is_acknowledged_without_duplicate(self):
         root = FakeTkRoot()
