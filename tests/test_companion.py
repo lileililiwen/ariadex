@@ -541,12 +541,40 @@ class FakeTkText(FakeTkWidget):
     def __init__(self, master=None, **options):
         super().__init__(master, **options)
         self.content = ""
+        self.see_calls: list[str] = []
+        self.yscrollcommand = options.get("yscrollcommand")
 
     def delete(self, start, end=None):
         self.content = ""
 
     def insert(self, index, text):
         self.content += text
+
+    def see(self, index):
+        self.see_calls.append(str(index))
+
+    def yview(self, *args):
+        # Real scrollbar commands invoke text.yview("moveto", x) when
+        # dragged. Tests assert side effects, not this stub.
+        return None
+
+    def index(self, pos):
+        # Real Tk returns "line.char"; the test only needs see("end") to be
+        # recorded with the requested position.
+        return str(pos)
+
+
+class FakeTkScrollbar(FakeTkWidget):
+    def __init__(self, master=None, **options):
+        orient = options.pop("orient", "vertical")
+        command = options.pop("command", None)
+        super().__init__(master, **options)
+        self.options["orient"] = orient
+        self.command = command
+        self.set_calls: list[tuple[float, float]] = []
+
+    def set(self, first, last):
+        self.set_calls.append((first, last))
 
 
 class FakeTkStringVar:
@@ -632,6 +660,7 @@ class FakeTkModule:
     Label = FakeTkWidget
     Button = FakeTkWidget
     Text = FakeTkText
+    Scrollbar = FakeTkScrollbar
     Entry = FakeTkWidget
     StringVar = FakeTkStringVar
     TclError = Exception
@@ -687,6 +716,7 @@ def install_fake_tk(test):
         "Label",
         "Button",
         "Text",
+        "Scrollbar",
         "Entry",
         "StringVar",
         "TclError",

@@ -48,6 +48,15 @@ class FakeTkWidget:
     def insert(self, index, text):
         self.text = text
 
+    def see(self, index):
+        self.options["see"] = str(index)
+
+    def yview(self, *args):
+        return None
+
+    def set(self, first, last):
+        self.options["set"] = (first, last)
+
     def invoke(self):
         if self.command is not None:
             self.command()
@@ -111,6 +120,7 @@ def install_fake_tk(test: unittest.TestCase):
     tk_mod.Label = FakeTkWidget  # type: ignore[attr-defined]
     tk_mod.Button = FakeTkWidget  # type: ignore[attr-defined]
     tk_mod.Text = FakeTkWidget  # type: ignore[attr-defined]
+    tk_mod.Scrollbar = FakeTkWidget  # type: ignore[attr-defined]
     saved = sys.modules.get("tkinter")
     sys.modules["tkinter"] = tk_mod
 
@@ -312,9 +322,7 @@ class RobotHubWindowTest(unittest.TestCase):
         companion_mod._button_press(window.pause_button)
         self.assertEqual(window.pause_button.options.get("relief"), "sunken")
         companion_mod._button_release(window.pause_button, root)
-        self.assertEqual(
-            window.pause_button.options.get("background"), "#22c55e"
-        )
+        self.assertEqual(window.pause_button.options.get("background"), "#22c55e")
         self.assertTrue(root.after_calls)
 
     def test_add_and_remove_tab(self):

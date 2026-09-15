@@ -101,14 +101,16 @@ class StripVisibilityTest(unittest.TestCase):
 
     def test_strip_packs_only_status_bar(self):
         self.window._set_display_mode("strip")
-        # Status bar is the only visible affordance.
+        # Status bar is the only visible affordance; the log row hides
+        # as a unit via its container frame (the text stays packed
+        # inside the hidden frame).
         self.assertTrue(self.window.status_bar.packed)
+        self.assertFalse(self.window.context_log_frame.packed)
         for hidden in (
             self.window.titlebar,
             self.window.version_label,
             self.window.work_label,
             self.window.controls,
-            self.window.context_log,
             self.window.details,
         ):
             self.assertFalse(
@@ -117,12 +119,12 @@ class StripVisibilityTest(unittest.TestCase):
 
     def test_full_packs_all_rows(self):
         self.window._set_display_mode("full")
+        self.assertTrue(self.window.context_log_frame.packed)
         for visible in (
             self.window.titlebar,
             self.window.version_label,
             self.window.work_label,
             self.window.controls,
-            self.window.context_log,
             self.window.details,
         ):
             self.assertTrue(
@@ -132,12 +134,12 @@ class StripVisibilityTest(unittest.TestCase):
     def test_collapsed_hides_details_panel(self):
         self.window._set_display_mode("collapsed")
         self.assertFalse(self.window.details.packed)
+        self.assertTrue(self.window.context_log_frame.packed)
         for visible in (
             self.window.titlebar,
             self.window.version_label,
             self.window.work_label,
             self.window.controls,
-            self.window.context_log,
         ):
             self.assertTrue(
                 visible.packed, f"{visible!r} should be visible in collapsed mode"

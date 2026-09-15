@@ -1461,16 +1461,27 @@ class CompanionWindow:
         )
         self.copy_log_button.pack(side="left", expand=True, fill="x")
 
+        self.context_log_frame = tk.Frame(self.frame, background="#20242b")
+        self.context_log_frame.pack(fill="x", pady=(4, 0))
+        self.context_log_scrollbar = tk.Scrollbar(
+            self.context_log_frame,
+            orient="vertical",
+            takefocus=False,
+            name="context-log-scrollbar",
+        )
+        self.context_log_scrollbar.pack(side="right", fill="y")
         self.context_log = tk.Text(
-            self.frame,
+            self.context_log_frame,
             height=6,
             width=34,
             wrap="word",
             takefocus=False,
             name="context-log-text",
+            yscrollcommand=self.context_log_scrollbar.set,
         )
+        self.context_log.pack(side="left", fill="both", expand=True)
         self.context_log.configure(state="disabled")
-        self.context_log.pack(fill="x", pady=(4, 0))
+        self.context_log_scrollbar.configure(command=self.context_log.yview)
 
         self.details = tk.Frame(self.frame)
         self.status_text = tk.Text(
@@ -1961,7 +1972,7 @@ class CompanionWindow:
         with contextlib.suppress(Exception):
             self.controls.pack_forget()
         with contextlib.suppress(Exception):
-            self.context_log.pack_forget()
+            self.context_log_frame.pack_forget()
         with contextlib.suppress(Exception):
             self.details.pack_forget()
         # In strip mode the status bar fills the visible window. Re-pack
@@ -1992,7 +2003,7 @@ class CompanionWindow:
         with contextlib.suppress(Exception):
             self.controls.pack(fill="x", pady=(4, 0))
         with contextlib.suppress(Exception):
-            self.context_log.pack(fill="x", pady=(4, 0))
+            self.context_log_frame.pack(fill="x", pady=(4, 0))
         with contextlib.suppress(Exception):
             self.details.pack(fill="x")
         with contextlib.suppress(Exception):
@@ -2013,7 +2024,7 @@ class CompanionWindow:
         with contextlib.suppress(Exception):
             self.controls.pack(fill="x", pady=(4, 0))
         with contextlib.suppress(Exception):
-            self.context_log.pack(fill="x", pady=(4, 0))
+            self.context_log_frame.pack(fill="x", pady=(4, 0))
         with contextlib.suppress(Exception):
             self.details.pack_forget()
         with contextlib.suppress(Exception):
@@ -2072,7 +2083,14 @@ class CompanionWindow:
             )
 
     def _render_context_log(self, model: dict) -> None:
-        """Write the read-only managed log; never raises into the poll loop."""
+        """Write the read-only managed log; never raises into the poll loop.
+
+        After every rewrite the viewport follows the latest entry
+        (`see("end")`) so new activity is visible without manual
+        scrolling; a slim vertical scrollbar tracks the content
+        length. The follow is viewport work only — log bounds,
+        redaction, and durable state are unchanged.
+        """
         projection = model.get("managed_context")
         if not isinstance(projection, dict):
             lines = ["diagnostic context: (daemon unreachable or not started yet)"]
@@ -2082,6 +2100,8 @@ class CompanionWindow:
             self.context_log.configure(state="normal")
             self.context_log.delete("1.0", "end")
             self.context_log.insert("1.0", "\n".join(lines))
+            # Follow the latest entry; viewport work never raises.
+            self.context_log.see("end")
             self.context_log.configure(state="disabled")
 
     def _hide(self) -> None:
@@ -2987,7 +3007,9 @@ class RobotHubWindow:
             foreground="#9aa4b2",
         )
         self.expanded = False
-        self.log_text = self._build_log_panel(tk)
+        self.log_text_frame, self.log_text, self.log_scrollbar = self._build_log_panel(
+            tk
+        )
         controls = tk.Frame(self.frame, background="#20242b")
         controls.pack(fill="x", pady=(4, 0))
         self.pause_button = tk.Button(
@@ -3173,24 +3195,44 @@ class RobotHubWindow:
             self.event_label.configure(text=f"latest  {error}")
 
     def _build_log_panel(self, tk):
-        """Create the read-only activity log without touching window focus."""
+        """Create the read-only activity log + slim scrollbar in one frame.
+
+        Returns (frame, text, scrollbar) so the toggle can pack/forget
+        the row in one call and the scrollbar shares the text's width
+        budget. Returns (None, None, None) on construction failure so
+        callers stay no-op safe.
+        """
         text_cls = getattr(tk, "Text", None)
-        if text_cls is None:
-            return None
+        scrollbar_cls = getattr(tk, "Scrollbar", None)
+        if text_cls is None or scrollbar_cls is None:
+            return None, None, None
         try:
+            frame_cls = getattr(tk, "Frame", None)
+            frame = (frame_cls or text_cls)(self.frame)
+            scrollbar = scrollbar_cls(
+                frame,
+                orient="vertical",
+                takefocus=False,
+                name="hub-log-scrollbar",
+            )
             widget = text_cls(
-                self.frame,
+                frame,
                 height=8,
                 wrap="word",
                 takefocus=False,
                 background="#14171c",
                 foreground="#c9d1d9",
+                yscrollcommand=scrollbar.set,
+                name="hub-log-text",
             )
         except Exception:
-            return None
+            return None, None, None
         with contextlib.suppress(Exception):
+            widget.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
             widget.configure(state="disabled")
-        return widget
+            scrollbar.configure(command=widget.yview)
+        return frame, widget, scrollbar
 
     def _hub_model(self) -> dict:
         return build_hub_view_model(
@@ -3201,10 +3243,10 @@ class RobotHubWindow:
         """Expand or collapse the activity log; never sends provider input."""
         self.expanded = not self.expanded
         with contextlib.suppress(Exception):
-            if self.expanded and self.log_text is not None:
-                self.log_text.pack(fill="both", expand=True, pady=(4, 0))
-            elif self.log_text is not None:
-                pack_forget = getattr(self.log_text, "pack_forget", None)
+            if self.expanded and self.log_text_frame is not None:
+                self.log_text_frame.pack(fill="both", expand=True, pady=(4, 0))
+            elif self.log_text_frame is not None:
+                pack_forget = getattr(self.log_text_frame, "pack_forget", None)
                 if callable(pack_forget):
                     pack_forget()
         with contextlib.suppress(Exception):
@@ -3411,7 +3453,14 @@ class RobotHubWindow:
         )
 
     def _render_log(self, model: dict) -> None:
-        """Write the read-only log; never raises into the poll loop."""
+        """Write the read-only log; never raises into the poll loop.
+
+        After every rewrite the viewport follows the latest entry
+        (`see("end")`) so new activity is visible without manual
+        scrolling; a slim vertical scrollbar tracks the content
+        length. The follow is viewport work only — log bounds,
+        redaction, and durable state are unchanged.
+        """
         if self.log_text is None or not self.expanded:
             return
         lines = self._hub_log_text(model).splitlines()
@@ -3424,6 +3473,9 @@ class RobotHubWindow:
                 delete("1.0", "end")
             if callable(insert):
                 insert("1.0", "\n".join(lines))
+        with contextlib.suppress(Exception):
+            # Follow the latest entry; viewport work never raises.
+            self.log_text.see("end")
         with contextlib.suppress(Exception):
             self.log_text.configure(state="disabled")
 

@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Widget logs follow the latest entry with a tracking scrollbar.

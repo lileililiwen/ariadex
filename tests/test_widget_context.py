@@ -179,12 +179,35 @@ class FakeTkText(FakeTkWidget):
     def __init__(self, master=None, **options):
         super().__init__(master, **options)
         self.content = ""
+        self.see_calls: list[str] = []
 
     def delete(self, start, end=None):
         self.content = ""
 
     def insert(self, index, text):
         self.content += text
+
+    def see(self, index):
+        self.see_calls.append(str(index))
+
+    def yview(self, *args):
+        return None
+
+    def index(self, pos):
+        return str(pos)
+
+
+class FakeTkScrollbar(FakeTkWidget):
+    def __init__(self, master=None, **options):
+        orient = options.pop("orient", "vertical")
+        command = options.pop("command", None)
+        super().__init__(master, **options)
+        self.options["orient"] = orient
+        self.command = command
+        self.set_calls: list[tuple[float, float]] = []
+
+    def set(self, first, last):
+        self.set_calls.append((first, last))
 
 
 class FakeTkStringVar:
@@ -262,6 +285,7 @@ class FakeTkModule:
     Label = FakeTkWidget
     Button = FakeTkWidget
     Text = FakeTkText
+    Scrollbar = FakeTkScrollbar
     Entry = FakeTkWidget
     StringVar = FakeTkStringVar
     TclError = Exception
@@ -310,6 +334,7 @@ def install_fake_tk():
         "Label",
         "Button",
         "Text",
+        "Scrollbar",
         "Entry",
         "StringVar",
         "TclError",
@@ -363,7 +388,7 @@ class ManagedWindowTest(unittest.TestCase):
     def test_collapsed_widget_shows_live_log_and_remaining_specs(self):
         window = self.make_window(context_state())
         self.assertFalse(window.expanded)
-        self.assertTrue(window.context_log.packed)
+        self.assertTrue(window.context_log_frame.packed)
         self.assertIn("beta", window.context_log.content)
         self.assertIn("2 active", str(window.work_label.options.get("text", "")))
 
