@@ -1,11 +1,13 @@
 """Tests for the terminal driver contract and tmux implementation."""
 
 import unittest
+from unittest import mock
 
 from ariadex.terminal import (
     DeliveryFailed,
     FakeTerminalDriver,
     SessionMissing,
+    TerminalError,
     TmuxDriver,
     TmuxNotAvailable,
     session_name_for,
@@ -28,6 +30,20 @@ class FakeDriverTest(unittest.TestCase):
         self.driver.create_or_connect("s", "/tmp", ["codex"])
         self.driver.send_input("s", "hello")
         self.assertEqual(self.driver.capture("s"), "hello\n")
+
+    def test_send_keys_round_trip(self):
+        self.driver.create_or_connect("s", "/tmp", ["codex"])
+        self.driver.send_keys("s", ["Enter"])
+        self.assertEqual(self.driver.sent_key_sequences("s"), [["Enter"]])
+        self.assertEqual(self.driver.sent_inputs("s"), [])
+        with self.assertRaises(SessionMissing):
+            self.driver.send_keys("ghost", ["Enter"])
+
+    def test_send_keys_delivery_failure_is_typed(self):
+        self.driver.create_or_connect("s", "/tmp", ["opencode"])
+        self.driver.fail_delivery = True
+        with self.assertRaises(DeliveryFailed):
+            self.driver.send_keys("s", ["Enter"])
 
     def test_operations_on_missing_session_fail_typed(self):
         with self.assertRaises(SessionMissing):
@@ -83,6 +99,32 @@ class TmuxDriverUnitTest(unittest.TestCase):
 
     def test_session_name_mapping(self):
         self.assertEqual(session_name_for("abc123"), "ariadex-abc123")
+
+    def test_send_keys_rejects_unknown_key_names(self):
+        driver = TmuxDriver(executable="tmux")
+        with mock.patch.object(driver, "_require_alive", return_value=None):
+            with self.assertRaises(TerminalError):
+                driver.send_keys("s", ["F13"])
+            with self.assertRaises(TerminalError):
+                driver.send_keys("s", [])
+
+    def test_send_keys_uses_named_tmux_keys(self):
+        driver = TmuxDriver(executable="tmux")
+        seen: list[list[str]] = []
+        with (
+            mock.patch.object(driver, "_require_alive", return_value=None),
+            mock.patch.object(
+                driver, "_run", side_effect=lambda args, ctx: seen.append(args)
+            ),
+        ):
+            driver.send_keys("s", ["Down", "Enter"])
+        self.assertEqual(
+            seen,
+            [
+                ["send-keys", "-t", "s", "Down"],
+                ["send-keys", "-t", "s", "Enter"],
+            ],
+        )
 
 
 if __name__ == "__main__":

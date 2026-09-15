@@ -108,6 +108,11 @@ class AgentAdapter(abc.ABC):
     #: provider surface is not understood: approvals always wait for a
     #: human and the watcher never sends input for them.
     permission_approve_input: str | None = None
+    #: Provider-owned permission-selector key sequence (ordered terminal
+    #: key names such as `"Enter"`), sent only after a parsed request is
+    #: approved and the live surface is a choice selector. None means the
+    #: provider has no selector surface: approvals use the text keystroke.
+    permission_approve_keys: tuple[str, ...] | None = None
     #: Provider-owned CLI option that selects the model for a fresh start
     #: (for example `"--model"` or `"-m"`). None means the provider has no
     #: verified model-selection flag and `switch_model` stays unsupported.
@@ -185,6 +190,19 @@ class AgentAdapter(abc.ABC):
         except terminal_mod.TerminalError as exc:
             raise TransportError(
                 f"failed to deliver input to {self.provider_name}: {exc}"
+            ) from exc
+
+    def send_keys(self, keys: list[str] | tuple[str, ...]) -> None:
+        """Deliver named keys to the session (selector confirmations only)."""
+        try:
+            self.driver.send_keys(self.session_name, list(keys))
+        except terminal_mod.TmuxNotAvailable as exc:
+            raise TransportError(str(exc)) from exc
+        except terminal_mod.SessionMissing as exc:
+            raise TransportError(str(exc)) from exc
+        except terminal_mod.TerminalError as exc:
+            raise TransportError(
+                f"failed to deliver keys to {self.provider_name}: {exc}"
             ) from exc
 
     def interrupt(self) -> None:
@@ -300,6 +318,16 @@ class AgentAdapter(abc.ABC):
             return permissions_mod.parse_permission_request(capture_tail)
         except Exception:
             return None
+
+    def recognize_selector(self, capture_tail: str) -> bool:
+        """True when the live approval surface is a choice selector.
+
+        Choice selectors (Allow once / Allow always / Reject style) need
+        the adapter-owned key sequence instead of the text keystroke.
+        The base implementation reports no selector; providers with a
+        verified selector surface override it. Never raises.
+        """
+        return False
 
     def is_idle(self) -> bool:
         """Conservative default: never claim idle without evidence."""

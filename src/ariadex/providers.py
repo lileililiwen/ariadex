@@ -79,9 +79,22 @@ class OpenCodeAdapter(AgentAdapter):
     # Standard TUI confirm keystroke; sent only after a parsed request is
     # approved by the permission policy, never for unknown surfaces.
     permission_approve_input = "y"
+    # Directory-access prompts render as a choice selector (Allow once /
+    # Allow always / Reject with `select` + `enter` hints). Confirming with
+    # Enter answers the focused choice (the single-grant option), never
+    # types into the session; sent only after a parsed request is approved.
+    permission_approve_keys = ("Enter",)
     # Verified `opencode --help`: `-m, --model provider/model`.
     model_option = "-m"
     ready_markers = ("Ask anything", "tab agents")
+
+    def recognize_selector(self, capture_tail: str) -> bool:
+        """True for the Allow once / Allow always / Reject choice surface."""
+        try:
+            lowered = "\n".join((capture_tail or "").splitlines()[-16:]).lower()
+        except Exception:
+            return False
+        return "allow once" in lowered and "allow always" in lowered
 
     def input_surface(self, capture: str) -> InputSurface:
         """Recognize OpenCode's current composer, independent of answer text.

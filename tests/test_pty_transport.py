@@ -136,6 +136,35 @@ class PtyLifecycleTest(unittest.TestCase):
         self.assertEqual(argv[0], "tail")
         self.assertIn(".log", argv[-1])
 
+    def test_keys_op_delivers_named_keys_and_refuses_unknown(self) -> None:
+        self.driver.create_or_connect("s1", self.project, ["cat"])
+        paths = self.driver._paths("s1")
+        for payload, expected_ok in (
+            ({"op": "keys", "keys": ["Enter"]}, True),
+            ({"op": "keys", "keys": ["Down", "Enter"]}, True),
+            ({"op": "keys", "keys": ["F13"]}, False),
+            ({"op": "keys", "keys": []}, False),
+        ):
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                client.settimeout(5.0)
+                client.connect(str(paths["socket"]))
+                client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+                data = b""
+                while b"\n" not in data:
+                    data += client.recv(4096)
+                reply = json.loads(data.decode("utf-8"))
+                self.assertEqual(reply["ok"], expected_ok, payload)
+            finally:
+                client.close()
+        self.assertTrue(self.driver.session_alive("s1"))
+
+    def test_driver_send_keys_reaches_live_session(self) -> None:
+        self.driver.create_or_connect("s1", self.project, ["cat"])
+        self.driver.send_keys("s1", ["Enter"])
+        with self.assertRaises(terminal_mod.TerminalError):
+            self.driver.send_keys("ghost", ["Enter"])
+
     def test_malformed_request_keeps_relay_serving(self) -> None:
         self.driver.create_or_connect("s1", self.project, ["cat"])
         paths = self.driver._paths("s1")

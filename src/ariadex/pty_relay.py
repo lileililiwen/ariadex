@@ -7,6 +7,9 @@ send/capture/interrupt without holding the pty itself.
 
 Protocol (one JSON object per line, 64KB bound each way):
   {"op": "send", "text": "..."}      -> write text + Enter key
+  {"op": "keys", "keys": [...]}      -> write named keys (Enter, Escape, Tab,
+                                        Up, Down, Left, Right; same names as
+                                        terminal.SELECTOR_KEYS), no extra Enter
   {"op": "interrupt"}                -> write C-c byte
   {"op": "capture", "lines": N}      -> {"ok": true, "text": "..."}
   {"op": "ping"}                     -> {"ok": true, "alive": bool}
@@ -35,6 +38,18 @@ LOG_MAX_BYTES = 33554432
 SELECT_TIMEOUT_S = 0.5
 EXIT_GRACE_S = 5.0
 SOCKET_TIMEOUT_S = 5.0
+
+#: Named-key to control-byte map. Mirrors terminal.SELECTOR_KEYS (kept
+#: local so the relay stays dependency-free); unknown names are refused.
+KEY_BYTES = {
+    "Enter": b"\r",
+    "Escape": b"\x1b",
+    "Tab": b"\t",
+    "Up": b"\x1b[A",
+    "Down": b"\x1b[B",
+    "Left": b"\x1b[D",
+    "Right": b"\x1b[C",
+}
 
 
 def _reply(conn: socket.socket, payload: dict) -> None:
@@ -141,6 +156,25 @@ def serve(
                 _fail(conn, f"interrupt failed: {exc}")
             else:
                 _reply(conn, {"ok": True})
+        elif op == "keys":
+            keys = request.get("keys", [])
+            if not isinstance(keys, list) or not keys:
+                _fail(conn, "keys requires a non-empty key list")
+            else:
+                try:
+                    raw = b"".join(KEY_BYTES[key] for key in keys)
+                except (KeyError, TypeError):
+                    _fail(
+                        conn,
+                        "unknown key: expected one of " + ", ".join(sorted(KEY_BYTES)),
+                    )
+                else:
+                    try:
+                        os.write(master, raw)
+                    except OSError as exc:
+                        _fail(conn, f"keys failed: {exc}")
+                    else:
+                        _reply(conn, {"ok": True})
         elif op == "capture":
             try:
                 wanted = int(request.get("lines", 0) or 0)

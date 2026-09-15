@@ -1351,11 +1351,12 @@ class RobotWatcher:
         """Evaluate one provider approval surface against the policy.
 
         Returns the watcher phase (always WAITING for approvals). Sends
-        the adapter-owned keystroke only for a verified, contained request
-        under an auto policy, at most once per distinct request. Every
-        other surface waits for explicit human action with the exact
-        reason recorded; nothing is ever denied blindly or approved
-        without a parsed operation and contained path.
+        the adapter-owned keystroke (or key sequence for choice-selector
+        surfaces) only for a verified, contained request under an auto
+        policy, at most once per distinct request. Every other surface
+        waits for explicit human action with the exact reason recorded;
+        nothing is ever denied blindly or approved without a parsed
+        operation and contained path.
         """
         policy, temp_root_cfg, actions, allowlist_cfg = self._permission_settings()
         parsed = self.adapter.recognize_permission(capture)
@@ -1399,7 +1400,13 @@ class RobotWatcher:
                 project_dir=self.project_dir,
             )
         summary = permissions_mod.decision_summary(decision)
-        if decision.result == "allow" and decision.approve_input:
+        try:
+            selector = self.adapter.recognize_selector(capture)
+        except Exception:
+            selector = False
+        keys = list(getattr(self.adapter, "permission_approve_keys", None) or ())
+        use_keys = decision.result == "allow" and bool(selector) and bool(keys)
+        if decision.result == "allow" and (use_keys or decision.approve_input):
             key = "|".join(
                 (decision.provider, decision.operation, decision.normalized_path)
             )
@@ -1417,7 +1424,10 @@ class RobotWatcher:
                 summary = permissions_mod.decision_summary(decision)
             else:
                 try:
-                    self._send(decision.approve_input)
+                    if use_keys:
+                        self._send_keys(keys)
+                    else:
+                        self._send(decision.approve_input)
                 except RobotError as exc:
                     decision = permissions_mod.PermissionDecision(
                         decision.provider,
@@ -1633,6 +1643,18 @@ class RobotWatcher:
                 ) from exc
             raise RobotError(f"prompt delivery failed: {exc}") from exc
 
+    def _send_keys(self, keys: list[str]) -> None:
+        try:
+            self.adapter.send_keys(keys)
+        except TransportLoss:
+            raise
+        except Exception as exc:
+            if _is_transport_loss(exc):
+                raise TransportLoss(
+                    f"provider session unavailable (send-keys: {exc})"
+                ) from exc
+            raise RobotError(f"approval delivery failed: {exc}") from exc
+
     def poll(self) -> str:
         """Advance one bounded step; returns the current phase.
 
@@ -1686,7 +1708,11 @@ class RobotWatcher:
                     else self.adapter.is_input_ready(capture)
                 ),
             )
-            if provider_state == "active":
+            if provider_state == "active" and observed != CLASS_APPROVAL:
+                # A live approval surface wins over a busy process state so
+                # the permission branch evaluates it instead of stalling
+                # silently; pure busy output without approval markers stays
+                # working as before.
                 observed = CLASS_WORKING
             elif provider_state == "retry":
                 observed = CLASS_QUOTA
@@ -1697,9 +1723,10 @@ class RobotWatcher:
             # Approval/confirmation belongs to the provider conversation.
             # The permission policy decides: contained temp-root or
             # allowlist requests under an auto policy are approved with the
-            # adapter-owned keystroke; every other surface waits for the
-            # human to answer inside the user-owned session. Waiting never
-            # terminates the watcher and never resends the initial prompt.
+            # adapter-owned keystroke or selector key sequence; every other
+            # surface waits for the human to answer inside the user-owned
+            # session. Waiting never terminates the watcher and never
+            # resends the initial prompt.
             return self._handle_approval(capture)
         if observed == CLASS_QUOTA:
             if self._try_model_switch():

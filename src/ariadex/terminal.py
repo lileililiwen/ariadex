@@ -66,6 +66,14 @@ class TerminalDriver(abc.ABC):
     def send_input(self, name: str, text: str) -> None:
         """Deliver input to the session followed by Enter."""
 
+    def send_keys(self, name: str, keys: list[str]) -> None:
+        """Deliver named keys (Enter, arrows, Tab, Escape) without typing text.
+
+        Defaults to unsupported so transports without key delivery stay
+        honest; tmux and pty drivers override it.
+        """
+        raise TerminalError("this terminal driver cannot send key sequences")
+
     @abc.abstractmethod
     def interrupt(self, name: str) -> None:
         """Send an interrupt keystroke (C-c) to the session."""
@@ -93,6 +101,11 @@ class TerminalDriver(abc.ABC):
     def session_pid(self, name: str) -> int | None:
         """Return the foreground process PID when the driver can observe it."""
         return None
+
+
+#: Named keys accepted by `send_keys` (tmux key names; the pty relay
+#: maps the same names to control bytes).
+SELECTOR_KEYS = ("Enter", "Escape", "Tab", "Up", "Down", "Left", "Right")
 
 
 class TmuxDriver(TerminalDriver):
@@ -170,6 +183,22 @@ class TmuxDriver(TerminalDriver):
         try:
             self._run(["send-keys", "-t", name, "-l", text], "input delivery failed")
             self._run(["send-keys", "-t", name, "Enter"], "input delivery failed")
+        except TerminalError as exc:
+            raise DeliveryFailed(str(exc)) from exc
+
+    def send_keys(self, name: str, keys: list[str]) -> None:
+        self._require_alive(name)
+        if not keys:
+            raise TerminalError("no keys to send")
+        unknown = [key for key in keys if key not in SELECTOR_KEYS]
+        if unknown:
+            raise TerminalError(
+                f"unsupported key `{unknown[0]}`: expected one of "
+                f"{', '.join(SELECTOR_KEYS)}"
+            )
+        try:
+            for key in keys:
+                self._run(["send-keys", "-t", name, key], "key delivery failed")
         except TerminalError as exc:
             raise DeliveryFailed(str(exc)) from exc
 
@@ -536,6 +565,17 @@ class PtyDriver(TerminalDriver):
                 raise
             raise DeliveryFailed(str(exc)) from exc
 
+    def send_keys(self, name: str, keys: list[str]) -> None:
+        self._require_alive(name)
+        if not keys:
+            raise TerminalError("no keys to send")
+        try:
+            self._request(name, {"op": "keys", "keys": list(keys)})
+        except TerminalError as exc:
+            if isinstance(exc, SessionMissing):
+                raise
+            raise DeliveryFailed(str(exc)) from exc
+
     def interrupt(self, name: str) -> None:
         self._require_alive(name)
         try:
@@ -687,6 +727,13 @@ class FakeTerminalDriver(TerminalDriver):
                 texts.append(args[1])
         return texts
 
+    def sent_key_sequences(self, name: str) -> list[list[str]]:
+        sequences: list[list[str]] = []
+        for op, *args in self.calls:
+            if op == "send_keys" and args[0] == name:
+                sequences.append(list(args[1]))
+        return sequences
+
     def send_input(self, name: str, text: str) -> None:
         self._check_binary()
         if name not in self.sessions:
@@ -695,6 +742,14 @@ class FakeTerminalDriver(TerminalDriver):
             raise DeliveryFailed("input delivery failed (fake)")
         self.calls.append(("send_input", name, text))
         self.sessions[name]["output"] += text + "\n"
+
+    def send_keys(self, name: str, keys: list[str]) -> None:
+        self._check_binary()
+        if name not in self.sessions:
+            raise SessionMissing(f"tmux session `{name}` does not exist (fake)")
+        if self.fail_delivery:
+            raise DeliveryFailed("key delivery failed (fake)")
+        self.calls.append(("send_keys", name, list(keys)))
 
     def interrupt(self, name: str) -> None:
         self._check_binary()

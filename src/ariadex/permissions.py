@@ -91,6 +91,16 @@ _OPERATION_RE = re.compile(
     + r")(?![A-Za-z0-9_])"
 )
 
+#: Directory nouns and access verbs for provider directory-access prompts
+#: (for example a choice selector granting an external working directory).
+#: No concrete path is special-cased here; containment always comes from
+#: operator configuration at evaluation time.
+_DIRECTORY_NOUNS = ("director", "folder")
+_DIRECTORY_VERBS = ("access", "allow", "permit", "grant")
+
+#: Glob characters that must never appear in an approved primary directory.
+_DIRECTORY_GLOB_CHARS = ("*", "?", "[")
+
 #: Path token shapes: quoted, backticked, or bare absolute/relative tokens.
 _QUOTED_PATH_RE = re.compile(r"[`\"']([^`\"'\n]{1,512})[`\"']")
 _BARE_PATH_RE = re.compile(r"(?<![\w@])(~?(?:/|\./)(?:[^\s'\"`|&;<>$(){}[\]]+))")
@@ -161,6 +171,9 @@ def parse_permission_request(text: str) -> ParsedRequest | None:
     Returns the canonical operation plus the single unambiguous requested
     path, or None when the surface is unknown, ambiguous (zero or several
     distinct paths), privileged, or names no permitted file action.
+    Provider directory-access prompts (one unambiguous directory on the
+    access line) additionally parse as a `read` request for the directory
+    itself; surrounding pattern and history lines are context only.
     Callers must treat None as waiting: never approve, never deny-blindly.
     """
     tail = "\n".join((text or "").splitlines()[-16:])
@@ -180,7 +193,7 @@ def parse_permission_request(text: str) -> ParsedRequest | None:
         if operation is not None:
             break
     if operation is None:
-        return None
+        return _parse_directory_access(tail)
     candidates = _path_candidates(tail)
     if len(candidates) != 1:
         return None
@@ -190,6 +203,51 @@ def parse_permission_request(text: str) -> ParsedRequest | None:
     if not requested.strip():
         return None
     return ParsedRequest(operation=operation, requested_path=requested)
+
+
+def _parse_directory_access(tail: str) -> ParsedRequest | None:
+    """Parse one provider directory-access prompt (fail-closed).
+
+    Only the access line itself (the line naming directory access) may
+    contribute the requested directory: it must carry exactly one
+    path-like token with no glob characters. Every other line is context
+    (match patterns, command history) and never widens the grant.
+    A directory grant is recorded as a `read` of the directory itself;
+    policy containment and `permission_actions` gating apply unchanged.
+    """
+    access_line: str | None = None
+    for raw in (tail or "").splitlines():
+        lowered = raw.lower()
+        if any(verb in lowered for verb in _DIRECTORY_VERBS) and any(
+            noun in lowered for noun in _DIRECTORY_NOUNS
+        ):
+            access_line = raw
+            break
+    if access_line is None:
+        return None
+    found: list[str] = []
+    for match in _QUOTED_PATH_RE.finditer(access_line):
+        candidate = match.group(1).strip()
+        if (
+            candidate
+            and candidate not in found
+            and ("/" in candidate or candidate.startswith(("~", ".")))
+        ):
+            found.append(candidate)
+    for match in _BARE_PATH_RE.finditer(access_line):
+        candidate = match.group(1).strip().rstrip(".,:;!?")
+        if candidate and candidate not in found:
+            found.append(candidate)
+    if len(found) != 1:
+        return None
+    requested = found[0][:MAX_PATH_CHARS]
+    if any(char in requested for char in _DIRECTORY_GLOB_CHARS):
+        return None
+    if any(char in requested for char in _SHELL_CHARS):
+        return None
+    if not requested.strip():
+        return None
+    return ParsedRequest(operation="read", requested_path=requested)
 
 
 def temp_root_path(project_dir: Path, configured: str) -> Path:

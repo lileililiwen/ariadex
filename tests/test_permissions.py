@@ -46,6 +46,15 @@ APPROVAL_AMBIGUOUS = (
 APPROVAL_UNKNOWN = "Ask anything\nApproval required: frobnicator engaged? [y/n]\n"
 
 
+def directory_selector_capture(directory: str) -> str:
+    """Generic directory-access selector surface for one directory."""
+    return (
+        "Build\nPermission required\nAccess external directory "
+        f"{directory}\nPatterns\n- {directory}/*\n\n"
+        "Allow once   Allow always   Reject   select  enter confirm\n"
+    )
+
+
 class FakeDriver(terminal_mod.FakeTerminalDriver):
     def __init__(self) -> None:
         super().__init__()
@@ -244,6 +253,73 @@ class ParseTest(unittest.TestCase):
             self.assertEqual(other.permission_approve_input, "y")
             self.assertIsNone(other.recognize_permission(APPROVAL_UNKNOWN))
 
+    def test_directory_access_parses_single_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "work")
+            parsed = permissions_mod.parse_permission_request(
+                directory_selector_capture(target)
+            )
+            self.assertIsNotNone(parsed)
+            assert parsed is not None
+            self.assertEqual(
+                (parsed.operation, parsed.requested_path), ("read", target)
+            )
+
+    def test_directory_access_ignores_surrounding_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "work")
+            capture = (
+                f"cp {tmp}/a.rs {target}/src/main.rs\n"
+                f"cargo run --manifest-path {target}/Cargo.toml\n"
+                + directory_selector_capture(target)
+                + f"- {tmp}/*\n"
+            )
+            parsed = permissions_mod.parse_permission_request(capture)
+            self.assertIsNotNone(parsed)
+            assert parsed is not None
+            self.assertEqual(
+                (parsed.operation, parsed.requested_path), ("read", target)
+            )
+
+    def test_directory_access_two_directories_are_ambiguous(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            first = os.path.join(tmp, "one")
+            second = os.path.join(tmp, "two")
+            self.assertIsNone(
+                permissions_mod.parse_permission_request(
+                    f"Access external directory {first} and {second}\n"
+                    "Allow once   Allow always\n"
+                )
+            )
+
+    def test_directory_access_glob_primary_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(
+                permissions_mod.parse_permission_request(
+                    f"Access external directory {tmp}/*\nAllow once   Allow always\n"
+                )
+            )
+
+    def test_selector_recognition(self) -> None:
+        driver = FakeDriver()
+        opencode = providers_mod.get_adapter("opencode", driver, "agent", "/t")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "work")
+            self.assertTrue(
+                opencode.recognize_selector(directory_selector_capture(target))
+            )
+        self.assertFalse(opencode.recognize_selector(APPROVAL_SHARED_TMP))
+        self.assertEqual(opencode.permission_approve_keys, ("Enter",))
+        for provider in ("codex", "codebuddy"):
+            other = providers_mod.get_adapter(provider, driver, "agent", "/t")
+            with tempfile.TemporaryDirectory() as tmp:
+                self.assertFalse(
+                    other.recognize_selector(
+                        directory_selector_capture(os.path.join(tmp, "work"))
+                    )
+                )
+            self.assertIsNone(other.permission_approve_keys)
+
 
 class TempRootTest(unittest.TestCase):
     def test_creates_owner_only_root(self) -> None:
@@ -331,6 +407,54 @@ class EvaluateTest(unittest.TestCase):
             decision = self._evaluate(target, policy="auto", temp_root=None)
             self.assertEqual(decision.result, "allow", target)
             self.assertEqual(decision.approve_input, "y")
+
+    def _evaluate_directory(self, requested_dir: str, **overrides):
+        parsed = permissions_mod.parse_permission_request(
+            directory_selector_capture(requested_dir)
+        )
+        assert parsed is not None, f"directory surface did not parse: {requested_dir}"
+        params = {
+            "provider": "opencode",
+            "parsed": parsed,
+            "raw_tail": directory_selector_capture(requested_dir),
+            "policy": "allowlist",
+            "temp_root": None,
+            "allowlist": [],
+            "allowed_actions": ["read", "write", "create", "delete"],
+            "approve_input": "y",
+            "project_dir": self.project,
+        }
+        params.update(overrides)
+        return permissions_mod.evaluate(**params)
+
+    def test_directory_allowlisted_approves(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "work")
+            roots = permissions_mod.allowlist_roots(self.project, [tmp])
+            decision = self._evaluate_directory(target, allowlist=roots)
+            self.assertEqual(decision.result, "allow")
+            self.assertEqual(decision.operation, "read")
+            self.assertEqual(decision.requested_path, target)
+
+    def test_directory_auto_approves_any_parsed_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "work")
+            decision = self._evaluate_directory(target, policy="auto")
+            self.assertEqual(decision.result, "allow")
+
+    def test_directory_prompt_waits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "work")
+            decision = self._evaluate_directory(target, policy="prompt")
+            self.assertEqual(decision.result, "waiting")
+            self.assertEqual(decision.approve_input, "")
+
+    def test_directory_outside_allowlist_waits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "work")
+            roots = permissions_mod.allowlist_roots(self.project, ["docs"])
+            decision = self._evaluate_directory(target, allowlist=roots)
+            self.assertEqual(decision.result, "waiting")
 
     def test_auto_policy_still_waits_on_unparsed(self) -> None:
         decision = permissions_mod.evaluate(
@@ -591,6 +715,62 @@ class WatcherApprovalTest(unittest.TestCase):
         )
         watcher.poll()
         self.assertEqual(watcher.status_view()["permissions_granted"], 1)
+
+    def test_busy_provider_with_approval_reaches_policy_branch(self) -> None:
+        class BusyOpenCode(providers_mod.OpenCodeAdapter):
+            @property
+            def provider_state_required(self):  # type: ignore[override]
+                return True
+
+            def provider_state(self):  # type: ignore[override]
+                return "active"
+
+        project = make_project(self._tmp, self._config("project-temp-auto"))
+        target = project / ".ariadex" / "tmp" / "draft.txt"
+        driver = FakeDriver()
+        adapter = BusyOpenCode(driver, "agent", project)
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": self._tmp_write_capture(project, str(target)),
+            "workdir": "/t",
+        }
+        watcher = robot_mod.RobotWatcher(
+            project,
+            robot_mod.RobotConfig(
+                session="agent",
+                provider="opencode",
+                initial_prompt="please start",
+                debounce_polls=1,
+                poll_interval_s=0.01,
+            ),
+            driver,
+            adapter,
+            evidence_runner=evidence_fakes.make_runner(project),
+        )
+        self.assertEqual(watcher.poll(), robot_mod.WAITING)
+        self.assertEqual(driver.sent_inputs("agent"), ["y"])
+        self.assertEqual(watcher.permissions_granted, 1)
+        record = last_record(project)
+        self.assertEqual(record["decision"], "allow")
+        self.assertEqual(record["classification"], "approval")
+
+    def test_selector_surface_sends_keys_once(self) -> None:
+        project = make_project(self._tmp, self._config("auto"))
+        driver = FakeDriver()
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "work")
+            watcher = make_watcher(project, driver, directory_selector_capture(target))
+            self.assertEqual(watcher.poll(), robot_mod.WAITING)
+            self.assertEqual(driver.sent_inputs("agent"), [])
+            self.assertEqual(driver.sent_key_sequences("agent"), [["Enter"]])
+            self.assertEqual(watcher.permissions_granted, 1)
+            record = last_record(project)
+            self.assertEqual(record["decision"], "allow")
+            self.assertEqual(record["operation"], "read")
+            self.assertEqual(record["requested_path"], target)
+            watcher.poll()
+            self.assertEqual(driver.sent_key_sequences("agent"), [["Enter"]])
+            self.assertEqual(watcher.permissions_granted, 1)
 
 
 class WidgetProjectionTest(unittest.TestCase):
