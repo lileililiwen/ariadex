@@ -631,7 +631,7 @@ Edit `.ariadex/config.yaml` after `init`. Key settings:
 
 ```yaml
 agent_provider: opencode      # opencode | codex
-terminal_driver: tmux          # tmux (MVP driver)
+terminal_driver: tmux          # tmux | pty (Python-owned Unix relays, no tmux binary)
 context_strategy: per-spec    # per-spec | per-task | token-threshold | manual | never
 reset_mode: auto              # soft | hard | auto (fresh-session strength)
 verification_commands: []     # shell commands that gate completion
@@ -649,6 +649,7 @@ permission_policy: prompt         # prompt | project-temp-auto | allowlist | den
 permission_temp_root: .ariadex/tmp # private project-relative root
 permission_actions: [read, write, create, delete]
 permission_allowlist: []           # e.g. [/tmp] only with allowlist policy
+model_fallbacks: []              # ordered models for automatic switch on quota/model errors (empty keeps manual recovery)
 ```
 
 Add your test/build commands to `verification_commands`; the runner
