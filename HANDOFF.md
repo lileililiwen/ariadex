@@ -76,6 +76,22 @@ that promotion has been skipped or failed.
 
 ## Current state
 
+- Implemented, verified, and archived: `provider-directory-approval`
+  (archived as `2026-09-15-provider-directory-approval`). Approval
+  surfaces now win over busy provider state so the permission branch
+  evaluates instead of stalling silently; provider directory-access
+  prompts parse as one unambiguous directory with no concrete-path
+  special-casing and evaluate under the existing policies; OpenCode
+  choice selectors confirm with Enter (focused single-grant choice),
+  deduped like text approvals. Verified with 13 new tests plus touched
+  suites (245 tests OK), live-pane reproduction (directory parses and
+  allows under `auto`), Ruff check clean and format at baseline, mypy at
+  baseline (13 pre-existing), `openspec validate --changes --strict`
+  passed; promoted into `openspec/specs/robot-agent-supervisor/spec.md`.
+  Full-suite result (1546 tests): only the pre-existing tmux
+  `list-panes` environment failure, which fails identically on the
+  clean tree. Queue empty at archive time.
+
 - Implemented, verified, and archived:
   `2026-09-15-init-theme-selection`. Init now configures the widget
   theme: trailing wizard prompt (blank keeps `dark`, invalid
