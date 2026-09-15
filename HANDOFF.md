@@ -55,6 +55,16 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-15-widget-control-room`. Truthful widget controls: inline
+  two-press Stop confirm with expiry (no modal dialog), busy-click
+  acknowledgment without duplicate IPC, live per-spec job pile from local
+  OpenSpec evidence, combined Pause (scheduling plus best-effort provider
+  interrupt, re-entry safe), and a WAITING indicator with plain-word
+  latest-event text. Verified with 1332-test suite (same 2 pre-existing
+  environment failures as HEAD), Ruff clean, mypy unchanged (13
+  pre-existing), `openspec validate --changes/--specs --strict` passed;
+  archived to `openspec/specs/widget-control-room/spec.md`.
+  Queue empty at archive time.
   `2026-09-15-unattended-provider-lifecycle`. Robot-owned lifecycle
   activities: adapter `model_switch` capability with verified per-provider
   flags (`opencode -m`, `codex -m`, `codebuddy --model`), watcher
@@ -645,8 +655,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 ## Next change
 
 No active changes remain. Select the next spec with `openspec list` when new
-work is planned; the planned sequel is the widget control-room change
-(truthful stop/pause, live job pile, logs).
+work is planned; the planned sequel is the cross-platform transport change
+(libtmux/PTY backends behind the driver contract).
 
 ## Latest change: widget live log and queue visibility
 
