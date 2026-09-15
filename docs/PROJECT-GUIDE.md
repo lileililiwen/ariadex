@@ -69,9 +69,13 @@ prompt once the provider is ready, and supervises verified continuation
 until the queue is empty. `--agent`, `--first-prompt`,
 `--continuation-prompt`, and `--confirmation-prompt` override the
 configuration for one run; session names and watcher options are never
-user inputs. A duplicate `start`
-reuses the live owner; if only the widget is unhealthy it recreates that widget
+user inputs. A duplicate `start` refuses to build a second workflow while
+a live daemon record owns the project: it reports the owner (pid, start
+time, endpoint reachability), names attach or `--project <other-dir>`,
 and creates no second daemon, provider session, supervisor, or prompt.
+If only the widget is unhealthy it recreates that widget. Stale or dead
+records keep the recovery path: stale ownership is reconciled before
+anything is spawned.
 
 The managed startup sequence is:
 
@@ -82,7 +86,9 @@ The managed startup sequence is:
 2. Run the prerequisite coordinator (runtime, provider CLI, tmux with
    automatic preparation, desktop/Tkinter widget readiness). Failures
    report the affected prerequisite plus manual recovery and start nothing.
-3. Report the live owner instead of starting a second workflow; recover
+3. Refuse a second owner when a live daemon record already owns the
+   project directory (fail closed with the attach/`--project` message,
+   creating nothing, terminating nothing, clearing no records); recover
    stale ownership before spawning.
 4. Start a background process and create `.ariadex/daemon.json`.
 5. Open the owner-only Unix control socket `.ariadex/daemon.sock`.
@@ -257,8 +263,14 @@ Behavior:
   the confirmation or continuation prompt. Quota/rate-limit responses
   are also non-terminal waiting states: no further prompt is sent while the
   operator switches the model or credentials. Approval and confirmation
-  requests are non-terminal waiting states; the watcher continues polling
-  until the provider resumes or the user pauses/quits.
+   requests are non-terminal waiting states; the watcher continues polling
+   until the provider resumes or the user pauses/quits.
+ - A dead tmux session or failed pane capture/send never kills supervision:
+   the watcher records an `unexpected-provider-exit` diagnostic, enters a
+   waiting state, and sends no provider input. Watching resumes once the
+   session is restored. An unexpected watcher error is recorded the same
+   way (preserving the outcome) while the daemon and widget keep reporting
+   the true state.
 - A finished conversation is recognized only when the selected adapter's
   provider-owned input-ready signal is stable for `--debounce` polls (default
   3) with no
