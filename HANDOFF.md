@@ -55,16 +55,16 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
-  `2026-09-15-widget-status-version`. Bottom status bar (project name
-  plus active-specs count only, no name list) and a display-only
-  version row below the title on mini player and hub; version prefers
-  the supervision's running version from daemon IPC with installed-
-  drift shown, local code version as fallback. Verified with
-  1355-test suite (same 2 pre-existing environment failures as HEAD),
-  Ruff clean, mypy at baseline (13 pre-existing),
+  `2026-09-15-finish-quiescence`. Dead-screen gate on all three
+  debounce-gated boundary paths: the classifier tail must be
+  byte-identical across the window or the count restarts with no
+  boundary evaluated; the watcher's own input echo counts as a screen
+  change (one settling poll). Verified with 1357-test suite (same 2
+  pre-existing environment failures as HEAD), Ruff clean, mypy at
+  baseline (13 pre-existing),
   `openspec validate --changes/--specs --strict` passed; promoted
-  into `openspec/specs/companion/spec.md`. Queue at archive time:
-  `2026-09-15-finish-quiescence`, `2026-09-15-ask-before-recovery`.
+  into `openspec/specs/robot-agent-supervisor/spec.md`. Queue at
+  archive time: `2026-09-15-ask-before-recovery`.
   `2026-09-15-auto-approve-policy`. Explicit opt-in `auto` permission
   policy: parsed requests with an enabled operation approve at any path;
   unparsed surfaces wait; privileged markers, resolution, and the
