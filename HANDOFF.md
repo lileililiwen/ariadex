@@ -55,6 +55,16 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-15-widget-status-version`. Bottom status bar (project name
+  plus active-specs count only, no name list) and a display-only
+  version row below the title on mini player and hub; version prefers
+  the supervision's running version from daemon IPC with installed-
+  drift shown, local code version as fallback. Verified with
+  1355-test suite (same 2 pre-existing environment failures as HEAD),
+  Ruff clean, mypy at baseline (13 pre-existing),
+  `openspec validate --changes/--specs --strict` passed; promoted
+  into `openspec/specs/companion/spec.md`. Queue at archive time:
+  `2026-09-15-finish-quiescence`, `2026-09-15-ask-before-recovery`.
   `2026-09-15-auto-approve-policy`. Explicit opt-in `auto` permission
   policy: parsed requests with an enabled operation approve at any path;
   unparsed surfaces wait; privileged markers, resolution, and the
@@ -678,9 +688,9 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active changes remain. Select the next spec with `openspec list` when new
-work is planned; the planned sequel is the cross-platform transport change
-(libtmux/PTY backends behind the driver contract).
+Select `2026-09-15-finish-quiescence` next: implement, run the full
+verification sequence, and archive with canonical spec promotion.
+Queued after it: `2026-09-15-ask-before-recovery`.
 
 ## Latest change: widget live log and queue visibility
 
