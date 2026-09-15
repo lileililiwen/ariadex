@@ -77,14 +77,12 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Proposed, awaiting selection (no implementation yet):
-  `2026-09-15-hub-keymap` (keymap menu; yield never quits;
-  quit-current and quit-all are distinct keys),
   `2026-09-15-manual-actions` (labeled manual rows: retry, model
   select from a new `models` config list, message send with
   empty/draft/PAUSE refusals; rows, never tabs),
   `2026-09-15-session-robustness` (seal provider session-loss gaps:
-  session-loss survival plus single live-owner guard). All three
-  validate clean (`openspec validate --changes --strict`).
+  session-loss survival plus single live-owner guard). Both validate
+  clean (`openspec validate --changes --strict`).
   `2026-09-15-ask-before-recovery`. One bounded DONE/WORKING
   readiness ask in the current conversation before confirmation
   recovery: fixed protocol wording, strict last-line parsing on a
@@ -184,6 +182,28 @@ that promotion has been skipped or failed.
   `hub-keymap`, `manual-actions`, `session-robustness` remain; the
   latter appeared as a new proposed change during this work and is
   tracked but unimplemented).
+  `2026-09-15-hub-keymap`. The hub has a keymap menu (Keys button):
+  every global binding (yield, quit-current-tab, quit-all, toggle
+  log) lists its current key with a Set control that captures the
+  next keypress; duplicates are refused inline with the reason,
+  Escape cancels, and the map persists per user. Quit-current calls
+  the existing detach path (visible tab only, others keep polling;
+  last tab keeps the exact Quit-button behavior), quit-all stays a
+  separate key, and yield (`Ctrl+Esc` default) only pauses/resumes —
+  it never quits. The hub grabs one key per action through one
+  adapter instance each (adapters are single-key by construction);
+  refused grabs stay recorded and visible while the rest stay live.
+  The mini keeps its yield-only hotkey row (now writing the map plus
+  the legacy key) with a read-only keys line. Verified with 36 new
+  `tests/test_hub_keymap.py` tests plus the touched suites
+  (274 tests OK), full 1439-test suite with only the pre-existing
+  tmux `list-panes` env failure, Ruff check/format clean, mypy at
+  baseline (13 pre-existing), `openspec validate --changes/--specs
+  --strict` passed (2 active changes, 68 canonical specs); promoted
+  into `openspec/specs/hub-controls/spec.md` plus the promised
+  `floating-control` yield-keymap line (no formal delta existed).
+  Queue empties by one (`hub-keymap` archived; `manual-actions`,
+  `session-robustness` remain).
 
 - Implemented, verified, and archived:
   `2026-09-14-independent-runtime-processes`. Managed widget IPC and polling
@@ -759,8 +779,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Select `2026-09-15-hub-keymap` next when building starts, then
-`2026-09-15-manual-actions`, `2026-09-15-session-robustness`, one at a time.
+Select `2026-09-15-manual-actions` next when building starts, then
+`2026-09-15-session-robustness`, one at a time.
 
 ## Latest change: widget live log and queue visibility
 
