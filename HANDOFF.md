@@ -77,13 +77,14 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Proposed, awaiting selection (no implementation yet):
-  `2026-09-15-log-autoscroll` (logs follow the latest entry),
   `2026-09-15-hub-keymap` (keymap menu; yield never quits;
   quit-current and quit-all are distinct keys),
   `2026-09-15-manual-actions` (labeled manual rows: retry, model
   select from a new `models` config list, message send with
-  empty/draft/PAUSE refusals; rows, never tabs). All three validate
-  clean (`openspec validate --changes --strict`).
+  empty/draft/PAUSE refusals; rows, never tabs),
+  `2026-09-15-session-robustness` (seal provider session-loss gaps:
+  session-loss survival plus single live-owner guard). All three
+  validate clean (`openspec validate --changes --strict`).
   `2026-09-15-ask-before-recovery`. One bounded DONE/WORKING
   readiness ask in the current conversation before confirmation
   recovery: fixed protocol wording, strict last-line parsing on a
@@ -162,6 +163,27 @@ that promotion has been skipped or failed.
   ("Strip mode parks the mini player"). Queue empties by one
   (`mini-collapse` archived; `log-autoscroll`, `hub-keymap`,
   `manual-actions` remain).
+  `2026-09-15-log-autoscroll`. Both widget log areas follow the
+  latest entry: after every rewrite the mini context log and the hub
+  detail log call `see("end")` inside the existing suppress guard, so
+  new activity is visible without manual scrolling. Each log gains a
+  slim vertical `Scrollbar` paired via `yscrollcommand`/`command`
+  that shares the text row's width budget (no layout growth, no
+  config keys). Bounds, redaction, and durable state are untouched;
+  the single-robot widget log and the mini details-panel text dump
+  stay as-is per the change scope (design named the hub
+  `status_text`; corrected to the hub `log_text` activity panel).
+  Verified with 12 new `tests/test_log_autoscroll.py` tests plus the
+  touched suites (companion, widget-context, widget-placement,
+  mini-collapse, robot-hub, docs-consistency: 238 tests OK), Ruff
+  check/format clean, mypy at baseline (13 pre-existing),
+  `openspec validate --changes/--specs --strict` passed (3 active
+  changes, 68 canonical specs); promoted into
+  `openspec/specs/companion/spec.md` ("Widget logs follow the latest
+  entry"). Queue empties by one (`log-autoscroll` archived;
+  `hub-keymap`, `manual-actions`, `session-robustness` remain; the
+  latter appeared as a new proposed change during this work and is
+  tracked but unimplemented).
 
 - Implemented, verified, and archived:
   `2026-09-14-independent-runtime-processes`. Managed widget IPC and polling
@@ -737,8 +759,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Select `2026-09-15-log-autoscroll` next when building starts, then
-`2026-09-15-hub-keymap`, `2026-09-15-manual-actions`, one at a time.
+Select `2026-09-15-hub-keymap` next when building starts, then
+`2026-09-15-manual-actions`, `2026-09-15-session-robustness`, one at a time.
 
 ## Latest change: widget live log and queue visibility
 
