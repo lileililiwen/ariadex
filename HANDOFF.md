@@ -55,6 +55,15 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-15-auto-approve-policy`. Explicit opt-in `auto` permission
+  policy: parsed requests with an enabled operation approve at any path;
+  unparsed surfaces wait; privileged markers, resolution, and the
+  operation allowlist still gate; default stays `prompt`; init warns on
+  selection. Verified with 1349-test suite (same 2 pre-existing
+  environment failures as HEAD), Ruff clean, mypy at baseline (13
+  pre-existing), `openspec validate --changes/--specs --strict` passed;
+  promoted into `openspec/specs/robot-agent-supervisor/spec.md`.
+  Queue empty at archive time.
   `2026-09-15-portable-terminal-transport`. Python-owned pty sessions
   behind the unchanged driver contract: stdlib-only Unix relay daemon
   (`pty_relay.py`), full `PtyDriver` ABC implementation with
