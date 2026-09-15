@@ -77,6 +77,27 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-15-widget-theme-and-manual-input`. Standalone
+  `src/ariadex/theme.py` owns all widget paint (dark/light/contrast,
+  `theme` config key defaulting to dark with warn-and-fallback);
+  every mini/hub/robot surface renders from it — no Tk light
+  defaults remain. Message textarea is keyboard-focusable
+  (`takefocus`) with theme line spacing; covered by a real-Tk Xvfb
+  typing regression test (focus, keys, send, clear). `ariadex -V`
+  and the widget version row share `upgrade.describe_build`
+  (`<version>+g<sha>[-dirty]`, fail-soft, lazily resolved so
+  read-only commands never probe git). Verified: full 1523-test
+  suite with only the pre-existing tmux `list-panes` env failure
+  (fails identically on the clean tree), Ruff check/format clean,
+  mypy at baseline (13 pre-existing, none in touched files),
+  `openspec validate --changes/--specs --strict` passed (68
+  canonical specs); promoted into
+  `openspec/specs/companion/spec.md` and
+  `openspec/specs/cli-lifecycle/spec.md`. Geometry re-measured
+  under Xvfb (collapsed 344, full 884 = 694+190): constants hold.
+  Queue empty at archive time.
+
+- Implemented, verified, and archived:
   `2026-09-15-session-robustness` (commit `1112b1e`; archived as
   `2026-09-15-2026-09-15-session-robustness`). Transport loss is now a
   classified watcher state, never an escaping exception: `SessionMissing`
