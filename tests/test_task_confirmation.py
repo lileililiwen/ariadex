@@ -357,8 +357,20 @@ class PromptSelectionTest(unittest.TestCase):
         watcher = make_watcher(project, driver, fresh_ready_attempts=1)
         with clean_git(self):
             watcher.poll()  # initial prompt
+            # Poll, ask baseline, ask iterations (send echo settles into
+            # garbage, so the ask concludes fast), then the fresh-ready
+            # wait for today's recovery path.
             with unittest.mock.patch.object(
-                watcher, "_capture", side_effect=[READY, READY, "blank screen"]
+                watcher,
+                "_capture",
+                side_effect=[
+                    READY,
+                    READY,
+                    "blank screen",
+                    "blank screen",
+                    "blank screen",
+                    "blank screen",
+                ],
             ):
                 self.assertEqual(watcher.poll(), "working")
         self.assertEqual(watcher.block_reason, "")
@@ -374,13 +386,32 @@ class PromptSelectionTest(unittest.TestCase):
         watcher.initial_sent = True
         with (
             clean_git(self),
+            # Poll, ask baseline, ask iterations (send echo settles into
+            # garbage, so the ask concludes fast), then today's path.
             unittest.mock.patch.object(
-                watcher, "_capture", side_effect=[MAX_STEP_LIMIT, READY, READY]
+                watcher,
+                "_capture",
+                side_effect=[
+                    MAX_STEP_LIMIT,
+                    READY,
+                    READY,
+                    READY + "\n> sent-echo\n",
+                    READY + "\n> sent-echo\n",
+                    READY,
+                ],
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
         ):
             self.assertEqual(watcher.poll(), "continuing")
-        self.assertEqual(driver.sent_inputs("agent"), ["please finish the rest"])
+        # The readiness ask fires first (unparseable echo concludes it),
+        # then today's recovery sends the confirmation.
+        self.assertEqual(
+            driver.sent_inputs("agent"),
+            [
+                robot_mod.readiness_ask_text("demo", 1),
+                "please finish the rest",
+            ],
+        )
         self.assertEqual(watcher.confirmations_sent, 1)
 
     def test_invalid_metadata_sends_no_confirmation(self) -> None:
@@ -645,6 +676,140 @@ class RobotLogWidgetTest(unittest.TestCase):
 
 
 DRAFT = "Ask anything\n┃ user is typing a correction\n▣ Build · x\n"
+
+
+class ReadinessAskTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp: list = []
+        self.addCleanup(lambda: [tmp.cleanup() for tmp in self._tmp])
+
+    def _watcher(self, project, driver, **overrides):
+        params = {"fresh_ready_interval_s": 0.01}
+        params.update(overrides)
+        return make_watcher(project, driver, **params)
+
+    def test_parser_matrix(self) -> None:
+        parse = robot_mod.parse_readiness_reply
+        self.assertEqual(parse("base\nDONE\n", "base\n"), "DONE")
+        self.assertEqual(parse("base\nWORKING\n", "base\n"), "WORKING")
+        self.assertEqual(parse("base\n  done  \n", "base\n"), "DONE")
+        self.assertIsNone(parse("base\n", "base\n"))
+        self.assertIsNone(parse("base\necho\n", "base\n"))
+        self.assertIsNone(parse("base\necho\nDONE\nthanks\n", "base\n"))
+        self.assertIsNone(parse("base DONE\n", "base\n"))
+        self.assertIsNone(parse("DONE\nmore\n", "DONE\n"))
+        self.assertIsNone(parse("", ""))
+
+    def test_working_reply_skips_reset(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open it\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        watcher = self._watcher(project, driver)
+        echo = READY + "question-echo\n"
+        replied = echo + "WORKING\n"
+        with clean_git(self):
+            watcher.poll()  # initial prompt
+            with unittest.mock.patch.object(
+                watcher,
+                "_capture",
+                side_effect=[READY, READY, echo, replied, replied],
+            ):
+                phase = watcher.poll()
+        self.assertIn(phase, ("working", "attached"))
+        self.assertEqual(watcher.stable_polls, 0)
+        sent = driver.sent_inputs("agent")
+        self.assertEqual(sent[0], "please start")
+        self.assertIn("DONE or WORKING", sent[1])
+        self.assertNotIn("/new", sent)
+        self.assertEqual(watcher.confirmations_sent, 0)
+
+    def test_done_reply_runs_todays_recovery(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open it\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        watcher = self._watcher(project, driver)
+        echo = READY + "question-echo\n"
+        replied = echo + "DONE\n"
+        with clean_git(self):
+            watcher.poll()  # initial prompt
+            with unittest.mock.patch.object(
+                watcher,
+                "_capture",
+                side_effect=[READY, READY, echo, replied, replied, READY],
+            ):
+                self.assertEqual(watcher.poll(), "continuing")
+        sent = driver.sent_inputs("agent")
+        self.assertIn("/new", sent)
+        self.assertEqual(sent[-1], "please finish the rest")
+        self.assertEqual(watcher.confirmations_sent, 1)
+
+    def test_static_screen_recovers_as_today(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open it\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        watcher = self._watcher(project, driver)
+        with clean_git(self):
+            watcher.poll()  # initial prompt
+            # Static screen: poll, ask baseline, full bounded wait with no
+            # reply, then the fresh-ready wait on today's path.
+            with unittest.mock.patch.object(
+                watcher, "_capture", side_effect=[READY] * 16
+            ):
+                self.assertEqual(watcher.poll(), "continuing")
+        sent = driver.sent_inputs("agent")
+        self.assertIn("/new", sent)
+        self.assertEqual(sent[-1], "please finish the rest")
+
+    def test_second_evaluation_skips_ask(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open it\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        watcher = self._watcher(project, driver)
+        first = watcher._ask_readiness(
+            "demo", 1, ["demo"], "openspec", sleep=lambda _: None
+        )
+        self.assertEqual(first, "unknown")
+        sent_after_first = list(driver.sent_inputs("agent"))
+        self.assertEqual(len(sent_after_first), 1)
+        second = watcher._ask_readiness(
+            "demo", 1, ["demo"], "openspec", sleep=lambda _: None
+        )
+        self.assertEqual(second, "unknown")
+        self.assertEqual(driver.sent_inputs("agent"), sent_after_first)
+
+    def test_pause_during_ask_parks_without_reset(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open it\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        mode = ["AUTO"]
+        watcher = self._watcher(project, driver)
+        watcher.mode_requested = lambda: mode[0]
+        watcher.initial_sent = True
+        calls: list[int] = []
+
+        def flipping_capture() -> str:
+            calls.append(1)
+            if len(calls) == 4:
+                mode[0] = "PAUSE"
+            return READY
+
+        with (
+            clean_git(self),
+            unittest.mock.patch.object(
+                watcher, "_capture", side_effect=flipping_capture
+            ),
+        ):
+            self.assertEqual(watcher.poll(), robot_mod.PAUSED)
+        sent = driver.sent_inputs("agent")
+        self.assertEqual(len(sent), 1)
+        self.assertIn("DONE or WORKING", sent[0])
+        self.assertNotIn("/new", sent)
+        self.assertEqual(watcher.confirmations_sent, 0)
 
 
 class ConfirmationDraftGuardTest(unittest.TestCase):

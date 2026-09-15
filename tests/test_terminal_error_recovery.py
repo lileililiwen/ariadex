@@ -187,21 +187,34 @@ class RoutingTest(unittest.TestCase):
             "output": READY_OPENCODE,
             "workdir": "/t",
         }
-        watcher = make_watcher(project, driver)
+        watcher = make_watcher(project, driver, fresh_ready_interval_s=0.01)
         watcher.initial_sent = True
+        echo = READY_OPENCODE + "\n> sent-echo\n"
         with (
             self._clean_git(),
             unittest.mock.patch.object(
                 watcher,
                 "_capture",
-                side_effect=[TERMINAL_OPENCODE, READY_OPENCODE, READY_OPENCODE],
+                side_effect=[
+                    TERMINAL_OPENCODE,
+                    READY_OPENCODE,
+                    READY_OPENCODE,
+                    echo,
+                    echo,
+                    READY_OPENCODE,
+                ],
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
         ):
             self.assertEqual(watcher.poll(), "continuing")
-        # Confirmation prompt configured on the watcher is delivered.
+        # The readiness ask fires first (its echo settles into garbage),
+        # then today's recovery delivers the configured confirmation.
         self.assertEqual(
-            driver.sent_inputs("agent"), [watcher.config.confirmation_prompt]
+            driver.sent_inputs("agent"),
+            [
+                robot_mod.readiness_ask_text("demo", 1),
+                watcher.config.confirmation_prompt,
+            ],
         )
         self.assertEqual(watcher.confirmations_sent, 1)
         self.assertEqual(watcher.boundary_error_category, "")
@@ -255,14 +268,24 @@ class RoutingTest(unittest.TestCase):
             "output": READY_OPENCODE,
             "workdir": "/t",
         }
-        watcher = make_watcher(project, driver, fresh_ready_attempts=1)
+        watcher = make_watcher(
+            project, driver, fresh_ready_attempts=1, fresh_ready_interval_s=0.01
+        )
         watcher.initial_sent = True
+        echo = READY_OPENCODE + "\n> sent-echo\n"
         with (
             self._clean_git(),
             unittest.mock.patch.object(
                 watcher,
                 "_capture",
-                side_effect=[TERMINAL_OPENCODE, READY_OPENCODE, "blank screen"],
+                side_effect=[
+                    TERMINAL_OPENCODE,
+                    READY_OPENCODE,
+                    READY_OPENCODE,
+                    echo,
+                    echo,
+                    "blank screen",
+                ],
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
         ):
@@ -286,8 +309,9 @@ class RecordingTest(unittest.TestCase):
             "output": READY_OPENCODE,
             "workdir": "/t",
         }
-        watcher = make_watcher(project, driver)
+        watcher = make_watcher(project, driver, fresh_ready_interval_s=0.01)
         watcher.initial_sent = True
+        echo = READY_OPENCODE + "\n> sent-echo\n"
         with (
             unittest.mock.patch.object(
                 robot_mod, "_git_tree_clean", return_value=(True, "")
@@ -295,7 +319,14 @@ class RecordingTest(unittest.TestCase):
             unittest.mock.patch.object(
                 watcher,
                 "_capture",
-                side_effect=[secret_capture, READY_OPENCODE, READY_OPENCODE],
+                side_effect=[
+                    secret_capture,
+                    READY_OPENCODE,
+                    READY_OPENCODE,
+                    echo,
+                    echo,
+                    READY_OPENCODE,
+                ],
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
         ):

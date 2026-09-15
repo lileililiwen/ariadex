@@ -41,6 +41,48 @@ DEFAULT_CONTINUATION_PROMPT = "Please read the HANDOFF.md, and implement the nex
 # Re-exported so watcher defaults stay identical to managed configuration.
 DEFAULT_ROBOT_CONFIRMATION_PROMPT = DEFAULT_CONFIRMATION_PROMPT
 
+#: Readiness-ask reply tokens. The ask demands exactly one of these lines;
+#: anything else is unparseable and falls back to today's recovery.
+READINESS_REPLY_DONE = "DONE"
+READINESS_REPLY_WORKING = "WORKING"
+READINESS_REPLIES = (READINESS_REPLY_DONE, READINESS_REPLY_WORKING)
+
+
+def readiness_ask_text(spec: str, open_tasks: int) -> str:
+    """Fixed readiness-ask prompt (protocol text, never user-configured).
+
+    The wording is fixed because the reply parser accepts exactly the two
+    tokens it names; configurable wording would break the strict parse.
+    """
+    name = (spec or "").strip() or "(unknown spec)"
+    return (
+        f"Spec `{name}` still shows {max(int(open_tasks), 0)} open task(s). "
+        "Reply with exactly one line: DONE or WORKING."
+    )
+
+
+def parse_readiness_reply(capture: str, baseline: str) -> str | None:
+    """Strict readiness token from text added since `baseline`.
+
+    Returns DONE or WORKING when the last non-empty added line is exactly
+    that token, else None (unchanged screen, garbage, or timeout). Only
+    appended text is considered so pre-existing prose never decides, and
+    the last line is judged (not the first) because our own question echo
+    always precedes the reply on screen.
+    """
+    current = capture or ""
+    base = baseline or ""
+    if current == base:
+        return None
+    added = current[len(base) :] if base and current.startswith(base) else current
+    for line in reversed(added.splitlines()):
+        text = line.strip().upper()
+        if not text:
+            continue
+        return text if text in READINESS_REPLIES else None
+    return None
+
+
 #: Maximum stored activity events per watcher (in-memory, informational only).
 MAX_ACTIVITY_EVENTS = 50
 
@@ -879,6 +921,11 @@ class RobotWatcher:
         #: tail resets the count on sight, and an identical tail still
         #: needs a full run of consecutive finished polls.
         self._last_finished_tail: str | None = None
+        #: Readiness-ask guard memory: `(spec, open_tasks)` of the last
+        #: undecided boundary that was asked, so the same boundary never
+        #: asks twice in a row. Any progress (new target, fewer open
+        #: tasks) mismatches the memory and re-arms the ask.
+        self._readiness_asked: tuple[str, int] | None = None
         # Empty initial prompt means attach to the current conversation and
         # never inject a synthetic first request.
         self.initial_sent = not self.config.initial_prompt.strip()
@@ -1986,6 +2033,105 @@ class RobotWatcher:
         self.boundary_error_category = ""
         return self.phase
 
+    def _ask_readiness(
+        self,
+        target: str,
+        open_tasks: int,
+        active: list[str],
+        evidence_source: str,
+        sleep: Callable[[float], None] | None = None,
+    ) -> str:
+        """One bounded DONE/WORKING ask in the current conversation.
+
+        Backup disambiguation before confirmation recovery: the screen is
+        finished but the evidence is incomplete, so the agent may be
+        pausing mid-work or truly stuck. Returns "done", "working",
+        "unknown" (timeout, garbage, or already asked for this boundary),
+        "paused", or "stopped". Only "working"/"paused"/"stopped" divert
+        from today's recovery path; everything else falls through to it.
+        The reply is parsed only from text added after the ask on a
+        settled screen, so streamed partial tokens never decide.
+        """
+        do_sleep = sleep if sleep is not None else time.sleep
+        key = (target, max(int(open_tasks), 0))
+        if self._readiness_asked == key:
+            return "unknown"
+        self._readiness_asked = key
+        question = readiness_ask_text(target, open_tasks)
+        baseline = self._capture()
+        self._send(question)
+        self.prompts_sent += 1
+        self._record("prompt", f"sent readiness ask for `{target}`; awaiting reply")
+        self._diag(
+            "prompt",
+            "sent readiness ask",
+            result="sent",
+            message=f"readiness ask sent for `{target}`; no reset performed",
+            current_spec=target,
+            open_tasks=open_tasks,
+            active_queue=tuple(active),
+            evidence_source=evidence_source,
+            decision="ask",
+            operation="readiness-ask",
+            next_action="route on the DONE/WORKING reply, else recover as today",
+        )
+        bound = max(self.config.fresh_ready_attempts, 1)
+        previous: str | None = None
+        # The ask needs at least two post-send captures (observe, then
+        # judge on a settled screen), so the loop always runs twice even
+        # when the fresh-ready bound is 1. A single iteration could never
+        # hear a reply.
+        ask_bound = max(bound, 2)
+        ran = 0
+        for attempt in range(1, ask_bound + 1):
+            if self._quit or (
+                self.shutdown_requested is not None and self.shutdown_requested()
+            ):
+                self._fresh_ready_aborted = "stopped"
+                return "stopped"
+            if self.mode_requested is not None and self.mode_requested() == "PAUSE":
+                self._fresh_ready_aborted = "paused"
+                return "paused"
+            capture = self._capture()
+            if previous is not None and capture == previous:
+                token = parse_readiness_reply(capture, baseline)
+                if token is not None:
+                    self._record(
+                        "readiness",
+                        f"agent replied {token} for `{target}`",
+                    )
+                    self._diag(
+                        "prompt",
+                        f"readiness reply {token}",
+                        result="replied",
+                        message=f"agent replied {token} for `{target}`",
+                        current_spec=target,
+                        open_tasks=open_tasks,
+                        active_queue=tuple(active),
+                        evidence_source=evidence_source,
+                        decision="ask",
+                        operation="readiness-ask",
+                        next_action="route on the reply",
+                    )
+                    return "done" if token == READINESS_REPLY_DONE else "working"
+                if capture != baseline:
+                    self._record(
+                        "readiness",
+                        f"unparseable readiness reply for `{target}`; "
+                        "recovering as without the ask",
+                    )
+                    return "unknown"
+            previous = capture
+            ran = attempt
+            if attempt < ask_bound:
+                do_sleep(self.config.fresh_ready_interval_s)
+        self._record(
+            "readiness",
+            f"no readiness reply for `{target}` after {ran} attempt(s); "
+            "recovering as without the ask",
+        )
+        return "unknown"
+
     def _open_confirmation(self, check: BoundaryCheck, instruction: str = "") -> str:
         """Recover unfinished tasks via the adapter contract only.
 
@@ -2033,6 +2179,33 @@ class RobotWatcher:
         ):
             self.phase = PAUSED
             self._record("pause", "automatic confirmation cancelled by operator")
+            return self.phase
+        ask = self._ask_readiness(
+            target, check.open_tasks, list(check.active), check.evidence_source
+        )
+        if ask in ("paused", "stopped"):
+            return self._abort_fresh_wait(target, list(check.active))
+        if ask == "working":
+            self.stable_polls = 0
+            self.phase = WORKING if self.initial_sent else ATTACHED
+            self._record(
+                "readiness",
+                f"agent reports WORKING for `{target}`; no reset performed, "
+                "watching continues",
+            )
+            self._diag(
+                "prompt",
+                "readiness reply WORKING",
+                result="working",
+                message=f"agent reports WORKING for `{target}`; no reset performed",
+                current_spec=target,
+                open_tasks=check.open_tasks,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="working",
+                operation="readiness-ask",
+                next_action="keep watching the current conversation",
+            )
             return self.phase
         self.phase = NEW_CONVERSATION
         detail = check.task_detail or (

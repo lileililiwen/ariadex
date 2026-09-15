@@ -140,6 +140,9 @@ class NoAdvanceEvidenceTest(unittest.TestCase):
         driver = FakeDriver()
         watcher = make_watcher(project, driver)
         watcher.initial_sent = True
+        # Fresh-wait mechanics under test, not the readiness ask:
+        # pre-arm its once-per-boundary guard.
+        watcher._readiness_asked = ("demo", 1)
         real_check = robot_mod.check_boundary
 
         def blocked(*args, **kwargs):
@@ -174,6 +177,9 @@ class NoAdvanceEvidenceTest(unittest.TestCase):
         driver = FakeDriver()
         watcher = make_watcher(project, driver)
         watcher.initial_sent = True
+        # Fresh-wait mechanics under test, not the readiness ask:
+        # pre-arm its once-per-boundary guard.
+        watcher._readiness_asked = ("demo", 1)
         real_check = robot_mod.check_boundary
 
         def empty(*args, **kwargs):
@@ -203,6 +209,9 @@ class NoAdvanceEvidenceTest(unittest.TestCase):
         driver = FakeDriver()
         watcher = make_watcher(project, driver)
         watcher.initial_sent = True
+        # Fresh-wait mechanics under test, not the readiness ask:
+        # pre-arm its once-per-boundary guard.
+        watcher._readiness_asked = ("demo", 1)
         real_check = robot_mod.check_boundary
 
         def complete(*args, **kwargs):
@@ -241,6 +250,9 @@ class NoAdvanceEvidenceTest(unittest.TestCase):
         driver = FakeDriver()
         watcher = make_watcher(project, driver, fresh_ready_attempts=1)
         watcher.initial_sent = True
+        # Fresh-wait mechanics under test, not the readiness ask:
+        # pre-arm its once-per-boundary guard.
+        watcher._readiness_asked = ("demo", 1)
         with (
             clean_git(),
             unittest.mock.patch.object(

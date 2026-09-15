@@ -96,6 +96,9 @@ class FreshReadyRetryTest(unittest.TestCase):
         driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
         watcher = make_watcher(project, driver)
         watcher.initial_sent = True
+        # Fresh-wait mechanics under test, not the readiness ask:
+        # pre-arm its once-per-boundary guard.
+        watcher._readiness_asked = ("demo", 1)
         with (
             clean_git(),
             unittest.mock.patch.object(
@@ -121,6 +124,9 @@ class FreshReadyRetryTest(unittest.TestCase):
         driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
         watcher = make_watcher(project, driver, fresh_ready_attempts=3)
         watcher.initial_sent = True
+        # Fresh-wait mechanics under test, not the readiness ask:
+        # pre-arm its once-per-boundary guard.
+        watcher._readiness_asked = ("demo", 1)
         with (
             clean_git(),
             unittest.mock.patch.object(
@@ -148,6 +154,9 @@ class FreshReadyRetryTest(unittest.TestCase):
         driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
         watcher = make_watcher(project, driver, fresh_ready_attempts=2)
         watcher.initial_sent = True
+        # Fresh-wait mechanics under test, not the readiness ask:
+        # pre-arm its once-per-boundary guard.
+        watcher._readiness_asked = ("demo", 1)
         # Three boundary cycles: READY reaches the boundary, BLANKs exhaust
         # the short wait. The third exhaustion parks instead of refiring.
         # Each cycle consumes poll + guard + two attempts.
@@ -173,6 +182,9 @@ class FreshReadyRetryTest(unittest.TestCase):
         driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
         watcher = make_watcher(project, driver, debounce_polls=2)
         watcher.initial_sent = True
+        # Fresh-wait mechanics under test, not the readiness ask:
+        # pre-arm its once-per-boundary guard.
+        watcher._readiness_asked = ("demo", 1)
         with (
             clean_git(),
             unittest.mock.patch.object(
@@ -196,6 +208,9 @@ class FreshReadyRetryTest(unittest.TestCase):
         modes = iter(["AUTO", "AUTO", "PAUSE"])
         watcher = make_watcher(project, driver, mode_requested=lambda: next(modes))
         watcher.initial_sent = True
+        # Fresh-wait mechanics under test, not the readiness ask:
+        # pre-arm its once-per-boundary guard.
+        watcher._readiness_asked = ("demo", 1)
         with (
             clean_git(),
             unittest.mock.patch.object(
