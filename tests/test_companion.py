@@ -468,21 +468,27 @@ class WidgetSmokeTest(unittest.TestCase):
                 "version-label",
             ):
                 self.assertTrue(bool(find(widget_name)), widget_name)
+            # Real Tk: read options via cget, not the fake options dict.
             self.assertEqual(
-                window.play_button.options["width"],
+                int(window.play_button.cget("width")),
                 companion.WIDGET_ACTION_BUTTON_WIDTH,
             )
             self.assertEqual(
-                window.copy_log_button.options["width"],
+                int(window.copy_log_button.cget("width")),
                 companion.WIDGET_COPY_BUTTON_WIDTH,
             )
-            # Collapsed by default; expand reveals extra controls.
+            # Collapsed by default; cycle collapsed → strip → full.
             self.assertFalse(window.expanded)
+            self.assertEqual(window.display_mode, "collapsed")
+            window._toggle_expanded()
+            self.assertEqual(window.display_mode, "strip")
             window._toggle_expanded()
             self.assertTrue(window.expanded)
+            self.assertEqual(window.display_mode, "full")
             find("reconcile-button")
             window._toggle_expanded()
             self.assertFalse(window.expanded)
+            self.assertEqual(window.display_mode, "collapsed")
             # Actions render from daemon truth without raising.
             window._on_pause()
             text = companion.format_view_text(window.model)
@@ -522,6 +528,9 @@ class FakeTkWidget:
 
     def bind(self, sequence, func):
         self.bindings[sequence] = func
+
+    def unbind(self, sequence):
+        self.bindings.pop(sequence, None)
 
     def invoke(self):
         if self.command is not None:
@@ -596,6 +605,16 @@ class FakeTkRoot(FakeTkWidget):
 
     def after_cancel(self, token):
         self.cancelled.append(token)
+
+    def after_idle(self, func=None):
+        # Coalesced by the widget, but always immediately runnable in
+        # tests so the test can either invoke manually or let the
+        # recorded call run.
+        self._after_seq += 1
+        token = f"idle{self._after_seq}"
+        if func is not None:
+            self.after_calls.append((0, func))
+        return token
 
     def mainloop(self):
         self.mainloop_called = True
@@ -746,6 +765,8 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.assertEqual(self.client.calls, [])
 
     def test_expanded_height_includes_diagnostic_textareas(self):
+        # Two toggles advance collapsed → strip → full.
+        self.window._toggle_expanded()
         self.window._toggle_expanded()
         self.assertEqual(
             self.window._active_window_height(),
@@ -770,11 +791,19 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.assertEqual(self.client.calls, [])
 
     def test_expand_toggle(self):
+        # Cycle: collapsed → strip → full → collapsed.
         self.assertFalse(self.window.expanded)
+        self.assertEqual(self.window.display_mode, "collapsed")
+        self.window._toggle_expanded()
+        self.assertEqual(self.window.display_mode, "strip")
+        self.assertFalse(self.window.expanded)
+        self.assertFalse(self.window.details.packed)
         self.window._toggle_expanded()
         self.assertTrue(self.window.expanded)
+        self.assertEqual(self.window.display_mode, "full")
         self.assertTrue(self.window.details.packed)
         self.window._toggle_expanded()
+        self.assertEqual(self.window.display_mode, "collapsed")
         self.assertFalse(self.window.expanded)
         self.assertFalse(self.window.details.packed)
 

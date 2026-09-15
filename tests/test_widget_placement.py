@@ -101,6 +101,9 @@ class PlacementPathTest(unittest.TestCase):
         window = self._window()
         window._drag_start(mock.Mock(x_root=150, y_root=250))
         window._drag_move(mock.Mock(x_root=9000, y_root=9000))
+        # The motion is coalesced: flush the pending after_idle callback
+        # so the test sees the clamped geometry without mainloop spin.
+        window._apply_pending_drag()
         geometry = window.root.options["geometry"]
         self.assertEqual(
             geometry,
@@ -112,6 +115,8 @@ class PlacementPathTest(unittest.TestCase):
         # Move near the bottom edge, then expand: position must move up.
         window.root.winfo_x = lambda: 100
         window.root.winfo_y = lambda: 1080 - companion.WIDGET_COLLAPSED_HEIGHT - 8
+        # Cycle: collapsed → strip → full.
+        window._toggle_expanded()
         window._toggle_expanded()
         self.assertTrue(window.expanded)
         geometry = window.root.options["geometry"]
@@ -124,6 +129,7 @@ class PlacementPathTest(unittest.TestCase):
         )
         window._toggle_expanded()
         self.assertFalse(window.expanded)
+        self.assertEqual(window.display_mode, "collapsed")
 
     def test_persist_clamps_before_save(self):
         window = self._window()

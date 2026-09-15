@@ -43,6 +43,17 @@ WIDGET_COLLAPSED_HEIGHT = 344
 WIDGET_EXPANDED_HEIGHT = 364
 # Includes both read-only text areas and every expanded action row.
 WIDGET_EXPANDED_WINDOW_HEIGHT = 694
+# Strip: a status-bar-only row including the state dot and a compact
+# "Ariadex — STATE  <project — n active specs>" line. The status bar is
+# the drag handle in this mode and the toggle button is hidden, so the
+# strip window needs only enough height for one font-9 line plus frame
+# padding (~9px on each side). Sits between the titlebar (30) and the
+# collapsed card (344) so the cycle stays visually progressive.
+WIDGET_STRIP_HEIGHT = 40
+# Display modes for the mini player, in the order the toggle cycles.
+# Strip parks the widget; full reveals details. Hub windows are
+# unaffected and keep their own tab bar.
+WIDGET_MODES: tuple[str, ...] = ("collapsed", "strip", "full")
 WIDGET_ACTION_BUTTON_WIDTH = 6
 WIDGET_COPY_BUTTON_WIDTH = 8
 
@@ -1255,9 +1266,23 @@ class CompanionWindow:
         self._state: dict = {}
         self.hotkey_active = False
         self.hotkey_error: str | None = None
+        #: Display mode: "collapsed" (default), "strip" (status bar only),
+        #: or "full" (expanded details). The toggle cycles through them.
+        self.display_mode: str = "collapsed"
+        #: Backwards-compatible boolean mirroring display_mode == "full".
+        #: Existing tests and external code may read this attribute.
         self.expanded = False
         self._poll_after: str | None = None
         self._save_after: str | None = None
+        #: Pending drag position (coalesced per motion burst) and its
+        #: after_idle token. One geometry write per event burst keeps the
+        #: strip and tall card both smooth on X11.
+        self._pending_drag_position: tuple[int, int] | None = None
+        self._drag_after_idle: str | None = None
+        #: True once a B1-Motion has fired during the current press; used
+        #: in strip mode to distinguish a click (cycles mode) from a drag
+        #: (moves the window).
+        self._drag_motion_occurred = False
         self._nonblocking = nonblocking
         self._action_busy = False
         self._refresh_busy = False
@@ -1563,24 +1588,62 @@ class CompanionWindow:
         origin_x = self.root.winfo_x()  # type: ignore[attr-defined]
         origin_y = self.root.winfo_y()  # type: ignore[attr-defined]
         self._drag_origin = (int(x) - int(origin_x), int(y) - int(origin_y))
+        self._drag_motion_occurred = False
 
     def _active_window_height(self) -> int:
-        if self.expanded:
+        if self.display_mode == "full":
             return WIDGET_EXPANDED_WINDOW_HEIGHT
+        if self.display_mode == "strip":
+            return WIDGET_STRIP_HEIGHT
         return WIDGET_COLLAPSED_HEIGHT
 
     def _drag_move(self, event: object) -> None:
         if self._drag_origin is None:
             return
+        self._drag_motion_occurred = True
         x = int(getattr(event, "x_root", 0)) - self._drag_origin[0]
         y = int(getattr(event, "y_root", 0)) - self._drag_origin[1]
+        # Coalesce per event burst: queue the position and let after_idle
+        # apply exactly one geometry write. Both the tall card and the
+        # strip benefit; the strip avoids sticking at the previous edge
+        # when the user moves quickly.
+        self._pending_drag_position = (x, y)
+        if self._drag_after_idle is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(self._drag_after_idle)  # type: ignore[attr-defined]
+        self._drag_after_idle = self.root.after_idle(  # type: ignore[attr-defined]
+            self._apply_pending_drag
+        )
+
+    def _apply_pending_drag(self) -> None:
+        self._drag_after_idle = None
+        if self._pending_drag_position is None:
+            return
+        x, y = self._pending_drag_position
+        self._pending_drag_position = None
         clamped = clamp_to_screen(
             self.root, x, y, WIDGET_WIDTH, self._active_window_height()
         )
-        self.root.geometry(f"+{clamped[0]}+{clamped[1]}")  # type: ignore[attr-defined]
+        with contextlib.suppress(Exception):
+            self.root.geometry(f"+{clamped[0]}+{clamped[1]}")  # type: ignore[attr-defined]
 
     def _drag_stop(self, _event: object) -> None:
+        was_motion = self._drag_motion_occurred
         self._drag_origin = None
+        self._drag_motion_occurred = False
+        # Flush any coalesced geometry write before we cycle or persist,
+        # so the position is correct in either case.
+        if self._drag_after_idle is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(self._drag_after_idle)  # type: ignore[attr-defined]
+            self._drag_after_idle = None
+        if self._pending_drag_position is not None:
+            self._apply_pending_drag()
+        # In strip mode a click (press + release with no motion) cycles
+        # to the next mode; the status bar is the only visible affordance.
+        if not was_motion and self.display_mode == "strip":
+            self._cycle_display_mode()
+            return
         if self._save_after is not None:
             with contextlib.suppress(Exception):
                 self.root.after_cancel(self._save_after)  # type: ignore[attr-defined]
@@ -1845,21 +1908,162 @@ class CompanionWindow:
         self._render()
 
     def _toggle_expanded(self) -> None:
-        self.expanded = not self.expanded
-        height = (
-            WIDGET_EXPANDED_WINDOW_HEIGHT if self.expanded else WIDGET_COLLAPSED_HEIGHT
+        self._cycle_display_mode()
+
+    def _cycle_display_mode(self) -> None:
+        """Advance one step in the collapsed → strip → full cycle.
+
+        The strip mode cycles through clicks on its drag handle; the
+        expanded toggle button is only visible in collapsed/full and
+        therefore only cycles the same sequence when the user can see
+        it. Unknown modes fall back to collapsed.
+        """
+        current = (
+            self.display_mode if self.display_mode in WIDGET_MODES else "collapsed"
         )
-        if self.expanded:
-            self.details.pack(fill="x")
-            self.toggle_button.configure(text="▴")
+        index = WIDGET_MODES.index(current)
+        next_mode = WIDGET_MODES[(index + 1) % len(WIDGET_MODES)]
+        self._set_display_mode(next_mode)
+
+    def _set_display_mode(self, mode: str) -> None:
+        """Apply `mode`: visibility, drag handle, geometry, and clamp.
+
+        Unknown values fall back to collapsed. The strip packs only the
+        status bar (with the state dot moved into the strip text) and
+        binds drag to it; collapsed/full bind drag to the titlebar.
+        """
+        if mode not in WIDGET_MODES:
+            mode = "collapsed"
+        self.display_mode = mode
+        self.expanded = mode == "full"
+        if mode == "strip":
+            self._apply_strip_visibility()
+            self._rebind_drag_handle("strip")
+        elif mode == "full":
+            self._apply_full_visibility()
+            self._rebind_drag_handle("full")
         else:
+            self._apply_collapsed_visibility()
+            self._rebind_drag_handle("collapsed")
+        self._resize_to_mode()
+        # Re-render so the new mode's status bar text and foreground
+        # color reflect the current daemon state immediately.
+        self._render()
+
+    def _apply_strip_visibility(self) -> None:
+        """Pack only the status bar; everything else hides."""
+        with contextlib.suppress(Exception):
+            self.titlebar.pack_forget()
+        with contextlib.suppress(Exception):
+            self.version_label.pack_forget()
+        with contextlib.suppress(Exception):
+            self.work_label.pack_forget()
+        with contextlib.suppress(Exception):
+            self.controls.pack_forget()
+        with contextlib.suppress(Exception):
+            self.context_log.pack_forget()
+        with contextlib.suppress(Exception):
             self.details.pack_forget()
+        # In strip mode the status bar fills the visible window. Re-pack
+        # with zero frame padding so the WIDGET_STRIP_HEIGHT budget is
+        # honest about its own height (matches the design's ~28-40px
+        # target without hidden frame padding eating the budget).
+        with contextlib.suppress(Exception):
+            self.frame.pack_configure(padx=0, pady=0)
+        with contextlib.suppress(Exception):
+            self.status_bar.pack_configure(side="top", fill="both", expand=True, pady=0)
+        with contextlib.suppress(Exception):
+            self.toggle_button.configure(text="▴")
+        with contextlib.suppress(Exception):
+            self.dot.pack_forget()
+
+    def _apply_full_visibility(self) -> None:
+        """Full mode: all rows visible, details panel packed."""
+        with contextlib.suppress(Exception):
+            self.frame.pack_configure(padx=10, pady=9)
+        with contextlib.suppress(Exception):
+            self.status_bar.pack_configure(side="bottom", fill="x", pady=(4, 0))
+        with contextlib.suppress(Exception):
+            self.titlebar.pack(fill="x")
+        with contextlib.suppress(Exception):
+            self.version_label.pack(fill="x")
+        with contextlib.suppress(Exception):
+            self.work_label.pack(fill="x")
+        with contextlib.suppress(Exception):
+            self.controls.pack(fill="x", pady=(4, 0))
+        with contextlib.suppress(Exception):
+            self.context_log.pack(fill="x", pady=(4, 0))
+        with contextlib.suppress(Exception):
+            self.details.pack(fill="x")
+        with contextlib.suppress(Exception):
+            self.toggle_button.configure(text="▴")
+
+    def _apply_collapsed_visibility(self) -> None:
+        """Collapsed: status bar + titlebar + version + work + controls + log."""
+        with contextlib.suppress(Exception):
+            self.frame.pack_configure(padx=10, pady=9)
+        with contextlib.suppress(Exception):
+            self.status_bar.pack_configure(side="bottom", fill="x", pady=(4, 0))
+        with contextlib.suppress(Exception):
+            self.titlebar.pack(fill="x")
+        with contextlib.suppress(Exception):
+            self.version_label.pack(fill="x")
+        with contextlib.suppress(Exception):
+            self.work_label.pack(fill="x")
+        with contextlib.suppress(Exception):
+            self.controls.pack(fill="x", pady=(4, 0))
+        with contextlib.suppress(Exception):
+            self.context_log.pack(fill="x", pady=(4, 0))
+        with contextlib.suppress(Exception):
+            self.details.pack_forget()
+        with contextlib.suppress(Exception):
             self.toggle_button.configure(text="▾")
+
+    def _rebind_drag_handle(self, mode: str) -> None:
+        """Make the active drag handle the only one bound.
+
+        In collapsed/full the titlebar (with its state label and a
+        hand2 cursor) is the handle. In strip the status bar is the
+        handle and the titlebar is hidden, so the bar gets the bindings
+        and the hand2 cursor instead.
+        """
+        with contextlib.suppress(Exception):
+            self.status_bar.unbind("<ButtonPress-1>")
+            self.status_bar.unbind("<B1-Motion>")
+            self.status_bar.unbind("<ButtonRelease-1>")
+        if mode == "strip":
+            with contextlib.suppress(Exception):
+                self.status_bar.configure(cursor="hand2")
+                self.status_bar.bind("<ButtonPress-1>", self._drag_start)
+                self.status_bar.bind("<B1-Motion>", self._drag_move)
+                self.status_bar.bind("<ButtonRelease-1>", self._drag_stop)
+        else:
+            with contextlib.suppress(Exception):
+                self.status_bar.configure(cursor="")
+            # Titlebar + state label were already bound at construction;
+            # the titlebar pack is restored in the visibility helpers.
+            for widget in (self.titlebar, self.state_label):
+                with contextlib.suppress(Exception):
+                    widget.configure(cursor="hand2")
+                    widget.bind("<ButtonPress-1>", self._drag_start)
+                    widget.bind("<B1-Motion>", self._drag_move)
+                    widget.bind("<ButtonRelease-1>", self._drag_stop)
+
+    def _resize_to_mode(self) -> None:
+        """Resize the window to the active mode height and re-clamp.
+
+        Preserves the current x/y when possible; offscreen positions are
+        corrected (per design: "geometry restore clamps to the strip
+        height"). The window is always kept inside the screen so the
+        strip cannot stick off the top or bottom after the toggle.
+        """
+        height = self._active_window_height()
         try:
             raw_x = int(self.root.winfo_x())  # type: ignore[attr-defined]
             raw_y = int(self.root.winfo_y())  # type: ignore[attr-defined]
         except Exception:
-            self.root.geometry(f"{WIDGET_WIDTH}x{height}")  # type: ignore[attr-defined]
+            with contextlib.suppress(Exception):
+                self.root.geometry(f"{WIDGET_WIDTH}x{height}")  # type: ignore[attr-defined]
             return
         clamped = clamp_to_screen(self.root, raw_x, raw_y, WIDGET_WIDTH, height)
         with contextlib.suppress(Exception):
@@ -1976,14 +2180,35 @@ class CompanionWindow:
             "WAITING": "gold",
             "UNREACHABLE": "red",
         }
-        self.dot.configure(foreground=colors.get(indicator, "black"))
+        indicator_color = colors.get(indicator, "black")
         suffix = "" if self.hotkey_active else " (hotkey off)"
         if self.hotkey_error and not self.hotkey_active:
             suffix = " (hotkey unavailable)"
+        self.dot.configure(foreground=indicator_color)
         self.state_label.configure(text=f"{WIDGET_BRAND_PREFIX}{indicator}{suffix}")
         self.work_label.configure(text=str(model.get("work_label", "")))
         self.version_label.configure(text=str(model.get("version_text", "")))
-        self.status_bar.configure(text=str(model.get("status_line", "")))
+        if self.display_mode == "strip":
+            # The strip compresses the titlebar, version row, work text,
+            # and status bar into one line. A colored "dot" character
+            # stands in for the titlebar's state dot, so the operator
+            # can still tell working/paused/blocked at a glance.
+            status_line = str(model.get("status_line", "") or "")
+            prefix = "\u25cf "
+            compact = (
+                f"{prefix}{WIDGET_BRAND} \u2014 {indicator}{suffix}  {status_line}"
+            )
+            self.status_bar.configure(
+                foreground=indicator_color,
+                text=compact.rstrip(),
+                anchor="w",
+            )
+        else:
+            self.status_bar.configure(
+                foreground="#8b949e",
+                text=str(model.get("status_line", "")),
+                anchor="w",
+            )
         actions = model.get("actions", {})
         self.pause_button.configure(text="Pause")
         self.pause_button.configure(

@@ -5,7 +5,6 @@
 Provide an opt-in desktop control surface that lets a human pause, resume, or
 inspect the Ariadex daemon without taking ownership away from the focused
 editor or Coding CLI.
-
 ## Requirements
 ### Requirement: Linux-first widget implementation
 
@@ -83,4 +82,17 @@ MUST NOT directly write Ariadex state, control the lease, or inject tmux input.
 
 - **WHEN** a widget action cannot reach the daemon
 - **THEN** the widget reports the failure and MUST NOT fabricate a state change
+
+### Requirement: Strip mode parks the mini player
+
+The mini player MUST offer a strip mode that shows only the status
+bar (project, active-specs count) with the state dot, hiding every
+other row. The strip MUST be draggable within screen bounds like the
+titlebar, and the toggle MUST cycle collapsed → strip → full.
+
+#### Scenario: Park as a strip
+
+- **WHEN** the operator toggles from collapsed mode
+- **THEN** only the status strip remains visible and dragging it
+  moves the window without invoking any watcher action
 
