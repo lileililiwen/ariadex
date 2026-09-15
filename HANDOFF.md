@@ -55,16 +55,17 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
-  `2026-09-15-finish-quiescence`. Dead-screen gate on all three
-  debounce-gated boundary paths: the classifier tail must be
-  byte-identical across the window or the count restarts with no
-  boundary evaluated; the watcher's own input echo counts as a screen
-  change (one settling poll). Verified with 1357-test suite (same 2
-  pre-existing environment failures as HEAD), Ruff clean, mypy at
-  baseline (13 pre-existing),
-  `openspec validate --changes/--specs --strict` passed; promoted
-  into `openspec/specs/robot-agent-supervisor/spec.md`. Queue at
-  archive time: `2026-09-15-ask-before-recovery`.
+  `2026-09-15-ask-before-recovery`. One bounded DONE/WORKING
+  readiness ask in the current conversation before confirmation
+  recovery: fixed protocol wording, strict last-line parsing on a
+  settled screen (streamed partials never decide), once-per-boundary
+  guard, DONE/WORKING/timeout/garbage routing with pause/shutdown
+  aborts. Verified with 1363-test suite (same 2 pre-existing
+  environment failures as HEAD), Ruff clean, mypy at baseline (13
+  pre-existing), `openspec validate --changes/--specs --strict`
+  passed; promoted into
+  `openspec/specs/robot-agent-supervisor/spec.md`.
+  Queue empty at archive time.
   `2026-09-15-auto-approve-policy`. Explicit opt-in `auto` permission
   policy: parsed requests with an enabled operation approve at any path;
   unparsed surfaces wait; privileged markers, resolution, and the
@@ -688,9 +689,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Select `2026-09-15-finish-quiescence` next: implement, run the full
-verification sequence, and archive with canonical spec promotion.
-Queued after it: `2026-09-15-ask-before-recovery`.
+No active changes remain. Select the next spec with `openspec list` when new
+work is planned.
 
 ## Latest change: widget live log and queue visibility
 
