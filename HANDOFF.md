@@ -77,11 +77,8 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Proposed, awaiting selection (no implementation yet):
-  `2026-09-15-manual-actions` (labeled manual rows: retry, model
-  select from a new `models` config list, message send with
-  empty/draft/PAUSE refusals; rows, never tabs),
   `2026-09-15-session-robustness` (seal provider session-loss gaps:
-  session-loss survival plus single live-owner guard). Both validate
+  session-loss survival plus single live-owner guard). Validates
   clean (`openspec validate --changes --strict`).
   `2026-09-15-ask-before-recovery`. One bounded DONE/WORKING
   readiness ask in the current conversation before confirmation
@@ -204,6 +201,31 @@ that promotion has been skipped or failed.
   `floating-control` yield-keymap line (no formal delta existed).
   Queue empties by one (`hub-keymap` archived; `manual-actions`,
   `session-robustness` remain).
+  `2026-09-15-manual-actions`. The expanded widget shows a labeled
+  Manual group (rows, never tabs): Retry resends the most recent
+  prompt verbatim or stays disabled via a `retry_available` status
+  flag; Model offers the configured `models` list (new
+  init-prompted config key, empty disables the row) through the
+  existing adapter `switch_model` restart path; Message sends once
+  with empty/draft/PAUSE refusals that record the reason and change
+  nothing. Three typed daemon IPC actions (`retry`, `send_message`,
+  `switch_model`) carry validated bounded payloads over the extended
+  wire protocol; the daemon routes them to the live in-process
+  watcher (module registry owned by `ManagedRuntime.start/stop`,
+  absent watcher fails closed). The watcher serializes manual sends
+  against the poll loop, reuses the adapter draft/ready surface for
+  the draft guard, and remembers only full prompt sends. The hub
+  panel acts on the active tab through its existing per-project
+  daemon IPC. Full-mode window grows by the measured
+  `MANUAL_GROUP_HEIGHT`; strip/collapsed unchanged. Verified with 54
+  new `tests/test_manual_actions.py` tests plus touched suites, full
+  1493-test suite with only the pre-existing tmux `list-panes` env
+  failure, Ruff check/format clean, mypy at baseline (13
+  pre-existing), `openspec validate --changes/--specs --strict`
+  passed (1 active change, 68 canonical specs); promoted into
+  `openspec/specs/companion/spec.md`, and the README config sample
+  gains the `models` key. Queue empties by one (`manual-actions`
+  archived; `session-robustness` remains).
 
 - Implemented, verified, and archived:
   `2026-09-14-independent-runtime-processes`. Managed widget IPC and polling
@@ -779,8 +801,7 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Select `2026-09-15-manual-actions` next when building starts, then
-`2026-09-15-session-robustness`, one at a time.
+Select `2026-09-15-session-robustness` next when building starts.
 
 ## Latest change: widget live log and queue visibility
 
