@@ -42,6 +42,9 @@ class FakeTkWidget:
     def bind(self, sequence, callback):
         self.options[f"bind:{sequence}"] = callback
 
+    def unbind(self, sequence):
+        self.options.pop(f"bind:{sequence}", None)
+
     def delete(self, start, end=None):
         self.text = ""
 

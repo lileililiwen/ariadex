@@ -529,11 +529,165 @@ def save_user_config(values: dict) -> bool:
 
 
 def configured_hotkey(override: str | None = None) -> str:
-    """Effective hotkey: CLI override, else per-user config, else default."""
+    """Effective yield key: CLI override, else keymap, else legacy, else default."""
     if override:
         return override
-    saved = load_user_config().get("hotkey")
+    config = load_user_config()
+    stored = config.get("keymap")
+    if isinstance(stored, dict):
+        value = stored.get("yield")
+        if isinstance(value, str) and value.strip():
+            try:
+                return canonical_hotkey(value)
+            except CompanionError:
+                pass
+    saved = config.get("hotkey")
     return str(saved) if saved else DEFAULT_HOTKEY
+
+
+#: Hub keymap actions in menu order. `yield` pauses/resumes only and
+#: MUST never quit anything; `quit_tab` detaches the visible tab;
+#: `quit_all` ends the hub; `toggle_expand` shows/hides the log.
+KEYMAP_ACTIONS = ("yield", "quit_tab", "quit_all", "toggle_expand")
+
+#: Human labels for the keymap menu rows.
+KEYMAP_LABELS = {
+    "yield": "Yield (pause/resume)",
+    "quit_tab": "Quit current tab",
+    "quit_all": "Quit all tabs",
+    "toggle_expand": "Toggle log",
+}
+
+#: Default bindings. quit_tab and quit_all are distinct keys from the
+#: start so no single binding can ever mean both.
+DEFAULT_KEYMAP = {
+    "yield": "Ctrl+Esc",
+    "quit_tab": "Ctrl+Shift+Q",
+    "quit_all": "Ctrl+Shift+X",
+    "toggle_expand": "Ctrl+Shift+E",
+}
+
+
+def canonical_hotkey(text: str) -> str:
+    """Normalize a binding to `Ctrl+Shift+Q` form (raises CompanionError)."""
+    mods, key = parse_hotkey(text)
+    if len(key) == 1 and key.isalpha():
+        key = key.upper()
+    ordered = [mod for mod in HOTKEY_MODIFIERS if mod in mods]
+    return "+".join([*ordered, key])
+
+
+def effective_keymap() -> dict:
+    """Effective keymap: stored map over defaults; fail-soft per action.
+
+    Unknown actions are ignored, unparsable stored values fall back to
+    their default, and a legacy single `hotkey` setting migrates to
+    `yield` when no stored map exists yet.
+    """
+    config = load_user_config()
+    merged = dict(DEFAULT_KEYMAP)
+    stored = config.get("keymap")
+    if isinstance(stored, dict):
+        for action in KEYMAP_ACTIONS:
+            value = stored.get(action)
+            if isinstance(value, str) and value.strip():
+                try:
+                    merged[action] = canonical_hotkey(value)
+                except CompanionError:
+                    continue
+        return merged
+    legacy = config.get("hotkey")
+    if isinstance(legacy, str) and legacy.strip():
+        with contextlib.suppress(CompanionError):
+            merged["yield"] = canonical_hotkey(legacy)
+    return merged
+
+
+def save_keymap(patch: dict) -> tuple:
+    """Validate and persist keymap changes; never writes a bad map.
+
+    Returns (True, None) on success, else (False, reason). Duplicates
+    across actions are refused; unknown actions and unparsable keys
+    are refused; the stored file keeps every unrelated setting.
+    """
+    current = effective_keymap()
+    proposed = dict(current)
+    for action, value in patch.items():
+        if action not in KEYMAP_ACTIONS:
+            return False, f"unknown binding `{action}`"
+        if not isinstance(value, str) or not value.strip():
+            return False, f"binding for `{action}` is empty"
+        try:
+            proposed[action] = canonical_hotkey(value)
+        except CompanionError as exc:
+            return False, str(exc)
+    seen: dict = {}
+    for action in KEYMAP_ACTIONS:
+        key = proposed[action]
+        if key in seen:
+            return (
+                False,
+                f"`{key}` is already bound to "
+                f"`{KEYMAP_LABELS[seen[key]]}`; choose a free key",
+            )
+        seen[key] = action
+    stored = load_user_config().get("keymap")
+    merged_stored = dict(stored) if isinstance(stored, dict) else {}
+    for action in patch:
+        merged_stored[action] = proposed[action]
+    if not save_user_config({"keymap": merged_stored}):
+        return False, "settings file is not writable"
+    return True, None
+
+
+#: Keysyms that carry no key of their own (capture keeps waiting).
+_KEYMAP_MODIFIER_KEYSYMS = frozenset(
+    {
+        "Shift_L",
+        "Shift_R",
+        "Control_L",
+        "Control_R",
+        "Alt_L",
+        "Alt_R",
+        "Meta_L",
+        "Meta_R",
+        "Super_L",
+        "Super_R",
+        "Caps_Lock",
+        "Num_Lock",
+        "Scroll_Lock",
+    }
+)
+
+
+def keymap_event_to_text(event: object) -> str | None:
+    """Translate a Tk KeyPress event to `Ctrl+Shift+Q` form.
+
+    Returns None while only modifiers are held (capture keeps
+    waiting); raises CompanionError on Escape so the caller cancels
+    the capture. Never injects anything anywhere.
+    """
+    keysym = str(getattr(event, "keysym", "") or "")
+    if not keysym:
+        return None
+    if keysym == "Escape":
+        raise CompanionError("capture cancelled")
+    if keysym in _KEYMAP_MODIFIER_KEYSYMS:
+        return None
+    try:
+        state = int(getattr(event, "state", 0) or 0)
+    except (TypeError, ValueError):
+        state = 0
+    mods = []
+    if state & 0x1:
+        mods.append("Shift")
+    if state & 0x4:
+        mods.append("Ctrl")
+    if state & 0x8:
+        mods.append("Alt")
+    if state & 0x40:
+        mods.append("Super")
+    return "+".join([*mods, keysym])
 
 
 class CompanionClient:
@@ -1525,6 +1679,14 @@ class CompanionWindow:
             command=self._apply_hotkey,
         )
         self.apply_button.pack(side="left")
+        self.keymap_label = tk.Label(
+            self.details,
+            text="",
+            anchor="w",
+            justify="left",
+            name="mini-keymap-label",
+        )
+        self.keymap_label.pack(fill="x")
         extra = tk.Frame(self.details)
         extra.pack(fill="x", pady=(4, 0))
         self.reconcile_button = tk.Button(
@@ -1693,12 +1855,19 @@ class CompanionWindow:
         except CompanionError as exc:
             self._notice(f"hotkey refused: {exc}")
             return
+        canonical = canonical_hotkey(candidate)
+        ok, reason = save_keymap({"yield": canonical})
+        if not ok:
+            self._notice(f"hotkey refused: {reason}")
+            return
         self.adapter.unregister()
-        self.hotkey = candidate
+        self.hotkey = canonical
         self._register_hotkey()
         if self.hotkey_active:
-            save_user_config({"hotkey": candidate})
-            self._notice(f"hotkey `{candidate}` active")
+            # Keep the legacy single-hotkey setting in sync so older
+            # versions and the CLI override keep reading the same key.
+            save_user_config({"hotkey": canonical})
+            self._notice(f"hotkey `{canonical}` active")
         else:
             self._notice(f"hotkey failed: {self.hotkey_error}")
         self._render()
@@ -2247,6 +2416,15 @@ class CompanionWindow:
         self.status_text.delete("1.0", "end")
         self.status_text.insert("1.0", text)
         self.status_text.configure(state="disabled")
+        with contextlib.suppress(Exception):
+            keys = effective_keymap()
+            self.keymap_label.configure(
+                text=(
+                    f"keys: yield {keys['yield']} · "
+                    f"quit tab {keys['quit_tab']} · "
+                    f"quit all {keys['quit_all']}"
+                )
+            )
         self._render_context_log(model)
 
 
@@ -2872,6 +3050,8 @@ class RobotHubWindow:
         poll_interval_s: float = POLL_INTERVAL_S,
         active: int = 0,
         on_empty: Callable[[], None] | None = None,
+        adapter_factory: Callable[[], HotkeyAdapter] | None = None,
+        keymap: dict | None = None,
     ) -> None:
         import tkinter as tk
 
@@ -2881,6 +3061,16 @@ class RobotHubWindow:
         self.active = min(max(0, active), max(0, len(self.tabs) - 1))
         self.hotkey_adapter = hotkey_adapter
         self.hotkey = hotkey
+        self._adapter_factory = adapter_factory
+        self.keymap = dict(keymap) if isinstance(keymap, dict) else effective_keymap()
+        for action in KEYMAP_ACTIONS:
+            try:
+                self.keymap[action] = canonical_hotkey(self.keymap[action])
+            except (CompanionError, KeyError, TypeError):
+                self.keymap[action] = DEFAULT_KEYMAP[action]
+        self._key_adapters: list = []
+        self.keymap_errors: dict = {}
+        self._capturing: str | None = None
         self.poll_interval_ms = max(1, int(poll_interval_s * 1000))
         self.models: list[dict] = [build_robot_view_model({}) for _ in self.tabs]
         self.queue_texts: list[str] = [
@@ -3066,6 +3256,62 @@ class RobotHubWindow:
             command=self._on_close_window,
         )
         self.close_button.pack(side="left", expand=True, fill="x")
+        self.keys_button = tk.Button(
+            controls,
+            text="Keys",
+            name="robot-hub-keys-button",
+            width=8,
+            takefocus=False,
+            command=self._on_toggle_keymap,
+        )
+        self.keys_button.pack(side="left", expand=True, fill="x")
+        self.keymap_frame = tk.Frame(self.frame, background="#20242b")
+        self.key_labels: dict = {}
+        self.key_set_buttons: dict = {}
+        for action in KEYMAP_ACTIONS:
+            row = tk.Frame(self.keymap_frame, background="#20242b")
+            row.pack(fill="x")
+            action_label = tk.Label(
+                row,
+                text=KEYMAP_LABELS[action],
+                anchor="w",
+                background="#20242b",
+                foreground="#9aa4b2",
+            )
+            action_label.pack(side="left")
+            key_label = tk.Label(
+                row,
+                text=self.keymap[action],
+                anchor="w",
+                background="#20242b",
+                foreground="#f3f4f6",
+                name=f"hub-key-{action}",
+            )
+            key_label.pack(side="left", padx=4)
+            set_button = tk.Button(
+                row,
+                text="Set",
+                name=f"hub-key-set-{action}",
+                width=6,
+                takefocus=False,
+                command=self._capture_fn(action),
+            )
+            set_button.pack(side="right")
+            _bind_button_feedback(set_button, self.root)
+            self.key_labels[action] = key_label
+            self.key_set_buttons[action] = set_button
+        self.keymap_feedback = tk.Label(
+            self.keymap_frame,
+            text="",
+            anchor="w",
+            justify="left",
+            wraplength=WIDGET_WIDTH - 20,
+            background="#20242b",
+            foreground="#9aa4b2",
+            name="hub-keymap-feedback",
+        )
+        self.keymap_feedback.pack(fill="x")
+        self.keymap_visible = False
         self._install_button_feedback(
             (
                 self.pause_button,
@@ -3074,12 +3320,160 @@ class RobotHubWindow:
                 self.toggle_button,
                 self.copy_log_button,
                 self.close_button,
+                self.keys_button,
             )
         )
-        if self.hotkey_adapter is not None:
-            self.hotkey_adapter.register(self.hotkey, self._on_hotkey)
+        self._register_keymap()
         self._refresh()
         self._schedule_poll()
+
+    def _register_keymap(self) -> None:
+        """Grab one global key per bound action; never raises.
+
+        Each action gets its own adapter instance (adapters grab
+        exactly one combination). A refused binding is recorded in
+        `keymap_errors` and shown in the menu while the other
+        bindings stay live. Re-registration first releases the
+        previous grabs so rebinding never stacks listeners.
+        """
+        self._unregister_keymap()
+        self.keymap_errors = {}
+        if self._adapter_factory is None:
+            if self.hotkey_adapter is not None:
+                with contextlib.suppress(Exception):
+                    self.hotkey_adapter.register(self.hotkey, self._on_hotkey)
+            return
+        targets = (
+            ("yield", self._on_yield_key),
+            ("quit_tab", self._on_quit_tab_key),
+            ("quit_all", self._on_quit_all_key),
+            ("toggle_expand", self._on_toggle_key),
+        )
+        for action, callback in targets:
+            try:
+                adapter = self._adapter_factory()
+                adapter.register(self.keymap[action], callback)
+            except CompanionError as exc:
+                self.keymap_errors[action] = str(exc)
+                continue
+            except Exception as exc:
+                self.keymap_errors[action] = str(exc)
+                continue
+            self._key_adapters.append(adapter)
+
+    def _unregister_keymap(self) -> None:
+        """Release every keymap grab. Never raises."""
+        adapters, self._key_adapters = self._key_adapters, []
+        for adapter in adapters:
+            with contextlib.suppress(Exception):
+                adapter.unregister()
+        if self.hotkey_adapter is not None:
+            with contextlib.suppress(Exception):
+                self.hotkey_adapter.unregister()
+
+    def _on_yield_key(self) -> None:
+        """Marshal the yield grab onto Tk's UI thread (active tab only)."""
+        with contextlib.suppress(Exception):
+            self.root.after(0, self._on_pause_active)  # type: ignore[attr-defined]
+
+    def _on_quit_tab_key(self) -> None:
+        """Marshal the quit-tab grab onto Tk's UI thread."""
+        with contextlib.suppress(Exception):
+            self.root.after(0, self._on_quit_active)  # type: ignore[attr-defined]
+
+    def _on_quit_all_key(self) -> None:
+        """Marshal the quit-all grab onto Tk's UI thread."""
+        with contextlib.suppress(Exception):
+            self.root.after(0, self._on_quit_all)  # type: ignore[attr-defined]
+
+    def _on_toggle_key(self) -> None:
+        """Marshal the toggle-log grab onto Tk's UI thread."""
+        with contextlib.suppress(Exception):
+            self.root.after(0, self._on_toggle)  # type: ignore[attr-defined]
+
+    def _capture_fn(self, action: str) -> Callable[[], None]:
+        def begin() -> None:
+            self._begin_capture(action)
+
+        return begin
+
+    def _on_toggle_keymap(self) -> None:
+        """Show or hide the keymap menu; cancelling any live capture."""
+        self.keymap_visible = not self.keymap_visible
+        with contextlib.suppress(Exception):
+            self._cancel_capture()
+        with contextlib.suppress(Exception):
+            if self.keymap_visible:
+                self.keymap_frame.pack(fill="x", pady=(4, 0))
+                self._refresh_keymap_labels()
+            else:
+                self.keymap_frame.pack_forget()
+
+    def _begin_capture(self, action: str) -> None:
+        """Grab the next keypress as the new binding for `action`."""
+        with contextlib.suppress(Exception):
+            self._cancel_capture()
+        self._capturing = action
+        with contextlib.suppress(Exception):
+            self.keymap_feedback.configure(
+                text=f"press a key for {KEYMAP_LABELS[action]} (Esc cancels)"
+            )
+        with contextlib.suppress(Exception):
+            self.root.bind("<KeyPress>", self._on_capture_key)  # type: ignore[attr-defined]
+
+    def _cancel_capture(self) -> None:
+        """Stop a live capture without changing any binding."""
+        self._capturing = None
+        with contextlib.suppress(Exception):
+            self.root.unbind("<KeyPress>")  # type: ignore[attr-defined]
+
+    def _on_capture_key(self, event: object) -> None:
+        """Apply the captured keypress as the pending binding, or refuse."""
+        action = self._capturing
+        if action is None:
+            return
+        try:
+            text = keymap_event_to_text(event)
+        except CompanionError as exc:
+            self._cancel_capture()
+            with contextlib.suppress(Exception):
+                self.keymap_feedback.configure(text=str(exc))
+            return
+        if text is None:
+            return
+        try:
+            ok, reason = save_keymap({action: text})
+        except Exception as exc:
+            ok, reason = False, str(exc)
+        self._cancel_capture()
+        with contextlib.suppress(Exception):
+            if ok:
+                self.keymap[action] = canonical_hotkey(text)
+                self._register_keymap()
+                self._refresh_keymap_labels()
+                self.keymap_feedback.configure(
+                    text=f"{KEYMAP_LABELS[action]} is now `{self.keymap[action]}`"
+                )
+            else:
+                self.keymap_feedback.configure(text=str(reason))
+
+    def _refresh_keymap_labels(self) -> None:
+        """Show current keys; flag bindings whose grab was refused."""
+        with contextlib.suppress(Exception):
+            for action in KEYMAP_ACTIONS:
+                label = self.key_labels.get(action)
+                if label is None:
+                    continue
+                text = self.keymap[action]
+                error = self.keymap_errors.get(action)
+                if error:
+                    text = f"{text} (inactive: {error})"
+                label.configure(text=text)
+            if self.keymap_errors and not self._capturing:
+                first = next(iter(self.keymap_errors))
+                self.keymap_feedback.configure(
+                    text=f"`{self.keymap[first]}` refused: {self.keymap_errors[first]}"
+                )
 
     def _install_button_feedback(self, buttons: tuple[object, ...]) -> None:
         for button in buttons:
@@ -3148,6 +3542,7 @@ class RobotHubWindow:
 
     def _on_close_window(self) -> None:
         """Close the hub window only; daemons, sessions, watchers persist."""
+        self._unregister_keymap()
         with contextlib.suppress(Exception):
             self.root.destroy()  # type: ignore[attr-defined]
 
@@ -3300,9 +3695,7 @@ class RobotHubWindow:
             tab.on_quit()
         self.remove_project(tab.project)
         if not self.tabs:
-            if self.hotkey_adapter is not None:
-                with contextlib.suppress(Exception):
-                    self.hotkey_adapter.unregister()
+            self._unregister_keymap()
             self._cancel_poll()
 
     def _on_quit_all(self) -> None:
@@ -3310,8 +3703,7 @@ class RobotHubWindow:
         for tab in self.tabs:
             with contextlib.suppress(Exception):
                 tab.on_quit()
-        if self.hotkey_adapter is not None:
-            self.hotkey_adapter.unregister()
+        self._unregister_keymap()
         self._cancel_poll()
         self.root.destroy()  # type: ignore[attr-defined]
 
@@ -3565,19 +3957,15 @@ def run_robot_hub(tabs: list[RobotHubTab], *, poll_interval_s: float = 2.0) -> i
         raise CompanionError("robot hub unavailable: Tkinter is not installed")
     import tkinter as tk
 
-    try:
-        hotkey = configured_hotkey()
-        parse_hotkey(hotkey)
-        hotkey_adapter = adapter_for_session(info.session)
-    except CompanionError as exc:
-        raise CompanionError(f"robot hub unavailable: {exc}") from exc
+    keymap = effective_keymap()
+    session_factory = lambda: adapter_for_session(info.session)  # noqa: E731
 
     root = tk.Tk()
     window = RobotHubWindow(
         root,
         tabs,
-        hotkey_adapter=hotkey_adapter,
-        hotkey=hotkey,
+        keymap=keymap,
+        adapter_factory=session_factory,
         poll_interval_s=poll_interval_s,
     )
     root.protocol("WM_DELETE_WINDOW", window._on_quit_all)
@@ -3605,7 +3993,7 @@ def run_robot_hub(tabs: list[RobotHubTab], *, poll_interval_s: float = 2.0) -> i
         with contextlib.suppress(Exception):
             root.destroy()
     finally:
-        hotkey_adapter.unregister()
+        window._unregister_keymap()
     return 0
 
 

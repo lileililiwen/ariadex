@@ -42,7 +42,9 @@ pause, and stop, and MUST support expanding for additional controls.
 
 The companion MUST support a configurable global hotkey and MUST use the
 configured default candidate `Ctrl+Esc` unless the platform rejects it. The
-hotkey MUST issue only a daemon pause/resume request.
+hotkey MUST issue only a daemon pause/resume request. The yield key is the
+`yield` entry of the per-user keymap (`quit_tab`, `quit_all`,
+`toggle_expand` are separate bindings); it MUST never quit anything.
 
 #### Scenario: Human yields
 
