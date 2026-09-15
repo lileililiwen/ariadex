@@ -1,5 +1,14 @@
 # Ariadex handoff
 
+## Documentation governance
+
+The repository entry point is `AGENTS.md`; detailed change, completion,
+architecture, reliability, and security rules live under `.ai-rules/`.
+Update these rules and the user-facing README/roadmap when verified behavior
+or delivery scope changes. This documentation bootstrap does not implement a
+product change or establish new runtime verification evidence. Current active
+implementation work is determined by `openspec list`.
+
 ## Mandatory OpenSpec rule
 
 NEVER use `--skip-specs` when archiving. Every archive MUST promote the
@@ -52,9 +61,30 @@ that promotion has been skipped or failed.
   documentation tests, Ruff check/format, diff check, and strict validation
   (50 canonical specs).
 
+- Implemented, verified, and archived:
+  `2026-09-15-widget-brand`. Mini-player titlebar now shows the fixed
+  `Ariadex` brand ahead of the state word in every indicator state, and
+  `format_view_text` headless equivalent prefixes the line with
+  `ariadex companion:` so screen-reader and CLI status carry the brand
+  too. The hub window title stays `Ariadex Robots` (already shipped).
+  Verified with 1369-test suite (same 2 pre-existing environment failures
+  as HEAD: real-tmux `list-panes` and companion fake-Tk `options`),
+  Ruff check/format clean, mypy clean on `companion.py`, diff check
+  clean, `openspec validate --changes/--specs --strict` passed;
+  promoted into `openspec/specs/companion/spec.md`.
+  Queue empty at archive time.
+
 ## Current state
 
-- Implemented, verified, and archived:
+- Proposed, awaiting selection (no implementation yet):
+  `2026-09-15-mini-collapse` (collapse to a draggable status strip),
+  `2026-09-15-log-autoscroll` (logs follow the latest entry),
+  `2026-09-15-hub-keymap` (keymap menu; yield never quits;
+  quit-current and quit-all are distinct keys),
+  `2026-09-15-manual-actions` (labeled manual rows: retry, model
+  select from a new `models` config list, message send with
+  empty/draft/PAUSE refusals; rows, never tabs). All four validate
+  clean (`openspec validate --changes --strict`).
   `2026-09-15-ask-before-recovery`. One bounded DONE/WORKING
   readiness ask in the current conversation before confirmation
   recovery: fixed protocol wording, strict last-line parsing on a
@@ -113,7 +143,7 @@ that promotion has been skipped or failed.
   archived to `openspec/specs/provider-lifecycle/spec.md`.
   Pre-existing broken mocks in terminal-error/fresh-retry tests (failing at
   HEAD from an earlier guard capture) were updated to the redefined
-  refire contract. No active changes remain.
+  refire contract. Queue empty at archive time.
 
 - Implemented, verified, and archived:
   `2026-09-14-independent-runtime-processes`. Managed widget IPC and polling
@@ -689,8 +719,9 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active changes remain. Select the next spec with `openspec list` when new
-work is planned.
+Select `2026-09-15-mini-collapse` next when building starts, then
+`2026-09-15-log-autoscroll`, `2026-09-15-hub-keymap`,
+`2026-09-15-manual-actions`, one at a time.
 
 ## Latest change: widget live log and queue visibility
 
