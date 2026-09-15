@@ -22,7 +22,7 @@ import tempfile
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Protocol
 
 DEFAULT_HOTKEY = "Ctrl+Esc"
 
@@ -574,7 +574,21 @@ class CompanionClient:
         return self._call("wake")
 
 
-INDICATORS = ("working", "paused", "manual", "blocked", "stopped", "completed")
+INDICATORS = (
+    "working",
+    "paused",
+    "manual",
+    "blocked",
+    "stopped",
+    "completed",
+    "waiting",
+)
+
+#: Stop double-press window: the armed confirm expires to the safe default.
+STOP_CONFIRM_TIMEOUT_MS = 5000
+
+#: Latest-event decisions that render as a waiting indicator while AUTO.
+WAITING_DECISIONS = ("waiting", "refire", "switched")
 
 
 def build_view_model(state: dict) -> dict:
@@ -590,6 +604,12 @@ def build_view_model(state: dict) -> dict:
     next_text = "" if next_action is None else str(next_action)
     open_count = int(state.get("open_count", 0) or 0)
     blocked_count = int(state.get("blocked_count", 0) or 0)
+    latest_decision = ""
+    raw_context = state.get("diagnostic_context")
+    if isinstance(raw_context, dict):
+        raw_latest = raw_context.get("latest_event")
+        if isinstance(raw_latest, dict):
+            latest_decision = str(raw_latest.get("decision", ""))
     if not alive:
         indicator = "stopped"
     elif mode == "PAUSE":
@@ -600,6 +620,8 @@ def build_view_model(state: dict) -> dict:
         indicator = "manual"
     elif "idle" in next_text:
         indicator = "completed"
+    elif mode == "AUTO" and latest_decision in WAITING_DECISIONS:
+        indicator = "waiting"
     elif mode == "AUTO":
         indicator = "working"
     else:
@@ -623,9 +645,14 @@ def build_view_model(state: dict) -> dict:
         if context_summary:
             work_label += f"\n{context_summary}"
         queue = managed_context.get("queue", [])
-        if len(queue) > 1:
-            names = ", ".join(str(item.get("name", "?")) for item in queue[:10])
-            work_label += f"\n{len(queue)} active specs ({names})"
+        if queue:
+            parts = [
+                f"{item.get('name', '?')!s} "
+                f"{item.get('completed', 0)}/{item.get('total', 0)}"
+                for item in queue[:10]
+                if isinstance(item, dict)
+            ]
+            work_label += f"\n{len(queue)} active specs ({', '.join(parts)})"
     return {
         "indicator": indicator,
         "indicator_text": indicator.upper(),
@@ -1174,6 +1201,10 @@ class CompanionWindow:
         self._nonblocking = nonblocking
         self._action_busy = False
         self._refresh_busy = False
+        #: Inline Stop confirm: armed by the first press, fired by the
+        #: second within the timeout, disarmed silently on expiry.
+        self._stop_armed = False
+        self._stop_after: str | None = None
 
         assert isinstance(root, tk.Tk)
         root.title("Ariadex")
@@ -1552,9 +1583,12 @@ class CompanionWindow:
     ) -> None:
         """Run daemon IPC off the Tk event thread and apply its result on Tk."""
         if self._action_busy:
+            # Acknowledge instead of silently dropping: the in-flight
+            # request stands and no duplicate is sent.
+            self._notice(f"{action} request already in flight…")
             return
         self._action_busy = True
-        self._render()
+        self._notice(f"{action} request sent…")
 
         def worker() -> None:
             try:
@@ -1634,19 +1668,35 @@ class CompanionWindow:
             self._run_client("resume")
 
     def _on_stop(self) -> None:
-        import tkinter.messagebox as messagebox
-
-        if not messagebox.askyesno(
-            "Ariadex",
-            "Stop the daemon? In-flight work is cancelled at the safe "
-            "boundary; durable state is kept for `recover`.",
-            parent=cast(Any, self.root),
-        ):
+        # Inline two-press confirm: no modal dialog ever grabs the Tk
+        # event loop. Expiry disarms to the safe default of not stopping.
+        if not self._stop_armed:
+            self._stop_armed = True
+            if self._stop_after is not None:
+                with contextlib.suppress(Exception):
+                    self.root.after_cancel(self._stop_after)  # type: ignore[attr-defined]
+            self._stop_after = self.root.after(  # type: ignore[attr-defined]
+                STOP_CONFIRM_TIMEOUT_MS, self._disarm_stop
+            )
+            with contextlib.suppress(Exception):
+                self.stop_button.configure(text="Confirm stop")
+            self._notice("press Stop again to confirm stopping the daemon")
             return
+        self._disarm_stop()
         if self._nonblocking:
             self._run_client_async("stop")
         else:
             self._run_client("stop")
+
+    def _disarm_stop(self) -> None:
+        """Return Stop to its safe default; expiry sends nothing."""
+        self._stop_armed = False
+        if self._stop_after is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(self._stop_after)  # type: ignore[attr-defined]
+        self._stop_after = None
+        with contextlib.suppress(Exception):
+            self.stop_button.configure(text="Stop")
 
     def _on_reconcile(self) -> None:
         if self._nonblocking:
@@ -1823,6 +1873,7 @@ class CompanionWindow:
             "BLOCKED": "red",
             "STOPPED": "gray",
             "COMPLETED": "green",
+            "WAITING": "gold",
             "UNREACHABLE": "red",
         }
         self.dot.configure(foreground=colors.get(indicator, "black"))

@@ -711,9 +711,22 @@ class HeadlessWidgetTest(unittest.TestCase):
     def test_pause_play_stop_wiring(self):
         self.window._on_pause()
         self.window._on_play()
-        FakeMessagebox.answer = True
-        self.window._on_stop()
+        self.window._on_stop()  # first press arms, sends nothing
+        self.assertEqual(self.client.calls, ["pause", "resume"])
+        self.assertTrue(self.window._stop_armed)
+        self.window._on_stop()  # second press fires
         self.assertEqual(self.client.calls, ["pause", "resume", "stop"])
+        self.assertFalse(self.window._stop_armed)
+
+    def test_stop_confirm_expires_to_safe_default(self):
+        self.window._on_stop()
+        self.assertTrue(self.window._stop_armed)
+        self.assertEqual(self.window.stop_button.options.get("text"), "Confirm stop")
+        self.assertEqual(self.client.calls, [])
+        self.window._disarm_stop()
+        self.assertFalse(self.window._stop_armed)
+        self.assertEqual(self.window.stop_button.options.get("text"), "Stop")
+        self.assertEqual(self.client.calls, [])
 
     def test_expanded_height_includes_diagnostic_textareas(self):
         self.window._toggle_expanded()
@@ -829,9 +842,7 @@ class HeadlessWidgetTest(unittest.TestCase):
     def test_button_press_gives_immediate_feedback(self):
         companion._button_press(self.window.pause_button)
         self.assertEqual(self.window.pause_button.options.get("relief"), "sunken")
-        self.assertEqual(
-            self.window.pause_button.options.get("background"), "#3b82f6"
-        )
+        self.assertEqual(self.window.pause_button.options.get("background"), "#3b82f6")
         companion._button_release(self.window.pause_button, self.root)
         self.assertEqual(self.window.pause_button.options.get("relief"), "flat")
 
@@ -1033,6 +1044,66 @@ class CompanionEdgeTest(unittest.TestCase):
             self.assertRaises(companion.CompanionError),
         ):
             companion.session_guidance(Path(tmp))
+
+
+class ControlRoomTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.env_patch = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": self.tmp.name})
+        self.env_patch.start()
+        self.addCleanup(self.env_patch.stop)
+        install_fake_tk(self)
+
+    def test_waiting_indicator_from_latest_decision(self):
+        waiting = live_state(
+            mode="AUTO",
+            next_action="advance-spec demo",
+            diagnostic_context={
+                "current_spec": "demo",
+                "queue": [{"name": "demo", "completed": 0, "total": 12}],
+                "latest_event": {
+                    "category": "provider",
+                    "message": "fresh input-ready surface not observed",
+                    "decision": "refire",
+                },
+                "recent_events": [],
+                "notes": [],
+            },
+        )
+        model = companion.build_view_model(waiting)
+        self.assertEqual(model["indicator"], "waiting")
+        self.assertEqual(model["indicator_text"], "WAITING")
+
+    def test_job_pile_lists_per_spec_progress(self):
+        state = live_state(
+            next_action="advance-spec demo",
+            diagnostic_context={
+                "current_spec": "demo",
+                "queue": [
+                    {"name": "demo", "completed": 0, "total": 12},
+                    {"name": "next", "completed": 3, "total": 10},
+                ],
+                "latest_event": None,
+                "recent_events": [],
+                "notes": [],
+            },
+        )
+        model = companion.build_view_model(state)
+        self.assertIn("2 active specs", model["work_label"])
+        self.assertIn("demo 0/12", model["work_label"])
+        self.assertIn("next 3/10", model["work_label"])
+
+    def test_busy_click_is_acknowledged_without_duplicate(self):
+        root = FakeTkRoot()
+        window = companion.CompanionWindow(
+            root, FakeClient(), FakeAdapter(), "Ctrl+Esc", nonblocking=True
+        )
+        window.client.calls.clear()
+        window._action_busy = True
+        window._on_pause()
+        self.assertEqual(window.client.calls, [])
+        self.assertIn("in flight", str(window.model.get("failure", "")))
 
 
 if __name__ == "__main__":

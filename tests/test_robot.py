@@ -1752,6 +1752,50 @@ class LifecycleActivitiesTest(unittest.TestCase):
                 )
             )
 
+    def test_pause_requests_provider_interrupt(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": BUSY, "workdir": "/t"}
+        watcher = make_watcher(project, driver)
+        result = watcher.request_pause()
+        self.assertEqual(watcher.phase, robot_mod.PAUSED)
+        self.assertIn(("interrupt", "agent"), driver.calls)
+        self.assertIn("interrupt requested", result)
+        kinds = [event["message"] for event in watcher.activity_events]
+        self.assertTrue(any("interrupt requested" in message for message in kinds))
+
+    def test_repeated_pause_does_not_respam_interrupt(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": BUSY, "workdir": "/t"}
+        watcher = make_watcher(project, driver)
+        watcher.request_pause()
+        interrupts = [call for call in driver.calls if call[0] == "interrupt"]
+        watcher.request_pause()
+        watcher.poll()
+        self.assertEqual(
+            [call for call in driver.calls if call[0] == "interrupt"], interrupts
+        )
+        self.assertEqual(len(interrupts), 1)
+
+    def test_pause_without_capability_holds_and_records(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": BUSY, "workdir": "/t"}
+        watcher = make_watcher(project, driver, provider="codex")
+        with unittest.mock.patch.object(
+            type(watcher.adapter),
+            "capabilities",
+            new_callable=unittest.mock.PropertyMock,
+        ) as caps:
+            from ariadex.adapters import Capabilities
+
+            caps.return_value = Capabilities(interrupt=False)
+            result = watcher.request_pause()
+        self.assertEqual(watcher.phase, robot_mod.PAUSED)
+        self.assertNotIn(("interrupt", "agent"), driver.calls)
+        self.assertIn("unavailable", result)
+
 
 if __name__ == "__main__":
     unittest.main()

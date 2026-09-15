@@ -1001,17 +1001,41 @@ class RobotWatcher:
             )
 
     def request_pause(self) -> str:
-        """Stop new input; the user-owned session keeps running."""
+        """Stop new input and ask the running provider to stop too.
+
+        Scheduling pause always holds; the provider interrupt is
+        best-effort through the adapter contract and its outcome is
+        recorded either way. Re-engaging an held pause is a no-op so a
+        parked watcher never spams interrupts. The user-owned session
+        keeps running.
+        """
+        if self._paused:
+            self.phase = PAUSED
+            return "paused: no new input; pause already held"
         self._paused = True
         self.phase = PAUSED
         self._record("pause", "paused: no new input will be sent")
+        interrupt_note = self._interrupt_for_pause()
+        self._record("pause", interrupt_note)
         self._diag(
             "pause",
             "watcher paused",
             result="paused",
-            message="no new input will be sent",
+            message=f"no new input will be sent; {interrupt_note}",
         )
-        return "paused: no new input; the provider session keeps running"
+        return f"paused: no new input; {interrupt_note}"
+
+    def _interrupt_for_pause(self) -> str:
+        """Best-effort provider interrupt for a pause; never raises."""
+        if not self.adapter.capabilities.interrupt:
+            return "provider interrupt unavailable (capability)"
+        try:
+            self.adapter.interrupt()
+        except UnsupportedOperation:
+            return "provider interrupt unavailable (unsupported)"
+        except Exception as exc:
+            return f"provider interrupt failed: {exc}"
+        return "provider interrupt requested"
 
     def request_resume(self) -> str:
         """Resume observation; do not inject input just because of resume."""
@@ -1312,16 +1336,10 @@ class RobotWatcher:
         if self.mode_requested is not None:
             mode = self.mode_requested()
             if mode == "PAUSE":
-                self._paused = True
-                self.phase = PAUSED
+                # One pause path: scheduling holds and the provider is
+                # asked to stop too, with the outcome recorded.
                 self.stable_polls = 0
-                self._record("pause", "daemon mode PAUSE: no new input will be sent")
-                self._diag(
-                    "pause",
-                    "daemon mode PAUSE observed",
-                    result="paused",
-                    message="no new input will be sent",
-                )
+                self.request_pause()
                 return self.phase
             if self._paused and mode == "AUTO":
                 self.request_resume()
