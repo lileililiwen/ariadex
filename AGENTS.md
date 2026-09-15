@@ -1,45 +1,42 @@
-# Ariadex agent instructions
+# Ariadex agent entry point
 
-Read `README.md`, `ROADMAP.md`, and `HANDOFF.md` before changing the project. Ariadex is a human-supervised orchestration runtime, not an IDE, editor, LLM client, or replacement Coding CLI.
+Ariadex is a human-supervised runtime for existing Coding CLIs. It is not an
+IDE, editor, LLM client, or replacement CLI. Read `README.md`, `ROADMAP.md`,
+and `HANDOFF.md` before project changes.
+
+## Required workflow
+
+- Use OpenSpec for every non-trivial behavior change. Select one active change
+  with `openspec list`; implement only that change and its tests.
+- Follow [`.ai-rules/workflow.md`](.ai-rules/workflow.md): breadth analysis,
+  structural pass, depth implementation, breadth verification.
+- Load [`.ai-rules/architecture.md`](.ai-rules/architecture.md) for module,
+  boundary, lifecycle, persistence, or provider changes. Apply relevant rules
+  in [reliability](.ai-rules/concerns/reliability.md) and
+  [security](.ai-rules/concerns/security.md).
+- Completion means the conditions in
+  [`.ai-rules/completion.md`](.ai-rules/completion.md) hold. Build success,
+  test success, or a compiling skeleton alone is not DONE.
+- Run relevant tests and checks, then
+  `openspec validate --changes --strict --no-interactive`.
+- Archive only after verification and canonical spec promotion. Never use
+  `--skip-specs`. Commit the implementation/archive, update `HANDOFF.md` with
+  evidence and the next change, commit only that handoff update, then stop.
 
 ## Product invariants
 
-- Preserve repository, spec, and handoff state as the durable source of continuity.
-- Keep AgentAdapter separate from TerminalDriver.
-- Keep provider-specific commands inside adapters; the runner uses declared capabilities.
-- Never silently discard unresolved work. Use `OPEN`, `RESOLVED`, `DEFERRED`, or `BLOCKED` with reason and target where applicable.
-- MANUAL means no automatic input; Ariadex may observe and log. PAUSE means no new scheduling operations.
-- Returning to AUTO always resynchronizes from handoff, git status/diff, current spec, and unresolved queue.
-- Never claim an AI-reported completion without configured verification passing.
-- Do not add provider LLM API calls, IDE features, or V2 features to an MVP change.
+- Repository, OpenSpec, and handoff state are durable continuity sources.
+- Keep `AgentAdapter` separate from `TerminalDriver`; provider commands and
+  input-surface semantics stay behind adapter capabilities.
+- Preserve unresolved work as `OPEN`, `RESOLVED`, `DEFERRED`, or `BLOCKED`
+  with reason and target where applicable.
+- `MANUAL` prohibits automatic input; `PAUSE` prohibits new scheduling.
+  Returning to `AUTO` resynchronizes from handoff, Git, the current spec, and
+  the unresolved queue.
+- Never treat provider-reported completion as success without configured
+  verification. Preserve drafts, human takeover, and ownership boundaries.
+- Do not add provider LLM API calls, IDE features, or V2 capabilities to MVP
+  changes.
 
-## OpenSpec delivery workflow
-
-1. Select one active change with `openspec list`.
-2. Implement only that change and its tests.
-3. Update its `tasks.md` as tasks complete.
-4. Verify with relevant tests and strict OpenSpec validation.
-5. Archive the completed change.
-   NEVER use `--skip-specs` when archiving. Canonical specs MUST be updated
-   from the change before the archive is accepted.
-6. Commit 1: implementation, tests, archive, and related generated specs only.
-7. Update `HANDOFF.md` with completion evidence and the next change.
-8. Commit 2: only the `HANDOFF.md` update.
-9. Stop; do not start another change or push.
-
-Incomplete or blocked work must not be claimed complete. Record the exact failed command and next action in `HANDOFF.md`.
-
-## Verification
-
-Use the project’s actual build and test commands once established. Every change must pass relevant tests and:
-
-For a fresh development checkout, run `ariadex dev setup` first. It
-user-scoped installs `uv` only with confirmation, then performs the frozen
-development sync and verifies `pip-audit`; ordinary runtime installation does
-not install development tools.
-
-```bash
-openspec validate --changes --strict --no-interactive
-```
-
-Before handoff, inspect `git status --short`, confirm only intended files changed, and verify links and configuration examples.
+Incomplete or blocked work is not complete. Record the exact failed command
+and next action in `HANDOFF.md`.

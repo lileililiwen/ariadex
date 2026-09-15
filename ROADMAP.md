@@ -133,45 +133,6 @@ minimal middle-right robot widget (watching state, Pause, Quit). No
 duplicate queue, no provider LLM API calls, no input while the agent
 works, and no implicit session creation or termination.
 
-## Planned: idempotent managed runtime and minimal CLI
-
-`2026-09-13-managed-runtime-upsert-and-minimal-cli` is planning-only and
-targets the remaining lifecycle gap: `ariadex start` must reconcile one
-project into one daemon, one provider session, one supervisor, and one widget;
-rerunning it after a widget crash must reuse the daemon/session and recreate
-only the widget. The same change reduces the normal user workflow to
-`ariadex init` and `ariadex start`, with lifecycle controls provided by the
-provider terminal and widget and only a small admin diagnostic surface.
-
-## Deferred V2 capabilities
-
-## Planned: managed start and unified prerequisites
-
-The following planning-only changes are active and must be implemented in
-dependency order. All three items are implemented, tested, archived, and committed
-(`2026-09-12-2026-09-13-init-prompt-config`, commit `93f20ef`;
-`2026-09-12-2026-09-13-prerequisite-coordinator`, commit `21ff82e`;
-`2026-09-12-2026-09-13-managed-start-facade`, commit `59966c6`; see
-[HANDOFF.md](HANDOFF.md)):
-
-1. `2026-09-13-init-prompt-config` — interactive first-run provider and prompt
-   configuration, built-in defaults, refusal of implicit initialization, and
-   explicit `init --force` reset scoped to `.ariadex`. (Complete.)
-2. `2026-09-13-prerequisite-coordinator` — silently reuse ready prerequisites,
-   automatically prepare safe missing prerequisites, request sudo only when a
-   system install requires it, and fail closed after verification. `uv` stays
-   a development prerequisite; provider applications are never installed by
-   Ariadex. (Complete.)
-3. `2026-09-13-managed-start-facade` — make `ariadex start` the single normal
-   workflow for daemon, provider tmux session, first/continuation prompts,
-   widget, supervision, queue completion, and clean shutdown, while retaining
-   advanced internals for recovery. (Complete.)
-
-The managed-start track and the task-aware confirmation/widget-log follow-up
-are complete. The follow-up was implemented and archived as
-`2026-09-13-task-aware-confirmation-and-widget-activity-log`; `openspec list`
-currently has no active changes in Ariadex itself.
-
 ## Complete: OpenSpec lifecycle and diagnostics follow-ups
 
 All three dependency-ordered changes are implemented, tested, archived,
@@ -186,14 +147,21 @@ and committed (see `HANDOFF.md` for per-change evidence):
    normal `ariadex start` widget, shows accurate OpenSpec task state, and copies
    a redacted debugging context to the desktop clipboard.
 
+## Deferred capabilities
+
 With the foundations above archived, the deferred capabilities are:
 
-- native PTY driver
+- Windows ConPTY terminal backend (Unix pty backend is implemented;
+  ConPTY needs a Windows host for verification)
 - Claude Code adapter (CodeBuddy shares the adapter boundary since
   `robot-agent-supervisor`)
 - token and cost statistics when providers expose usage
 - advanced retry strategies and idle detection
 - remote monitoring beyond the provider-neutral export boundary
+
+Implementation work begins only from an active OpenSpec change. When no change
+is active, update planning/specs before changing product behavior; do not
+treat the deferred list as implementation authorization.
 
 ## Non-goals
 
