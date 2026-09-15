@@ -21,7 +21,11 @@ class StaleDaemonRecoveryTest(unittest.TestCase):
                 self.assertFalse(cli._live_owner(root, False))
             report.assert_not_called()
 
-    def test_live_owner_requires_typed_socket_response(self):
+    def test_live_record_refuses_without_typed_socket_response(self):
+        # Session-robustness: a live daemon record alone refuses a second
+        # owner (fail closed with attach/`--project`); only stale or dead
+        # records keep the recovery path. IPC health only enriches the
+        # report, it never admits a second scheduler.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".ariadex").mkdir()
@@ -32,8 +36,8 @@ class StaleDaemonRecoveryTest(unittest.TestCase):
                 mock.patch.object(cli, "_daemon_ipc_or_none", return_value=None),
                 mock.patch.object(cli, "_report_live_owner") as report,
             ):
-                self.assertFalse(cli._live_owner(root, False))
-            report.assert_not_called()
+                self.assertTrue(cli._live_owner(root, False))
+            report.assert_called_once()
 
 
 if __name__ == "__main__":

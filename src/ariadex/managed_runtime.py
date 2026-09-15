@@ -161,27 +161,60 @@ class ManagedRuntime:
             raise
 
     def _run_watcher(self) -> None:
-        if self.watcher is not None:
+        if self.watcher is None:
+            return
+        try:
             self.outcome = self.watcher.run()
-            if self._unexpected_provider_exit():
-                from . import diagnostics as diagnostics_mod
+        except Exception as exc:
+            from types import SimpleNamespace
 
-                details: dict[str, object] = {"watcher_outcome": str(self.outcome)}
-                adapter = self.adapter
-                if adapter is not None:
-                    try:
-                        details["final_capture"] = adapter.capture_output()[-4000:]
-                    except Exception as exc:
-                        details["final_capture_error"] = str(exc)
-                diagnostics_mod.record_operation(
-                    self.project_dir,
-                    "unexpected-provider-exit",
-                    phase="observed",
-                    result="provider-missing",
-                    provider=getattr(adapter, "provider_name", ""),
-                    session=getattr(adapter, "session_name", ""),
-                    details=details,
-                )
+            from . import diagnostics as diagnostics_mod
+
+            self.outcome = SimpleNamespace(
+                outcome="crashed",
+                detail=f"watcher error: {exc}",
+                prompts_sent=getattr(self.watcher, "prompts_sent", 0),
+            )
+            error_details: dict[str, object] = {
+                "watcher_outcome": str(self.outcome),
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            }
+            adapter = self.adapter
+            if adapter is not None:
+                try:
+                    error_details["final_capture"] = adapter.capture_output()[-4000:]
+                except Exception as capture_exc:
+                    error_details["final_capture_error"] = str(capture_exc)
+            diagnostics_mod.record_operation(
+                self.project_dir,
+                "unexpected-provider-exit",
+                phase="observed",
+                result="provider-missing",
+                provider=getattr(adapter, "provider_name", ""),
+                session=getattr(adapter, "session_name", ""),
+                details=error_details,
+            )
+            return
+        if self._unexpected_provider_exit():
+            from . import diagnostics as diagnostics_mod
+
+            details: dict[str, object] = {"watcher_outcome": str(self.outcome)}
+            adapter = self.adapter
+            if adapter is not None:
+                try:
+                    details["final_capture"] = adapter.capture_output()[-4000:]
+                except Exception as exc:
+                    details["final_capture_error"] = str(exc)
+            diagnostics_mod.record_operation(
+                self.project_dir,
+                "unexpected-provider-exit",
+                phase="observed",
+                result="provider-missing",
+                provider=getattr(adapter, "provider_name", ""),
+                session=getattr(adapter, "session_name", ""),
+                details=details,
+            )
 
     def _unexpected_provider_exit(self) -> bool:
         """Return true only for a provider loss without an explicit stop."""

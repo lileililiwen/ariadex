@@ -32,7 +32,14 @@ from . import handoff as handoff_mod
 from . import openspec_evidence as evidence_mod
 from . import permissions as permissions_mod
 from . import spec_graph as spec_graph_mod
-from .adapters import AgentAdapter, InputSurface, UnsupportedOperation
+from . import terminal as terminal_mod
+from .adapters import (
+    AgentAdapter,
+    CaptureError,
+    InputSurface,
+    TransportError,
+    UnsupportedOperation,
+)
 from .config import DEFAULT_CONFIRMATION_PROMPT
 from .logging import redact
 from .terminal import TerminalDriver
@@ -277,6 +284,36 @@ FRESH_EXHAUSTION_LIMIT = 3
 
 class RobotError(Exception):
     """Typed robot failure: configuration, session, or boundary refusal."""
+
+
+class TransportLoss(RobotError):
+    """Provider transport loss: dead session or failed capture/send.
+
+    Subclasses ``RobotError`` so existing approval-path handlers keep
+    waiting instead of crashing, but ``poll``/``run`` handle it as a
+    waiting state with an ``unexpected-provider-exit`` diagnostic —
+    never an escaping exception and never a killed watcher thread.
+    """
+
+
+def _is_transport_loss(exc: BaseException) -> bool:
+    """True when an exception chain names terminal/adapter transport loss."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(
+            current,
+            (
+                terminal_mod.TerminalError,
+                TransportError,
+                CaptureError,
+                TransportLoss,
+            ),
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def classify_capture(provider: str, text: str, input_ready: bool | None = None) -> str:
@@ -1530,7 +1567,39 @@ class RobotWatcher:
         try:
             return self.driver.capture(self.config.session)
         except Exception as exc:
+            if _is_transport_loss(exc):
+                raise TransportLoss(f"provider session unavailable: {exc}") from exc
             raise RobotError(f"capture failed: {exc}") from exc
+
+    def _enter_transport_wait(self, where: str, exc: BaseException) -> str:
+        """Park the watcher in WAITING on transport loss (never raises).
+
+        Records an ``unexpected-provider-exit`` diagnostic and sends no
+        provider input. The daemon and widget keep reporting the true
+        supervision state; watching resumes when the session is
+        restored.
+        """
+        detail = (
+            f"provider session unavailable ({where}: {exc}); waiting — "
+            "no input sent; restore the session, then watching resumes"
+        )
+        self.phase = WAITING
+        self.stable_polls = 0
+        self.block_reason = detail
+        self._record("waiting", detail)
+        self._diag(
+            "provider",
+            "unexpected-provider-exit",
+            result="waiting",
+            message=detail,
+            classification="unknown",
+            decision="waiting",
+            blocker=detail,
+            operation="observe",
+            next_action="restore the provider session, then watching resumes; "
+            "no input was sent",
+        )
+        return self.phase
 
     def _quiescent(self, capture: str) -> bool:
         """Dead-screen gate for finished classifications (pure accounting).
@@ -1555,11 +1624,23 @@ class RobotWatcher:
     def _send(self, text: str) -> None:
         try:
             self.adapter.send(text)
+        except TransportLoss:
+            raise
         except Exception as exc:
+            if _is_transport_loss(exc):
+                raise TransportLoss(
+                    f"provider session unavailable (send: {exc})"
+                ) from exc
             raise RobotError(f"prompt delivery failed: {exc}") from exc
 
     def poll(self) -> str:
-        """Advance one bounded step; returns the current phase."""
+        """Advance one bounded step; returns the current phase.
+
+        Transport loss (dead session, failed capture/send) parks the
+        watcher in WAITING with an ``unexpected-provider-exit``
+        diagnostic and sends no input — it never escapes as an
+        exception and never kills the watcher thread.
+        """
         if self._quit:
             self.phase = STOPPED
             return self.phase
@@ -1576,6 +1657,21 @@ class RobotWatcher:
         if self._paused:
             self.phase = PAUSED
             return self.phase
+        try:
+            return self._poll_observed()
+        except TransportLoss as exc:
+            return self._enter_transport_wait("poll", exc)
+        except (terminal_mod.TerminalError, TransportError, CaptureError) as exc:
+            return self._enter_transport_wait(
+                "poll", TransportLoss(f"provider session unavailable: {exc}")
+            )
+        except RobotError as exc:
+            if _is_transport_loss(exc):
+                return self._enter_transport_wait("poll", exc)
+            raise
+
+    def _poll_observed(self) -> str:
+        """Observe one capture and advance; transport loss propagates."""
         capture = self._capture()
         provider_state = self.adapter.provider_state()
         if self.adapter.provider_state_required and provider_state is None:
@@ -2608,7 +2704,8 @@ class RobotWatcher:
         observed `PAUSE` aborts the wait (`_fresh_ready_aborted` names
         the abort as `"paused"` or `"stopped"`). The attempt count of
         the latest wait is kept on `last_fresh_ready_attempts` for
-        activity records.
+        activity records. Transport loss propagates as `TransportLoss`
+        so the `poll` boundary parks the watcher instead of killing it.
         """
         do_sleep = sleep if sleep is not None else time.sleep
         bound = max(self.config.fresh_ready_attempts, 1)
@@ -2626,19 +2723,32 @@ class RobotWatcher:
                 self._fresh_ready_aborted = "paused"
                 return None
             self.last_fresh_ready_attempts = attempt
-            capture = self._capture()
-            provider_state = self.adapter.provider_state()
-            if self.adapter.provider_state_required:
-                ready = provider_state == "idle"
-            else:
-                ready = (
-                    classify_capture(
-                        self.adapter.provider_name,
-                        capture,
-                        input_ready=self.adapter.is_input_ready(capture),
+            try:
+                capture = self._capture()
+                provider_state = self.adapter.provider_state()
+                if self.adapter.provider_state_required:
+                    ready = provider_state == "idle"
+                else:
+                    ready = (
+                        classify_capture(
+                            self.adapter.provider_name,
+                            capture,
+                            input_ready=self.adapter.is_input_ready(capture),
+                        )
+                        == CLASS_FINISHED
                     )
-                    == CLASS_FINISHED
-                )
+            except TransportLoss:
+                raise
+            except (terminal_mod.TerminalError, TransportError, CaptureError) as exc:
+                raise TransportLoss(
+                    f"provider session unavailable (fresh-ready: {exc})"
+                ) from exc
+            except RobotError as exc:
+                if _is_transport_loss(exc):
+                    raise TransportLoss(
+                        f"provider session unavailable (fresh-ready: {exc})"
+                    ) from exc
+                raise
             if ready:
                 stable += 1
                 if stable >= needed:
@@ -2742,7 +2852,19 @@ class RobotWatcher:
                     ),
                     prompts_sent=self.prompts_sent,
                 )
-            self.poll()
+            try:
+                self.poll()
+            except TransportLoss as exc:
+                self._enter_transport_wait("run", exc)
+            except (terminal_mod.TerminalError, TransportError, CaptureError) as exc:
+                self._enter_transport_wait(
+                    "run", TransportLoss(f"provider session unavailable: {exc}")
+                )
+            except RobotError as exc:
+                if _is_transport_loss(exc):
+                    self._enter_transport_wait("run", exc)
+                else:
+                    raise
             polls += 1
             if self.phase in (DONE, BLOCKED) or self._quit:
                 continue

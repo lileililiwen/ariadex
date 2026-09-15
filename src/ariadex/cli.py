@@ -1723,10 +1723,14 @@ def _report_live_owner(project_dir: Path, record, as_json: bool) -> None:
     import json as json_mod
 
     healthy: bool = _daemon_ipc_or_none(project_dir, "status") is not None
+    started = getattr(record, "started_at", "?") or "?"
     detail = (
-        f"daemon already running (pid {record.pid}, "
+        f"project `{project_dir}` is already managed by a live daemon "
+        f"(pid {record.pid}, started {started}, "
         f"endpoint {record.endpoint}, "
-        f"{'reachable' if healthy else 'endpoint not answering'})"
+        f"{'reachable' if healthy else 'endpoint not answering'}); "
+        "attach to it or use `--project <other-dir>` "
+        "(no provider input sent; nothing created)"
     )
     if not healthy:
         detail += "; run `ariadex admin recover` if scheduling stalls"
@@ -1749,16 +1753,16 @@ def _report_live_owner(project_dir: Path, record, as_json: bool) -> None:
 
 
 def _live_owner(project_dir: Path, as_json: bool) -> bool:
-    """True when a live daemon owns the project (reported, untouched)."""
+    """True when a live daemon owns the project (reported, untouched).
+
+    A live daemon record alone refuses a second owner: the typed IPC
+    health only enriches the report. Stale or dead records keep
+    today's recovery path via `_start_daemon_only`.
+    """
     record = daemon_mod.read_record(project_dir)
-    if (
-        daemon_mod.daemon_alive(record)
-        and record is not None
-        and _daemon_ipc_or_none(project_dir, "status") is not None
-    ):
-        # Duplicate start: the typed endpoint has answered, so never create
-        # a second scheduler or provider session.
-        assert record is not None
+    if record is not None and daemon_mod.daemon_alive(record):
+        # Duplicate start: a live owner holds this directory, so never
+        # create a second scheduler, provider session, or record.
         _report_live_owner(project_dir, record, as_json)
         return True
     return False
@@ -2538,6 +2542,16 @@ def _start_daemon_only(project_dir: Path, as_json: bool = False) -> int:
     import time
 
     record = daemon_mod.read_record(project_dir)
+    if record is not None and daemon_mod.daemon_alive(record):
+        started = getattr(record, "started_at", "?") or "?"
+        print(
+            f"error: project `{project_dir}` is already managed by a live "
+            f"daemon (pid {record.pid}, started {started}); "
+            "attach to it or use `--project <other-dir>` "
+            "(no provider input sent; nothing created)",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
     diagnosis = concurrency_mod.diagnose(project_dir)
     if diagnosis.get("state") == "active":
         owner = diagnosis.get("owner") or {}

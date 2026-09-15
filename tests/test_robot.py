@@ -953,11 +953,15 @@ class ContinuationTest(unittest.TestCase):
         real_check = robot_mod.check_boundary
         robot_mod.check_boundary = self._ok_boundary(["next-change"])  # type: ignore[assignment]
         try:
-            # Initial send fails delivery -> RobotError surfaces, no claim.
-            with self.assertRaises(robot_mod.RobotError):
-                watcher.poll()
+            # Initial send fails delivery -> transport loss parks the
+            # watcher in WAITING (session-robustness); nothing escapes,
+            # no prompt is claimed sent.
+            self.assertEqual(watcher.poll(), "waiting")
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
+        self.assertIn("unavailable", watcher.block_reason)
+        self.assertIn("no input sent", watcher.block_reason)
+        self.assertEqual(driver.sent_inputs("agent"), [])
 
     def test_new_surface_never_ready_refires(self) -> None:
         project = make_project(self._tmp)
