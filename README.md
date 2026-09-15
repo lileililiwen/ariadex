@@ -195,7 +195,9 @@ confirmation_prompt: "Finish the remaining open tasks, then update the handoff."
 During init, permission setup asks for the policy, private temp root, allowed
 file actions, and an explicit path allowlist. To permit a shared path such as
 `/tmp`, select `allowlist` and enter `/tmp`; it is never enabled by a blank
-answer. Edit these values directly later. Existing projects receive missing prompt keys the
+answer. Init also asks for the widget color theme (`dark`/`light`/`contrast`,
+blank keeps `dark`); `ariadex init --theme light` sets it non-interactively.
+Edit these values directly later. Existing projects receive missing prompt keys the
 next time `ariadex init` runs, without replacing their other configuration.
 
 Run these from the project you want Ariadex to supervise (the current
@@ -281,7 +283,10 @@ durable work is preserved. Ctrl+C in the attached terminal uses the same path.
 Configuration is per user in `$XDG_CONFIG_HOME/ariadex/companion.json`
 (`~/.config/ariadex/companion.json` by default): `hotkey` (e.g. `Alt+F9`)
 and the last window position `x`/`y`. `--hotkey` overrides the hotkey for
-one session; `--editor` overrides `$EDITOR` for the Editor button. Wayland,
+one session; `--editor` overrides `$EDITOR` for the Editor button. The
+widget color theme is per project in `.ariadex/config.yaml` (`theme:
+dark`, `light`, or `contrast`; unknown values fall back to `dark` with a
+warning) and applies on the next widget start. Wayland,
 macOS, and Windows report unsupported instead of pretending; the managed
 provider remains available through its terminal. Use `ariadex admin doctor`
 for desktop, Tkinter, and hotkey diagnostics.

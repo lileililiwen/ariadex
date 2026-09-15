@@ -39,6 +39,7 @@ from . import runner as runner_mod
 from . import state as state_mod
 from . import status as status_mod
 from . import terminal as terminal_mod
+from . import theme as theme_mod
 from . import tmux_setup as tmux_setup_mod
 from . import upgrade as upgrade_mod
 from . import widget_runtime as widget_runtime_mod
@@ -114,6 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
         "-y",
         action="store_true",
         help="confirm the destructive reset without prompting (non-interactive use)",
+    )
+    init_parser.add_argument(
+        "--theme",
+        choices=theme_mod.theme_names(),
+        default=None,
+        help="widget color theme without prompting (dark/light/contrast)",
     )
     run_parser = sub.add_parser(
         "run", help="start execution after validating prerequisites"
@@ -675,17 +682,18 @@ def _coerce_answer(raw: str, default: str) -> str:
 
 def _ask_init_answers(
     read_answer=None,
-) -> tuple[str, str, str, str, str, str, list[str], list[str], list[str]]:
-    """Prompt for provider, managed prompts, and permission policy.
+    theme: str | None = None,
+) -> tuple[str, str, str, str, str, str, list[str], list[str], list[str], str]:
+    """Prompt for provider, managed prompts, permission policy, and theme.
 
     `read_answer` maps a prompt string to the user's raw answer; the default
     reads interactively (defaults headless). Invalid providers are rejected
     and re-prompted without touching durable state. Returns validated
     `(provider, first_prompt, continuation_prompt, confirmation_prompt,
     permission_policy, permission_temp_root, permission_actions,
-    permission_allowlist, models)` with validated values. Shared paths such as
+    permission_allowlist, models, theme)` with validated values. Shared paths such as
     `/tmp` are configured through the explicit allowlist, never by changing
-    the private project temp root.
+    the private project temp root. A `--theme` value skips the theme prompt.
     """
     read = read_answer if read_answer is not None else _wizard_answer
     providers = providers_mod.supported_providers()
@@ -787,6 +795,25 @@ def _ask_init_answers(
         "",
     )
     models = [item.strip() for item in raw_models.split(",") if item.strip()]
+    if theme is not None:
+        theme_answer = theme_mod.get_theme(theme).name
+    else:
+        choices = theme_mod.theme_names()
+        while True:
+            theme_answer = _coerce_answer(
+                read(
+                    "Widget theme [dark] "
+                    f"({'/'.join(choices)}; blank keeps the default): "
+                ),
+                "dark",
+            ).lower()
+            if theme_answer in theme_mod.THEMES:
+                break
+            print(
+                f"error: invalid theme `{theme_answer}`; "
+                f"choose one of {', '.join(choices)}",
+                file=sys.stderr,
+            )
     return (
         provider,
         first_prompt,
@@ -797,6 +824,7 @@ def _ask_init_answers(
         permission_actions,
         permission_allowlist,
         models,
+        theme_answer,
     )
 
 
@@ -810,6 +838,7 @@ def _render_config_text(
     permission_actions: list[str] | None = None,
     permission_allowlist: list[str] | None = None,
     models: list[str] | None = None,
+    theme: str | None = None,
 ) -> str:
     """Render the commented default config with the wizard answers applied.
 
@@ -884,6 +913,11 @@ def _render_config_text(
         f"\nmodels: {json_mod.dumps(models if models is not None else [])}\n",
         1,
     )
+    text = text.replace(
+        "\ntheme: dark\n",
+        f"\ntheme: {theme_mod.get_theme(theme).name}\n",
+        1,
+    )
     return text
 
 
@@ -898,6 +932,7 @@ def _create_missing_files(
     permission_actions: list[str] | None = None,
     permission_allowlist: list[str] | None = None,
     models: list[str] | None = None,
+    theme: str | None = None,
 ) -> tuple[list, list]:
     """Create absent .ariadex/config.yaml, handoff, and state files.
 
@@ -923,6 +958,7 @@ def _create_missing_files(
                 permission_actions,
                 permission_allowlist,
                 models,
+                theme,
             ),
             encoding="utf-8",
         )
@@ -947,7 +983,10 @@ def _create_missing_files(
 
 
 def _cmd_init_force(
-    project_dir: Path, confirmed: bool = False, read_answer=None
+    project_dir: Path,
+    confirmed: bool = False,
+    read_answer=None,
+    theme: str | None = None,
 ) -> int:
     """Destructively reset `.ariadex` after confirmation, then reinitialize.
 
@@ -984,7 +1023,8 @@ def _cmd_init_force(
         permission_actions,
         permission_allowlist,
         models,
-    ) = _ask_init_answers(read_answer)
+        theme,
+    ) = _ask_init_answers(read_answer, theme)
     print(
         "init --force removes the complete .ariadex directory (configuration, "
         "state, daemon records, locks, logs, events). HANDOFF.md, openspec/, "
@@ -1014,6 +1054,7 @@ def _cmd_init_force(
             permission_actions,
             permission_allowlist,
             models,
+            theme,
         )
     except OSError as exc:
         print(
@@ -1071,10 +1112,11 @@ def cmd_init(
     force: bool = False,
     confirmed: bool = False,
     read_answer=None,
+    theme: str | None = None,
 ) -> int:
     if force:
         return _cmd_init_force(
-            project_dir, confirmed=confirmed, read_answer=read_answer
+            project_dir, confirmed=confirmed, read_answer=read_answer, theme=theme
         )
     if is_initialized(project_dir):
         try:
@@ -1104,7 +1146,8 @@ def cmd_init(
         permission_actions,
         permission_allowlist,
         models,
-    ) = _ask_init_answers(read_answer)
+        theme,
+    ) = _ask_init_answers(read_answer, theme)
     try:
         created, preserved = _create_missing_files(
             project_dir,
@@ -1117,6 +1160,7 @@ def cmd_init(
             permission_actions,
             permission_allowlist,
             models,
+            theme,
         )
     except OSError as exc:
         print(f"error: initialization failed: {exc}", file=sys.stderr)
@@ -4138,6 +4182,7 @@ def main(argv: list[str] | None = None) -> int:
             project_dir,
             force=getattr(args, "force", False),
             confirmed=getattr(args, "yes", False),
+            theme=getattr(args, "theme", None),
         ),
         "run": lambda: cmd_run(
             project_dir,

@@ -109,7 +109,7 @@ class FirstRunWizardTest(unittest.TestCase):
         self.assertEqual(cfg.permission_allowlist, ["/tmp"])
 
     def test_invalid_permission_policy_reprompts_without_partial_init(self):
-        answers = iter(["opencode", "", "", "", "unsafe", "prompt", "", "", "", ""])
+        answers = iter(["opencode", "", "", "", "unsafe", "prompt", "", "", "", "", ""])
         with redirect_stderr(io.StringIO()):
             code = cli.cmd_init(self.root, read_answer=lambda prompt: next(answers))
         self.assertEqual(code, 0)
@@ -158,13 +158,14 @@ class FirstRunWizardTest(unittest.TestCase):
             mock.patch.object(sys, "stdin", fake_stdin),
             mock.patch(
                 "builtins.input",
-                side_effect=["codex", "", "", "", "", "", "", "", ""],
+                side_effect=["codex", "", "", "", "", "", "", "", "", ""],
             ),
         ):
             self.assertEqual(cli.cmd_init(self.root), 0)
         cfg = config.load(self.root)
         self.assertEqual(cfg.agent_provider, "codex")
         self.assertEqual(cfg.continuation_prompt, config.DEFAULT_MANAGED_PROMPT)
+        self.assertEqual(cfg.theme, "dark")
 
     def test_interactive_eof_falls_back_to_defaults(self):
         fake_stdin = io.StringIO()
@@ -175,6 +176,54 @@ class FirstRunWizardTest(unittest.TestCase):
         ):
             self.assertEqual(cli.cmd_init(self.root), 0)
         self.assertEqual(config.load(self.root).agent_provider, "opencode")
+
+    def test_theme_selection_stored(self):
+        self.assertEqual(
+            cli.cmd_init(
+                self.root,
+                read_answer=scripted("", "", "", "", "", "", "", "", "", "light"),
+            ),
+            0,
+        )
+        self.assertEqual(config.load(self.root).theme, "light")
+
+    def test_theme_blank_keeps_dark(self):
+        self.assertEqual(
+            cli.cmd_init(
+                self.root,
+                read_answer=scripted("", "", "", "", "", "", "", "", "", ""),
+            ),
+            0,
+        )
+        self.assertEqual(config.load(self.root).theme, "dark")
+
+    def test_invalid_theme_reprompts(self):
+        with redirect_stderr(io.StringIO()):
+            code = cli.cmd_init(
+                self.root,
+                read_answer=scripted(
+                    "", "", "", "", "", "", "", "", "", "neon", "contrast"
+                ),
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(config.load(self.root).theme, "contrast")
+
+    def test_theme_flag_skips_prompt(self):
+        seen: list[str] = []
+        code = cli.cmd_init(
+            self.root,
+            read_answer=lambda prompt: seen.append(prompt) or "",
+            theme="light",
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(config.load(self.root).theme, "light")
+        self.assertFalse([p for p in seen if "theme" in p.lower()])
+
+    def test_theme_flag_invalid_refuses_before_write(self):
+        with self.assertRaises(SystemExit) as ctx:
+            cli.build_parser().parse_args(["init", "--theme", "neon"])
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertFalse((self.root / ".ariadex" / "config.yaml").exists())
 
     def test_partial_init_completes_missing_files(self):
         cfg_path = self.root / config.CONFIG_REL_PATH

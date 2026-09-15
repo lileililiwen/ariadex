@@ -44,7 +44,9 @@ class ConfigModelsTest(unittest.TestCase):
         self.assertEqual(config.defaults().models, [])
 
     def test_init_prompt_round_trips_models(self):
-        answers = iter(["", "", "", "", "", "", "", "", "opencode/gpt-5,codex/o3"])
+        answers = iter(
+            ["", "", "", "", "", "", "", "", "opencode/gpt-5,codex/o3", "light"]
+        )
         code = cli.cmd_init(self.root, read_answer=lambda prompt: next(answers))
         self.assertEqual(code, 0)
         self.assertEqual(config.load(self.root).models, ["opencode/gpt-5", "codex/o3"])
