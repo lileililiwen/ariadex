@@ -332,7 +332,7 @@ class PromptSelectionTest(unittest.TestCase):
                 self.assertEqual(driver.sent_inputs("agent"), [])
                 self.assertEqual(watcher.confirmations_sent, 0)
 
-    def test_confirmation_waits_for_fresh_ready_surface(self) -> None:
+    def test_confirmation_refires_when_fresh_surface_missing(self) -> None:
         project = make_project(self._tmp)
         make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
@@ -341,11 +341,12 @@ class PromptSelectionTest(unittest.TestCase):
         with clean_git(self):
             watcher.poll()  # initial prompt
             with unittest.mock.patch.object(
-                watcher, "_capture", side_effect=[READY, "blank screen"]
+                watcher, "_capture", side_effect=[READY, READY, "blank screen"]
             ):
-                self.assertEqual(watcher.poll(), "blocked")
-        self.assertIn("never reported an input-ready surface", watcher.block_reason)
+                self.assertEqual(watcher.poll(), "working")
+        self.assertEqual(watcher.block_reason, "")
         self.assertNotIn("please finish the rest", driver.sent_inputs("agent"))
+        self.assertEqual(watcher.confirmations_sent, 0)
 
     def test_max_step_limit_opens_recovery_conversation(self) -> None:
         project = make_project(self._tmp)
@@ -357,7 +358,7 @@ class PromptSelectionTest(unittest.TestCase):
         with (
             clean_git(self),
             unittest.mock.patch.object(
-                watcher, "_capture", side_effect=[MAX_STEP_LIMIT, READY]
+                watcher, "_capture", side_effect=[MAX_STEP_LIMIT, READY, READY]
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
         ):
@@ -621,6 +622,44 @@ class RobotLogWidgetTest(unittest.TestCase):
         window = self._window({"phase": "blocked", "block_reason": "tasks.md missing"})
         window.toggle_button.invoke()
         self.assertIn("tasks.md missing", window.log_text.content)
+
+
+DRAFT = "Ask anything\n┃ user is typing a correction\n▣ Build · x\n"
+
+
+class ConfirmationDraftGuardTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp: list = []
+        self.addCleanup(lambda: [tmp.cleanup() for tmp in self._tmp])
+
+    def test_confirmation_defers_while_draft_present(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open it\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        watcher = make_watcher(project, driver)
+        with clean_git(self):
+            watcher.poll()  # initial prompt
+            driver.sessions["agent"]["output"] = DRAFT
+            # Production TmuxDriver path: the backend reports idle while the
+            # composer holds a draft, so the boundary fires and the guard
+            # must defer instead of sending `/new` over the draft.
+            with (
+                unittest.mock.patch.object(
+                    watcher.adapter, "provider_state", return_value="idle"
+                ),
+                unittest.mock.patch.object(
+                    type(watcher.adapter),
+                    "provider_state_required",
+                    new_callable=unittest.mock.PropertyMock,
+                    return_value=True,
+                ),
+            ):
+                self.assertEqual(watcher.poll(), robot_mod.PAUSED)
+        sent = driver.sent_inputs("agent")
+        self.assertEqual(sent, ["please start"])
+        self.assertNotIn("/new", sent)
+        self.assertEqual(watcher.confirmations_sent, 0)
 
 
 if __name__ == "__main__":

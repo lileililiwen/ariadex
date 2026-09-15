@@ -79,6 +79,8 @@ class OpenCodeAdapter(AgentAdapter):
     # Standard TUI confirm keystroke; sent only after a parsed request is
     # approved by the permission policy, never for unknown surfaces.
     permission_approve_input = "y"
+    # Verified `opencode --help`: `-m, --model provider/model`.
+    model_option = "-m"
     ready_markers = ("Ask anything", "tab agents")
 
     def input_surface(self, capture: str) -> InputSurface:
@@ -251,7 +253,11 @@ class OpenCodeAdapter(AgentAdapter):
         )
 
     def launch_command_for_provider(self) -> list[str]:
-        return [*self.launch_command, "--port", str(self.api_port)]
+        return [
+            *super().launch_command_for_provider(),
+            "--port",
+            str(self.api_port),
+        ]
 
     def provider_state(self) -> str | None:
         """Read OpenCode session state without inspecting pane text."""
@@ -300,6 +306,7 @@ class OpenCodeAdapter(AgentAdapter):
             structured_output=False,
             interrupt=True,
             manual_takeover=True,
+            model_switch=True,
         )
 
 
@@ -311,6 +318,8 @@ class CodexAdapter(AgentAdapter):
     # Standard TUI confirm keystroke; sent only after a parsed request is
     # approved by the permission policy, never for unknown surfaces.
     permission_approve_input = "y"
+    # Verified `codex --help`: `-m, --model <MODEL>`.
+    model_option = "-m"
     ready_markers = ("OpenAI Codex", "Ask Codex to do anything")
 
     @property
@@ -323,6 +332,7 @@ class CodexAdapter(AgentAdapter):
             structured_output=False,
             interrupt=True,
             manual_takeover=True,
+            model_switch=True,
         )
 
 
@@ -334,6 +344,8 @@ class CodeBuddyAdapter(AgentAdapter):
     # Standard TUI confirm keystroke; sent only after a parsed request is
     # approved by the permission policy, never for unknown surfaces.
     permission_approve_input = "y"
+    # Verified `codebuddy --help`: `--model <model>` (model ID).
+    model_option = "--model"
     ready_markers = ("CodeBuddy", "codebuddy")
 
     @property
@@ -346,6 +358,7 @@ class CodeBuddyAdapter(AgentAdapter):
             structured_output=False,
             interrupt=True,
             manual_takeover=True,
+            model_switch=True,
         )
 
 

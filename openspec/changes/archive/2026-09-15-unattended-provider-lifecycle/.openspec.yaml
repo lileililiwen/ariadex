@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: The robot owns new/continue/retry/model-switch unattended, never
+  types over drafts, and refires instead of silently shutting down.

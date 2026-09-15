@@ -87,6 +87,9 @@ class Config:
         default_factory=lambda: ["read", "write", "create", "delete"]
     )
     permission_allowlist: list = dataclasses.field(default_factory=list)
+    #: Ordered model fallbacks for automatic model-switch recovery on
+    #: quota/model errors. Empty preserves manual recovery.
+    model_fallbacks: list = dataclasses.field(default_factory=list)
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -171,6 +174,10 @@ permission_actions: [read, write, create, delete]
 # `allowlist` policy. Parsed requests contained in one of these entries may
 # be approved; everything else waits for explicit human action.
 permission_allowlist: []
+# Ordered model fallbacks for automatic model-switch recovery when the
+# provider reports quota or model errors. Empty keeps manual recovery:
+# the watcher waits for a human to switch the model or credentials.
+model_fallbacks: []
 """
     return text.replace("__CONFIRMATION_PROMPT__", DEFAULT_CONFIRMATION_PROMPT)
 
@@ -425,6 +432,14 @@ def validate(raw: dict, source: str = "configuration") -> Config:
             f"invalid permission_allowlist in {source}: "
             "expected a list of non-empty path strings"
         )
+    model_fallbacks = get("model_fallbacks", base.model_fallbacks)
+    if not isinstance(model_fallbacks, list) or not all(
+        isinstance(item, str) and item.strip() for item in model_fallbacks
+    ):
+        raise ConfigError(
+            f"invalid model_fallbacks in {source}: "
+            "expected a list of non-empty model strings"
+        )
     return Config(
         agent_provider=raw.get("agent_provider", base.agent_provider),
         terminal_driver=raw.get("terminal_driver", base.terminal_driver),
@@ -454,4 +469,5 @@ def validate(raw: dict, source: str = "configuration") -> Config:
         permission_temp_root=permission_temp_root,
         permission_actions=list(permission_actions),
         permission_allowlist=list(permission_allowlist),
+        model_fallbacks=list(model_fallbacks),
     )

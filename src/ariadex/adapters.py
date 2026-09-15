@@ -27,6 +27,7 @@ class Capabilities:
     structured_output: bool = False
     interrupt: bool = True
     manual_takeover: bool = True
+    model_switch: bool = False
 
 
 class InputSurface(enum.StrEnum):
@@ -107,6 +108,10 @@ class AgentAdapter(abc.ABC):
     #: provider surface is not understood: approvals always wait for a
     #: human and the watcher never sends input for them.
     permission_approve_input: str | None = None
+    #: Provider-owned CLI option that selects the model for a fresh start
+    #: (for example `"--model"` or `"-m"`). None means the provider has no
+    #: verified model-selection flag and `switch_model` stays unsupported.
+    model_option: str | None = None
     #: Provider-owned legacy terminal markers used by the adapter when no
     #: richer provider status channel is available.
     ready_markers: tuple[str, ...] = ()
@@ -120,6 +125,8 @@ class AgentAdapter(abc.ABC):
         self.driver = driver
         self.session_name = session_name
         self.workdir = workdir
+        #: Model selected via `switch_model`; applied to subsequent starts.
+        self.model_override: str | None = None
 
     @property
     @abc.abstractmethod
@@ -142,7 +149,31 @@ class AgentAdapter(abc.ABC):
             raise StartupError(f"{self.provider_name} startup failed: {exc}") from exc
 
     def launch_command_for_provider(self) -> list[str]:
-        return list(self.launch_command)
+        command = list(self.launch_command)
+        if self.model_override is not None and self.model_option is not None:
+            command.extend([self.model_option, self.model_override])
+        return command
+
+    def switch_model(self, target: str) -> None:
+        """Restart the provider session under a different model.
+
+        Applies `target` to subsequent starts via the provider-owned
+        `model_option` flag, then restarts the owned session so the new
+        model takes effect immediately. Raises UnsupportedOperation when
+        the adapter declares no `model_switch` capability or verified
+        flag; transport/termination/startup failures propagate as typed
+        AdapterError and must fail closed.
+        """
+        if not self.capabilities.model_switch or self.model_option is None:
+            raise UnsupportedOperation(
+                f"{self.provider_name} has no automatic model-switch "
+                "operation; switch the model manually"
+            )
+        if not target.strip():
+            raise AdapterError("model-switch target must not be empty")
+        self.model_override = target.strip()
+        self.terminate()
+        self.start()
 
     def send(self, text: str) -> None:
         try:

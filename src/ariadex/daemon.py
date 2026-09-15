@@ -719,6 +719,7 @@ def _managed_runtime(project_dir: Path):
                 confirmation_prompt=confirmation_prompt,
                 spec_dir=cfg.spec_dir,
                 handoff_file=cfg.handoff_file,
+                model_fallbacks=tuple(getattr(cfg, "model_fallbacks", None) or ()),
             )
         )
         return robot_mod.RobotWatcher(

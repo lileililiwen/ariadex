@@ -336,5 +336,61 @@ class SelectResetTest(unittest.TestCase):
             self.assertFalse(caps.token_usage)
 
 
+class ModelSwitchTest(unittest.TestCase):
+    def test_switch_unsupported_by_default(self):
+        from ariadex.adapters import AgentAdapter
+
+        class NoSwitch(AgentAdapter):
+            provider_name = "noswitch"
+            launch_command = ("noswitch",)
+
+            @property
+            def capabilities(self):
+                return Capabilities()
+
+        adapter = NoSwitch(FakeTerminalDriver(), "s", "/tmp")
+        with self.assertRaises(UnsupportedOperation):
+            adapter.switch_model("other-model")
+
+    def test_switch_empty_target_refused(self):
+        adapter, _driver = make_open_code()
+        with self.assertRaises(AdapterError):
+            adapter.switch_model("  ")
+
+    def test_opencode_switch_restarts_with_model_flag(self):
+        adapter, driver = make_open_code()
+        adapter.start()
+        adapter.switch_model("other-provider/other-model")
+        self.assertEqual(adapter.model_override, "other-provider/other-model")
+        self.assertEqual(
+            driver.sessions["test-session"]["command"],
+            [
+                "opencode",
+                "-m",
+                "other-provider/other-model",
+                "--port",
+                str(adapter.api_port),
+            ],
+        )
+
+    def test_codex_and_codebuddy_switch_with_verified_flags(self):
+        cases = (
+            (providers.CodexAdapter, "codex-session", ["codex", "-m", "model-x"]),
+            (
+                providers.CodeBuddyAdapter,
+                "buddy-session",
+                ["codebuddy", "--model", "model-x"],
+            ),
+        )
+        for cls, session, expected in cases:
+            with self.subTest(provider=cls.provider_name):
+                driver = FakeTerminalDriver()
+                adapter = cls(driver, session, "/tmp")
+                self.assertTrue(adapter.capabilities.model_switch)
+                adapter.start()
+                adapter.switch_model("model-x")
+                self.assertEqual(driver.sessions[session]["command"], expected)
+
+
 if __name__ == "__main__":
     unittest.main()

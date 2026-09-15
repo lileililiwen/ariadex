@@ -235,7 +235,7 @@ class NoAdvanceEvidenceTest(unittest.TestCase):
         self.assertEqual(record["current_spec"], "next")
         self.assertEqual(record["active_queue"], ["demo", "next"])
 
-    def test_fresh_ready_never_observed_blocks_with_next_action(self) -> None:
+    def test_fresh_ready_never_observed_refires_with_next_action(self) -> None:
         project = make_project(self._tmp)
         make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
@@ -244,15 +244,15 @@ class NoAdvanceEvidenceTest(unittest.TestCase):
         with (
             clean_git(),
             unittest.mock.patch.object(
-                watcher, "_capture", side_effect=[READY, "blank screen"]
+                watcher, "_capture", side_effect=[READY, READY, "blank screen"]
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
         ):
-            self.assertEqual(watcher.poll(), "blocked")
+            self.assertEqual(watcher.poll(), "working")
         record = last_record(project)
-        self.assertEqual(record["decision"], "blocked")
+        self.assertEqual(record["decision"], "refire")
         self.assertEqual(record["operation"], "new-conversation")
-        self.assertIn("input-ready", record["blocker"])
+        self.assertIn("input-ready", record["message"])
         self.assertIn("input-ready", record["next_action"])
 
     def test_max_polls_shutdown_is_diagnosable(self) -> None:

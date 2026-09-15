@@ -173,9 +173,7 @@ class ClassifyTest(unittest.TestCase):
         )
 
     def test_hard_error_beats_modern_ready_surface(self) -> None:
-        capture = (
-            "┃\n\n▣  Build · test · 1m 00s\nerror: provider exploded\n"
-        )
+        capture = "┃\n\n▣  Build · test · 1m 00s\nerror: provider exploded\n"
         self.assertEqual(
             robot_mod.classify_capture("opencode", capture, input_ready=True),
             "error",
@@ -545,15 +543,21 @@ class WatcherStateTest(unittest.TestCase):
         project = make_project(self._tmp)
         driver = FakeDriver()
         driver.sessions["agent"] = {
-            "command": [], "output": self._ready(), "workdir": "/t"
+            "command": [],
+            "output": self._ready(),
+            "workdir": "/t",
         }
         watcher = make_watcher(project, driver, debounce_polls=1)
         watcher.request_pause()
         watcher.initial_sent = True
         watcher.phase = robot_mod.VERIFIED_BOUNDARY
         check = robot_mod.BoundaryCheck(
-            ok=True, decision="continue", current_spec="change",
-            active=["change"], open_tasks=0, evidence_source="test"
+            ok=True,
+            decision="continue",
+            current_spec="change",
+            active=["change"],
+            open_tasks=0,
+            evidence_source="test",
         )
         watcher._record_before_prompt = lambda *args: True
         self.assertEqual(watcher._open_continuation(check), robot_mod.PAUSED)
@@ -712,8 +716,7 @@ class ContinuationTest(unittest.TestCase):
         done_shutdown = [
             entry
             for entry in recent
-            if entry.get("decision") == "done"
-            and entry.get("operation") == "shutdown"
+            if entry.get("decision") == "done" and entry.get("operation") == "shutdown"
         ]
         self.assertTrue(done_shutdown)
         self.assertEqual(done_shutdown[-1].get("blocker", ""), "")
@@ -893,7 +896,7 @@ class ContinuationTest(unittest.TestCase):
         finally:
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
 
-    def test_new_surface_never_ready_blocks(self) -> None:
+    def test_new_surface_never_ready_refires(self) -> None:
         project = make_project(self._tmp)
         make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
@@ -911,10 +914,10 @@ class ContinuationTest(unittest.TestCase):
         with unittest.mock.patch.object(watcher, "_capture", side_effect=captures):
             try:
                 watcher.poll()  # initial prompt sent
-                self.assertEqual(watcher.poll(), "blocked")
+                self.assertEqual(watcher.poll(), "working")
             finally:
                 robot_mod.check_boundary = real_check  # type: ignore[assignment]
-        self.assertIn("never reported an input-ready surface", watcher.block_reason)
+        self.assertEqual(watcher.block_reason, "")
 
 
 class BoundaryTest(unittest.TestCase):
@@ -1645,6 +1648,109 @@ class WatchCliTest(unittest.TestCase):
                 code = self.cli.main(["watch", "--list-sessions"])
         self.assertEqual(code, 0)
         self.assertIn("session: one", buf.getvalue())
+
+
+QUOTA_SWITCH = (
+    "Ask anything · tab agents\nModel quota expired. Switch model to continue.\n> "
+)
+DRAFT_SURFACE = "Ask anything\n┃ user is typing a correction\n▣ Build · x\n"
+
+
+class LifecycleActivitiesTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp: list = []
+        self.addCleanup(lambda: [tmp.cleanup() for tmp in self._tmp])
+
+    def test_quota_switches_model_and_resumes(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": READY_OPENCODE,
+            "workdir": "/t",
+        }
+        watcher = make_watcher(
+            project, driver, debounce_polls=1, model_fallbacks=("fallback-model",)
+        )
+        watcher.poll()
+        driver.sessions["agent"]["output"] = QUOTA_SWITCH
+        self.assertEqual(watcher.poll(), robot_mod.WORKING)
+        self.assertIn("fallback-model", watcher._tried_models)
+        self.assertEqual(
+            driver.sessions["agent"]["command"],
+            [
+                "opencode",
+                "-m",
+                "fallback-model",
+                "--port",
+                str(watcher.adapter.api_port),
+            ],
+        )
+        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+
+    def test_quota_waits_when_fallbacks_exhausted(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": READY_OPENCODE,
+            "workdir": "/t",
+        }
+        watcher = make_watcher(
+            project, driver, debounce_polls=1, model_fallbacks=("fallback-model",)
+        )
+        watcher.poll()
+        driver.sessions["agent"]["output"] = QUOTA_SWITCH
+        watcher.poll()
+        driver.sessions["agent"]["output"] = QUOTA_SWITCH
+        self.assertEqual(watcher.poll(), robot_mod.WAITING)
+        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+
+    def test_quota_waits_without_fallbacks(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": READY_OPENCODE,
+            "workdir": "/t",
+        }
+        watcher = make_watcher(project, driver, debounce_polls=1)
+        watcher.poll()
+        driver.sessions["agent"]["output"] = QUOTA_SWITCH
+        self.assertEqual(watcher.poll(), robot_mod.WAITING)
+        self.assertEqual(watcher._tried_models, set())
+
+    def test_fresh_exhaustion_refires_then_parks_visibly(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        watcher = make_watcher(project, driver)
+        active = ["demo"]
+        self.assertEqual(
+            watcher._note_fresh_exhaustion("demo", active, "openspec"),
+            robot_mod.WORKING,
+        )
+        self.assertEqual(
+            watcher._note_fresh_exhaustion("demo", active, "openspec"),
+            robot_mod.WORKING,
+        )
+        self.assertEqual(
+            watcher._note_fresh_exhaustion("demo", active, "openspec"),
+            robot_mod.WAITING,
+        )
+        self.assertIn("input-ready surface", watcher.block_reason)
+        kinds = [event["category"] for event in watcher.activity_events]
+        self.assertIn("waiting", kinds)
+
+    def test_bad_fallback_config_refused(self) -> None:
+        with self.assertRaises(robot_mod.RobotError):
+            robot_mod.validate_config(
+                robot_mod.RobotConfig(
+                    session="s", initial_prompt="go", model_fallbacks=[" "]
+                )
+            )
 
 
 if __name__ == "__main__":

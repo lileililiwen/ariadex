@@ -120,6 +120,37 @@ class ValidationTest(unittest.TestCase):
         self.assertEqual(cfg.blocker_policy, "stop-on-blocker")
         self.assertIn("legacy", buf.getvalue())
 
+    def test_model_fallbacks_default_empty_and_round_trip(self):
+        cfg = config.defaults()
+        self.assertEqual(cfg.model_fallbacks, [])
+        with tempfile.TemporaryDirectory() as tmp:
+            write_config(Path(tmp), config.default_config_text())
+            loaded = config.load(Path(tmp))
+        self.assertEqual(loaded.model_fallbacks, [])
+
+    def test_model_fallbacks_accepted_as_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_config(
+                Path(tmp),
+                "model_fallbacks:\n  - provider-a/model-1\n  - provider-b/model-2\n",
+            )
+            cfg = config.load(Path(tmp))
+        self.assertEqual(
+            cfg.model_fallbacks, ["provider-a/model-1", "provider-b/model-2"]
+        )
+
+    def test_model_fallbacks_rejected_when_not_string_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for text in (
+                "model_fallbacks: single-model\n",
+                "model_fallbacks:\n  - ok-model\n  - '  '\n",
+                "model_fallbacks:\n  - 123\n",
+            ):
+                with self.subTest(text=text):
+                    write_config(Path(tmp), text)
+                    with self.assertRaises(config.ConfigError):
+                        config.load(Path(tmp))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -192,7 +192,9 @@ class RoutingTest(unittest.TestCase):
         with (
             self._clean_git(),
             unittest.mock.patch.object(
-                watcher, "_capture", side_effect=[TERMINAL_OPENCODE, READY_OPENCODE]
+                watcher,
+                "_capture",
+                side_effect=[TERMINAL_OPENCODE, READY_OPENCODE, READY_OPENCODE],
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
         ):
@@ -230,7 +232,9 @@ class RoutingTest(unittest.TestCase):
         with (
             self._clean_git(),
             unittest.mock.patch.object(
-                watcher, "_capture", side_effect=[TERMINAL_OPENCODE, READY_OPENCODE]
+                watcher,
+                "_capture",
+                side_effect=[TERMINAL_OPENCODE, READY_OPENCODE, READY_OPENCODE],
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
             unittest.mock.patch.object(robot_mod, "check_boundary", ok_complete),
@@ -242,7 +246,7 @@ class RoutingTest(unittest.TestCase):
         sent = driver.sent_inputs("agent")
         self.assertIn(robot_mod.DEFAULT_CONTINUATION_PROMPT, sent)
 
-    def test_terminal_error_waits_for_fresh_ready_surface(self) -> None:
+    def test_terminal_error_refires_when_fresh_surface_missing(self) -> None:
         project = make_project(self._tmp)
         make_change(project, "demo", "# Tasks\n\n- [ ] Open\n")
         driver = FakeDriver()
@@ -256,12 +260,14 @@ class RoutingTest(unittest.TestCase):
         with (
             self._clean_git(),
             unittest.mock.patch.object(
-                watcher, "_capture", side_effect=[TERMINAL_OPENCODE, "blank screen"]
+                watcher,
+                "_capture",
+                side_effect=[TERMINAL_OPENCODE, READY_OPENCODE, "blank screen"],
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
         ):
-            self.assertEqual(watcher.poll(), "blocked")
-        self.assertIn("never reported an input-ready surface", watcher.block_reason)
+            self.assertEqual(watcher.poll(), "working")
+        self.assertEqual(watcher.block_reason, "")
         self.assertEqual(watcher.confirmations_sent, 0)
 
 
@@ -287,7 +293,9 @@ class RecordingTest(unittest.TestCase):
                 robot_mod, "_git_tree_clean", return_value=(True, "")
             ),
             unittest.mock.patch.object(
-                watcher, "_capture", side_effect=[secret_capture, READY_OPENCODE]
+                watcher,
+                "_capture",
+                side_effect=[secret_capture, READY_OPENCODE, READY_OPENCODE],
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
         ):

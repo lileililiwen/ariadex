@@ -226,6 +226,11 @@ CLASS_QUOTA = "waiting"
 CLASS_UNKNOWN = "unknown"
 CLASSIFICATION_TAIL_LINES = 16
 
+#: Consecutive fresh-ready exhaustions before the watcher parks in a
+#: visible WAITING state instead of refiring the open boundary. Bounds
+#: unattended /new retries while absence-first waiting stays state-keyed.
+FRESH_EXHAUSTION_LIMIT = 3
+
 
 class RobotError(Exception):
     """Typed robot failure: configuration, session, or boundary refusal."""
@@ -301,6 +306,9 @@ class RobotConfig:
     spec_dir: str = "openspec/changes"
     handoff_file: str = "HANDOFF.md"
     finished_change: str = ""
+    #: Ordered model fallbacks for automatic model-switch recovery on
+    #: quota/model errors. Empty preserves manual recovery.
+    model_fallbacks: tuple = ()
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -334,6 +342,10 @@ def validate_config(config: RobotConfig) -> RobotConfig:
         raise RobotError("fresh-ready attempts must be at least 1")
     if config.fresh_ready_interval_s < 0:
         raise RobotError("fresh-ready interval must not be negative")
+    if not isinstance(config.model_fallbacks, (list, tuple)) or not all(
+        isinstance(item, str) and item.strip() for item in config.model_fallbacks
+    ):
+        raise RobotError("model fallbacks must be a list of non-empty strings")
     return config
 
 
@@ -885,6 +897,13 @@ class RobotWatcher:
         #: Abort reason of the latest `_await_ready` wait (`""`, `"paused"`,
         #: or `"stopped"`); empty unless the wait was operator-aborted.
         self._fresh_ready_aborted = ""
+        #: Models already tried by automatic model-switch recovery in this
+        #: watcher lifetime; prevents fallback loops across quota hits.
+        self._tried_models: set[str] = set()
+        #: Consecutive fresh-ready exhaustion count; parks visibly after
+        #: `_fresh_exhaustion_limit` instead of shutting down. Reset by any
+        #: sent prompt or observed ready surface.
+        self._fresh_exhaustions = 0
         self._events: list[dict] = []
         self._event_seq = 0
         self._recovery_logged = False
@@ -1184,6 +1203,60 @@ class RobotWatcher:
         )
         return self.phase
 
+    def _try_model_switch(self) -> bool:
+        """Switch to the next untried fallback model on quota.
+
+        Returns True when a switch was performed and supervision should
+        continue; False keeps the existing manual-recovery outcome. Every
+        attempted target is recorded so fallbacks never loop.
+        """
+        if not self.adapter.capabilities.model_switch:
+            return False
+        target = ""
+        for candidate in self.config.model_fallbacks:
+            name = candidate.strip()
+            if name and name not in self._tried_models:
+                target = name
+                break
+        if not target:
+            return False
+        try:
+            self.adapter.switch_model(target)
+        except UnsupportedOperation:
+            return False
+        except Exception as exc:
+            self._tried_models.add(target)
+            reason = f"automatic model switch to `{target}` failed: {exc}"
+            self._record("error", reason)
+            self._diag(
+                "quota",
+                "automatic model switch failed",
+                result="failed",
+                message=reason,
+                decision="failed",
+                blocker=reason,
+                operation="switch-model",
+                next_action="switch the model or credentials manually, "
+                "then watching resumes",
+            )
+            return False
+        self._tried_models.add(target)
+        self.stable_polls = 0
+        self.phase = WORKING
+        summary = f"provider quota reached; switched model to `{target}` and resuming"
+        self._record("quota", summary)
+        self._diag(
+            "quota",
+            "automatic model switch",
+            result="switched",
+            message=summary,
+            decision="switched",
+            operation="switch-model",
+            next_action="supervise the switched model until the next "
+            "stable input-ready surface",
+        )
+        return True
+
     def status_view(self) -> dict:
         """Widget-visible robot state (pure data, no I/O)."""
         visible = self._events[-MAX_ACTIVITY_VIEW:]
@@ -1285,6 +1358,8 @@ class RobotWatcher:
             # terminates the watcher and never resends the initial prompt.
             return self._handle_approval(capture)
         if observed == CLASS_QUOTA:
+            if self._try_model_switch():
+                return self.phase
             self.phase = WAITING
             self.stable_polls = 0
             self.block_reason = (
@@ -1571,6 +1646,7 @@ class RobotWatcher:
         self._send(self.config.initial_prompt)
         self.initial_sent = True
         self.prompts_sent += 1
+        self._fresh_exhaustions = 0
         self.stable_polls = 0
         self.phase = CONTINUING
         self._record("prompt", "sent initial prompt to the ready conversation")
@@ -1823,32 +1899,9 @@ class RobotWatcher:
         if ready is None:
             return self._abort_fresh_wait(next_target, list(check.active))
         if not ready:
-            self.phase = BLOCKED
-            self.block_reason = (
-                "new conversation never reported an input-ready surface; "
-                "no prompt was sent"
+            return self._note_fresh_exhaustion(
+                next_target, list(check.active), check.evidence_source
             )
-            self._record(
-                "readiness",
-                "fresh input-ready surface not observed after "
-                f"{self.last_fresh_ready_attempts} attempt(s); no prompt sent",
-            )
-            self._record("error", self.block_reason)
-            self._diag(
-                "provider",
-                "fresh input-ready surface never observed",
-                result="blocked",
-                message=self.block_reason,
-                current_spec=next_target,
-                active_queue=tuple(check.active),
-                evidence_source=check.evidence_source,
-                decision="blocked",
-                blocker=self.block_reason,
-                operation="new-conversation",
-                next_action="verify the provider session shows an "
-                "input-ready surface, then resume watching",
-            )
-            return self.phase
         self._record(
             "readiness",
             "fresh input-ready surface observed after "
@@ -1856,6 +1909,7 @@ class RobotWatcher:
         )
         self._send(self.config.continuation_prompt)
         self.prompts_sent += 1
+        self._fresh_exhaustions = 0
         self.stable_polls = 0
         self.phase = CONTINUING
         error_category = self.boundary_error_category or "clean-finish"
@@ -1916,6 +1970,18 @@ class RobotWatcher:
             )
             return self.phase
         if not self._record_before_prompt("confirmation", target, list(check.active)):
+            return self.phase
+        if self.adapter.input_surface(self._capture()) is InputSurface.DRAFT:
+            self.phase = PAUSED
+            self._record(
+                "pause", "automatic confirmation deferred while input is not empty"
+            )
+            return self.phase
+        if self._paused or (
+            self.mode_requested is not None and self.mode_requested() == "PAUSE"
+        ):
+            self.phase = PAUSED
+            self._record("pause", "automatic confirmation cancelled by operator")
             return self.phase
         self.phase = NEW_CONVERSATION
         detail = check.task_detail or (
@@ -1997,33 +2063,9 @@ class RobotWatcher:
         if ready is None:
             return self._abort_fresh_wait(target, list(check.active))
         if not ready:
-            self.phase = BLOCKED
-            self.block_reason = (
-                "new conversation never reported an input-ready surface; "
-                "no prompt was sent"
+            return self._note_fresh_exhaustion(
+                target, list(check.active), check.evidence_source
             )
-            self._record(
-                "readiness",
-                "fresh input-ready surface not observed after "
-                f"{self.last_fresh_ready_attempts} attempt(s); no prompt sent",
-            )
-            self._record("error", self.block_reason)
-            self._diag(
-                "provider",
-                "fresh input-ready surface never observed",
-                result="blocked",
-                message=self.block_reason,
-                current_spec=target,
-                open_tasks=check.open_tasks,
-                active_queue=tuple(check.active),
-                evidence_source=check.evidence_source,
-                decision="blocked",
-                blocker=self.block_reason,
-                operation="new-conversation",
-                next_action="verify the provider session shows an "
-                "input-ready surface, then resume watching",
-            )
-            return self.phase
         self._record(
             "readiness",
             "fresh input-ready surface observed after "
@@ -2031,6 +2073,7 @@ class RobotWatcher:
         )
         self._send(self.config.confirmation_prompt)
         self.prompts_sent += 1
+        self._fresh_exhaustions = 0
         self.confirmations_sent += 1
         self.stable_polls = 0
         self.phase = CONTINUING
@@ -2106,6 +2149,68 @@ class RobotWatcher:
         )
         return self.phase
 
+    def _note_fresh_exhaustion(
+        self, target: str, active: list[str], evidence_source: str
+    ) -> str:
+        """Handle an exhausted fresh-ready wait without shutting down.
+
+        Below the exhaustion limit the watcher returns to observation so
+        the still-open boundary refires on the next stable surface; at the
+        limit it parks in a visible WAITING state a resume can clear. Never
+        sends provider input.
+        """
+        self._fresh_exhaustions += 1
+        self._record(
+            "readiness",
+            "fresh input-ready surface not observed after "
+            f"{self.last_fresh_ready_attempts} attempt(s); no prompt sent",
+        )
+        if self._fresh_exhaustions >= FRESH_EXHAUSTION_LIMIT:
+            self.phase = WAITING
+            self.stable_polls = 0
+            self.block_reason = (
+                "new conversation never reported an input-ready surface "
+                f"after {self._fresh_exhaustions} bounded waits; "
+                "no prompt was sent"
+            )
+            self._record("waiting", self.block_reason)
+            self._diag(
+                "provider",
+                "fresh input-ready surface never observed",
+                result="waiting",
+                message=self.block_reason,
+                current_spec=target,
+                active_queue=tuple(active),
+                evidence_source=evidence_source,
+                decision="waiting",
+                blocker=self.block_reason,
+                operation="new-conversation",
+                next_action="verify the provider session shows an "
+                "input-ready surface, then resume watching",
+            )
+            return self.phase
+        self.phase = WORKING
+        self.stable_polls = 0
+        summary = (
+            "fresh input-ready surface not observed; no prompt sent, "
+            "re-observing the open boundary"
+        )
+        self._record("waiting", summary)
+        self._diag(
+            "provider",
+            "fresh input-ready surface not observed; refiring boundary",
+            result="refire",
+            message=summary,
+            current_spec=target,
+            active_queue=tuple(active),
+            evidence_source=evidence_source,
+            decision="refire",
+            operation="new-conversation",
+            next_action="observe the provider session until the next "
+            "stable input-ready surface",
+        )
+        return self.phase
+
     def _await_ready(self, sleep: Callable[[float], None] | None = None) -> bool | None:
         """Bounded wait for the new input surface (no prompt until ready).
 
@@ -2152,6 +2257,7 @@ class RobotWatcher:
             if ready:
                 stable += 1
                 if stable >= needed:
+                    self._fresh_exhaustions = 0
                     return True
             else:
                 stable = 0

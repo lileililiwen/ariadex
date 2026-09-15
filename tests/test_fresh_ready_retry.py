@@ -106,14 +106,15 @@ class FreshReadyRetryTest(unittest.TestCase):
             self.assertEqual(watcher.poll(), "continuing")
         self.assertEqual(driver.sent_inputs("agent"), ["please finish the rest"])
         self.assertEqual(watcher.confirmations_sent, 1)
-        self.assertEqual(watcher.last_fresh_ready_attempts, 3)
+        # One capture serves the draft/pause guard; the wait needs two more.
+        self.assertEqual(watcher.last_fresh_ready_attempts, 2)
         messages = [event["message"] for event in watcher.activity_events]
         self.assertTrue(
-            any("observed after 3 attempt(s)" in message for message in messages),
+            any("observed after 2 attempt(s)" in message for message in messages),
             messages,
         )
 
-    def test_exhausted_bound_blocks_without_prompt(self) -> None:
+    def test_exhausted_bound_refires_without_prompt(self) -> None:
         project = make_project(self._tmp)
         make_change(project, "demo")
         driver = FakeDriver()
@@ -123,15 +124,47 @@ class FreshReadyRetryTest(unittest.TestCase):
         with (
             clean_git(),
             unittest.mock.patch.object(
-                watcher, "_capture", side_effect=[READY, BLANK, BLANK, BLANK]
+                watcher,
+                "_capture",
+                side_effect=[READY, BLANK, BLANK, BLANK, BLANK],
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
         ):
-            self.assertEqual(watcher.poll(), "blocked")
-        self.assertIn("never reported an input-ready surface", watcher.block_reason)
+            self.assertEqual(watcher.poll(), "working")
+        self.assertEqual(watcher.block_reason, "")
         self.assertEqual(watcher.confirmations_sent, 0)
         self.assertNotIn("please finish the rest", driver.sent_inputs("agent"))
         self.assertEqual(watcher.last_fresh_ready_attempts, 3)
+        messages = [event["message"] for event in watcher.activity_events]
+        self.assertTrue(
+            any("re-observing the open boundary" in message for message in messages),
+            messages,
+        )
+
+    def test_repeated_exhaustion_parks_visibly(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        watcher = make_watcher(project, driver, fresh_ready_attempts=2)
+        watcher.initial_sent = True
+        # Three boundary cycles: READY reaches the boundary, BLANKs exhaust
+        # the short wait. The third exhaustion parks instead of refiring.
+        # Each cycle consumes poll + guard + two attempts.
+        script = [READY, READY, BLANK, BLANK] * 3
+        with (
+            clean_git(),
+            unittest.mock.patch.object(watcher, "_capture", side_effect=script),
+            unittest.mock.patch.object(watcher.adapter, "new_conversation"),
+        ):
+            self.assertEqual(watcher.poll(), "working")
+            driver.sessions["agent"]["output"] = READY
+            self.assertEqual(watcher.poll(), "working")
+            driver.sessions["agent"]["output"] = READY
+            self.assertEqual(watcher.poll(), "waiting")
+        self.assertIn("input-ready surface", watcher.block_reason)
+        self.assertEqual(watcher.confirmations_sent, 0)
+        self.assertNotIn("please finish the rest", driver.sent_inputs("agent"))
 
     def test_debounce_requires_consecutive_ready_across_retries(self) -> None:
         project = make_project(self._tmp)
@@ -152,7 +185,8 @@ class FreshReadyRetryTest(unittest.TestCase):
             self.assertEqual(watcher.poll(), "finished-candidate")
             self.assertEqual(watcher.poll(), "continuing")
         self.assertEqual(watcher.confirmations_sent, 1)
-        self.assertEqual(watcher.last_fresh_ready_attempts, 3)
+        # Guard capture plus two debounced ready reads.
+        self.assertEqual(watcher.last_fresh_ready_attempts, 2)
 
     def test_pause_parks_fresh_wait_for_resume(self) -> None:
         project = make_project(self._tmp)

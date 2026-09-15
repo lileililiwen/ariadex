@@ -1996,6 +1996,7 @@ def _build_managed_watcher(project_dir, cfg, driver, adapter, session, resolved)
             confirmation_prompt=confirmation,
             spec_dir=cfg.spec_dir,
             handoff_file=cfg.handoff_file,
+            model_fallbacks=tuple(getattr(cfg, "model_fallbacks", None) or ()),
         )
     )
     return robot_mod.RobotWatcher(
@@ -2996,6 +2997,7 @@ def _build_hub_entry_watcher(
             spec_dir=cfg.spec_dir if cfg else "openspec/changes",
             handoff_file=cfg.handoff_file if cfg else "HANDOFF.md",
             finished_change=finished_change,
+            model_fallbacks=tuple(getattr(cfg, "model_fallbacks", None) or ()),
         )
     )
     return robot_mod.RobotWatcher(
@@ -3162,6 +3164,7 @@ def cmd_watch(
                 spec_dir=cfg.spec_dir if cfg else "openspec/changes",
                 handoff_file=cfg.handoff_file if cfg else "HANDOFF.md",
                 finished_change=finished_change,
+                model_fallbacks=tuple(getattr(cfg, "model_fallbacks", None) or ()),
             )
         )
     except robot_mod.RobotError as exc:
