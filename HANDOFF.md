@@ -55,6 +55,22 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-15-unattended-provider-lifecycle`. Robot-owned lifecycle
+  activities: adapter `model_switch` capability with verified per-provider
+  flags (`opencode -m`, `codex -m`, `codebuddy --model`), watcher
+  quota-routing to switch-and-continue via ordered `model_fallbacks`,
+  DRAFT/PAUSE/idle preconditions on the confirmation path, and fresh-ready
+  exhaustion refire (visible WAITING park after 3) instead of shutdown.
+  Verified with 1325-test suite (2 pre-existing environment failures also
+  failing at HEAD: real-tmux `list-panes` behavior and companion fake-Tk
+  `options`; 13 pre-existing mypy errors unchanged), Ruff clean,
+  `openspec validate --changes --strict` and `--specs --strict` passed;
+  archived to `openspec/specs/provider-lifecycle/spec.md`.
+  Pre-existing broken mocks in terminal-error/fresh-retry tests (failing at
+  HEAD from an earlier guard capture) were updated to the redefined
+  refire contract. No active changes remain.
+
+- Implemented, verified, and archived:
   `2026-09-14-independent-runtime-processes`. Managed widget IPC and polling
   now run outside the Tk event thread; daemon socket clients are handled by
   independent workers; provider termination snapshots and cleans only the
@@ -629,7 +645,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 ## Next change
 
 No active changes remain. Select the next spec with `openspec list` when new
-work is planned.
+work is planned; the planned sequel is the widget control-room change
+(truthful stop/pause, live job pile, logs).
 
 ## Latest change: widget live log and queue visibility
 
