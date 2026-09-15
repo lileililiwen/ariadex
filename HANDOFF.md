@@ -76,10 +76,31 @@ that promotion has been skipped or failed.
 
 ## Current state
 
-- Proposed, awaiting selection (no implementation yet):
-  `2026-09-15-session-robustness` (seal provider session-loss gaps:
-  session-loss survival plus single live-owner guard). Validates
-  clean (`openspec validate --changes --strict`).
+- Implemented, verified, and archived:
+  `2026-09-15-session-robustness` (commit `1112b1e`; archived as
+  `2026-09-15-2026-09-15-session-robustness`). Transport loss is now a
+  classified watcher state, never an escaping exception: `SessionMissing`
+  and capture/send transport failures move the watcher to WAITING with
+  an `unexpected-provider-exit` diagnostic and send no provider input
+  (`TransportLoss` subclasses `RobotError`; `poll`/`run` park it,
+  `_await_ready` propagates it to that boundary). `_run_watcher` is
+  total: any escaping exception records the diagnostic, preserves a
+  `crashed` outcome, and keeps the daemon/widget truthful. Managed
+  `start` refuses a second live owner for the same project directory:
+  a live daemon record alone fails closed naming attach and
+  `--project <other-dir>` (typed IPC health only enriches the
+  report); stale/dead records keep today's recovery path. Verified
+  with 10 new `tests/test_session_robustness.py` tests plus touched
+  suites (64 tests OK), full 1503-test suite with only the
+  pre-existing tmux `list-panes` env failure, Ruff check/format
+  clean on touched files, mypy at baseline (13 pre-existing),
+  `openspec validate --changes/--specs --strict` passed (1 active
+  change, 68 canonical specs); promoted into
+  `openspec/specs/robot-watch-stability/spec.md` and
+  `openspec/specs/daemon-recovery/spec.md`. Redefined contracts:
+  initial-send delivery failure now waits instead of raising, and the
+  live-record guard no longer requires a typed socket response.
+  Queue empty at archive time.
   `2026-09-15-ask-before-recovery`. One bounded DONE/WORKING
   readiness ask in the current conversation before confirmation
   recovery: fixed protocol wording, strict last-line parsing on a
@@ -801,7 +822,9 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Select `2026-09-15-session-robustness` next when building starts.
+No active OpenSpec change remains. The next implementation must begin by
+selecting a change from `openspec list` and updating this handoff only after
+its verified archive.
 
 ## Latest change: widget live log and queue visibility
 
