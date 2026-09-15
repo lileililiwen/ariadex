@@ -77,6 +77,20 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-15-init-theme-selection`. Init now configures the widget
+  theme: trailing wizard prompt (blank keeps `dark`, invalid
+  re-prompts naming the choices) plus `ariadex init --theme`
+  (argparse choices, refuses pre-write, skips the prompt); the
+  answer renders into `theme:` in the generated config. README
+  documents the themes, key, and flag. Verified: init suites
+  (incl. 5 new wizard tests) plus full 1529-test suite with only
+  the pre-existing tmux `list-panes` env failure, Ruff clean,
+  `openspec validate --changes/--specs --strict` passed (68
+  canonical specs); promoted into
+  `openspec/specs/init-prompt-config/spec.md`. Queue empty at
+  archive time.
+
+- Implemented, verified, and archived:
   `2026-09-15-widget-theme-and-manual-input`. Standalone
   `src/ariadex/theme.py` owns all widget paint (dark/light/contrast,
   `theme` config key defaulting to dark with warn-and-fallback);
