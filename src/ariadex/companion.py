@@ -26,6 +26,12 @@ from typing import Protocol
 
 DEFAULT_HOTKEY = "Ctrl+Esc"
 
+#: Fixed brand shown ahead of the mini-player state word and in the
+#: headless text equivalent. Borderless screenshots must identify the
+#: product even when the window manager title is hidden.
+WIDGET_BRAND = "Ariadex"
+WIDGET_BRAND_PREFIX = f"{WIDGET_BRAND} \u2014 "
+
 #: Bounded companion poll of daemon status (no busy-loop).
 POLL_INTERVAL_S = 2.0
 
@@ -728,7 +734,8 @@ def failure_view_model(reason: str) -> dict:
 def format_view_text(model: dict) -> str:
     """Text status equivalent of the widget (screen-reader / headless use)."""
     lines = [
-        f"companion: {model.get('indicator_text')} (mode {model.get('mode')})",
+        f"{WIDGET_BRAND.lower()} companion: {model.get('indicator_text')} "
+        f"(mode {model.get('mode')})",
         f"work: {model.get('work_label')}",
     ]
     status_line = str(model.get("status_line", "") or "")
@@ -1973,7 +1980,7 @@ class CompanionWindow:
         suffix = "" if self.hotkey_active else " (hotkey off)"
         if self.hotkey_error and not self.hotkey_active:
             suffix = " (hotkey unavailable)"
-        self.state_label.configure(text=f"{indicator}{suffix}")
+        self.state_label.configure(text=f"{WIDGET_BRAND_PREFIX}{indicator}{suffix}")
         self.work_label.configure(text=str(model.get("work_label", "")))
         self.version_label.configure(text=str(model.get("version_text", "")))
         self.status_bar.configure(text=str(model.get("status_line", "")))

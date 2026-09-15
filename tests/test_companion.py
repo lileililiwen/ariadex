@@ -221,6 +221,19 @@ class ViewModelTest(unittest.TestCase):
             self.assertIn("work:", text)
             self.assertIn("actions:", text)
 
+    def test_text_equivalent_carries_brand(self):
+        for state in (
+            live_state(),
+            live_state(mode="PAUSE"),
+            live_state(mode="MANUAL"),
+            {"alive": False},
+        ):
+            text = companion.format_view_text(companion.build_view_model(state))
+            self.assertTrue(
+                text.startswith("ariadex companion:"),
+                f"headless text missing brand prefix: {text!r}",
+            )
+
     def test_default_geometry_is_middle_right(self):
         x, y = companion.default_geometry(1920, 1080)
         self.assertGreater(x, 1920 // 2)
@@ -704,7 +717,9 @@ class HeadlessWidgetTest(unittest.TestCase):
         )
         self.assertEqual(self.window.titlebar.options["height"], 30)
         self.assertEqual(self.window.controls.options["height"], 36)
-        self.assertEqual(self.window.state_label.options["text"], "WORKING")
+        self.assertEqual(
+            self.window.state_label.options["text"], "Ariadex \u2014 WORKING"
+        )
         self.assertEqual(self.window.pause_button.options.get("state"), "normal")
         self.assertEqual(self.window.play_button.options.get("state"), "disabled")
         self.assertEqual(self.adapter.registered, ["Ctrl+Esc"])
@@ -892,6 +907,91 @@ class HeadlessWidgetTest(unittest.TestCase):
         with mock.patch.object(window, "_run_client_async") as run_client:
             window._on_reconcile()
         run_client.assert_called_once_with("reconcile")
+
+
+class WidgetBrandTest(unittest.TestCase):
+    """The mini-player titlebar advertises the Ariadex brand in every state."""
+
+    BRAND = "Ariadex"
+    SEP = " \u2014 "
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.env_patch = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": self.tmp.name})
+        self.env_patch.start()
+        self.addCleanup(self.env_patch.stop)
+        install_fake_tk(self)
+        self.client = FakeClient()
+        self.adapter = FakeAdapter()
+        self.root = FakeTkRoot()
+        self.window = companion.CompanionWindow(
+            self.root, self.client, self.adapter, "Ctrl+Esc"
+        )
+        self.client.calls.clear()
+
+    def _render_with(self, state):
+        self.client.state = state
+        self.window._refresh()
+        return str(self.window.state_label.options.get("text", ""))
+
+    def test_brand_constant_is_ariadex(self):
+        self.assertEqual(companion.WIDGET_BRAND, self.BRAND)
+        self.assertEqual(companion.WIDGET_BRAND_PREFIX, f"{self.BRAND}{self.SEP}")
+
+    def test_mini_titlebar_carries_brand_for_every_state(self):
+        blocked_state = live_state(
+            mode="AUTO", blocked_count=1, next_action="none \u2014 blocked"
+        )
+        states = (
+            ("working", live_state()),
+            ("paused", live_state(mode="PAUSE")),
+            ("manual", live_state(mode="MANUAL")),
+            ("blocked", blocked_state),
+            ("completed", live_state(mode="AUTO", next_action="none \u2014 idle")),
+            ("stopped", {"alive": False}),
+        )
+        for label, state in states:
+            with self.subTest(state=label):
+                indicator = companion.build_view_model(state)["indicator_text"]
+                text = self._render_with(state)
+                self.assertTrue(
+                    text.startswith(f"{self.BRAND}{self.SEP}"),
+                    f"{label}: missing brand prefix in {text!r}",
+                )
+                self.assertIn(indicator, text)
+
+    def test_mini_titlebar_brand_survives_hotkey_off_suffix(self):
+        self.window.hotkey_active = False
+        self.window.hotkey_error = None
+        text = self._render_with(live_state())
+        self.assertTrue(text.startswith(f"{self.BRAND}{self.SEP}"))
+        self.assertIn("(hotkey off)", text)
+
+    def test_mini_titlebar_brand_survives_hotkey_unavailable_suffix(self):
+        self.window.hotkey_active = False
+        self.window.hotkey_error = "X11 unavailable"
+        text = self._render_with(live_state())
+        self.assertTrue(text.startswith(f"{self.BRAND}{self.SEP}"))
+        self.assertIn("(hotkey unavailable)", text)
+
+    def test_hub_title_remains_branded(self):
+        from ariadex import companion as companion_mod
+
+        # The hub window title is owned by RobotHubWindow and stays
+        # "Ariadex Robots" (unchanged by this change). The
+        # `build_hub_view_model` helper must keep "Ariadex Robots" as
+        # its `title` so any caller that renders the model renders the
+        # brand even if the render path is short-circuited.
+        with mock.patch.object(companion_mod, "build_hub_view_model") as builder:
+            builder.return_value = {
+                "title": "Ariadex Robots (0)",
+                "tabs": [],
+                "hub_indicator": "stopped",
+                "hub_indicator_text": "STOPPED",
+            }
+            model = companion_mod.build_hub_view_model([], [], 0)
+        self.assertTrue(model["title"].startswith("Ariadex Robots"))
 
 
 class RunCompanionHeadlessTest(unittest.TestCase):
