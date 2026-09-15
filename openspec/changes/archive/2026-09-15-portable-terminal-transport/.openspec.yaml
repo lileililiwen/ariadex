@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Terminal transport without tmux: stdlib-only Unix pty backend
+  behind the unchanged driver contract, selected by configuration.

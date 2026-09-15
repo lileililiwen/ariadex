@@ -388,13 +388,22 @@ def format_lock_text(diagnosis: dict) -> str:
 def tmux_session_status(
     project_dir: Path, session_id: str
 ) -> tuple[str | None, bool | None]:
-    """Report-only tmux session liveness; never starts or stops sessions."""
+    """Report-only provider session liveness; never starts or stops sessions.
+
+    Uses the project's configured terminal backend (tmux or pty).
+    """
     try:
+        from . import config as config_mod
         from . import terminal as terminal_mod
     except Exception:
         return None, None
     try:
-        driver = terminal_mod.TmuxDriver()
+        cfg = config_mod.load(project_dir)
+        backend = getattr(cfg, "terminal_driver", "tmux") or "tmux"
+    except Exception:
+        backend = "tmux"
+    try:
+        driver = terminal_mod.make_driver(backend, project_dir)
         name = terminal_mod.session_name_for(session_id)
     except Exception:
         return None, None

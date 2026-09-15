@@ -19,11 +19,14 @@ import json
 import os
 import socket
 import stat
+import sys
 import tempfile
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
+
+from . import terminal as terminal_mod
 
 DAEMON_REL_PATH = Path(".ariadex") / "daemon.json"
 SOCKET_REL_PATH = Path(".ariadex") / "daemon.sock"
@@ -667,7 +670,7 @@ def _scheduler_poll(project_dir: Path) -> None:
     try:
         adapter = providers_mod.get_adapter(
             cfg.agent_provider,
-            terminal_mod.TmuxDriver(),
+            terminal_mod.make_driver(cfg.terminal_driver, project_dir),
             terminal_mod.session_name_for(stored.session_id),
             project_dir,
         )
@@ -703,7 +706,7 @@ def _managed_runtime(project_dir: Path):
     )
     widget_enabled = bool(managed_config.get("widget_enabled", True))
     session = terminal_mod.session_name_for(stored.session_id)
-    driver = terminal_mod.TmuxDriver()
+    driver = terminal_mod.make_driver(cfg.terminal_driver, project_dir)
     runtime = None
 
     def make_adapter():
@@ -806,7 +809,11 @@ def run_daemon(
     managed_runtime = None
     try:
         if (project_dir / MANAGED_RUNTIME_REL_PATH).exists():
-            managed_runtime = _managed_runtime(project_dir)
+            try:
+                managed_runtime = _managed_runtime(project_dir)
+            except terminal_mod.TerminalError as exc:
+                print(f"error: daemon refused startup: {exc}", file=sys.stderr)
+                return 1
             managed_runtime.start()
         server.bind(str(sock))
         with contextlib.suppress(OSError):

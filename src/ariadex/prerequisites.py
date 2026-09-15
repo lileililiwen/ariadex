@@ -195,6 +195,25 @@ def check_tmux(
     return PrerequisiteResult(name="tmux", state="installed", detail="tmux ready")
 
 
+def check_pty() -> PrerequisiteResult:
+    """Verify Python pty support (Unix only, stdlib, nothing to install).
+
+    Present when the `pty` module imports; otherwise missing with an
+    actionable recovery pointing at the tmux driver. There is no package
+    to install: pty is part of the Python standard library on Unix.
+    """
+    try:
+        import pty as _pty_mod  # noqa: F401
+    except ImportError:
+        return PrerequisiteResult(
+            name="pty",
+            state="missing",
+            detail="Python `pty` is unavailable on this platform",
+            recovery="use `terminal_driver: tmux` on this host, then rerun",
+        )
+    return PrerequisiteResult(name="pty", state="present", detail="pty ready")
+
+
 def check_widget(
     *,
     allow_install: bool = True,
@@ -279,6 +298,7 @@ def coordinate(
     confirmed: bool = False,
     interactive: bool = False,
     require_widget: bool = False,
+    terminal_driver: str = "tmux",
     version_info=None,
     yaml_available: bool | None = None,
     which=None,
@@ -290,12 +310,14 @@ def coordinate(
 ) -> CoordinatorReport:
     """Run the readiness path in dependency order, stopping at first failure.
 
-    Runtime, provider, tmux, then widget. Later prerequisites are never
-    prepared after an earlier failure, so a failed run leaves no partial
-    installation behind. Performs no daemon, tmux-session, provider, or
-    widget startup itself. The widget gates overall readiness only when
-    `require_widget` is true; otherwise its outcome is reported while
-    managed execution may continue with terminal controls.
+    Runtime, provider, terminal transport, then widget. The transport check
+    follows the configured driver: tmux (with preparation) or pty
+    (stdlib presence only). Later prerequisites are never prepared after
+    an earlier failure, so a failed run leaves no partial installation
+    behind. Performs no daemon, session, provider, or widget startup
+    itself. The widget gates overall readiness only when `require_widget`
+    is true; otherwise its outcome is reported while managed execution
+    may continue with terminal controls.
     """
     results: list[PrerequisiteResult] = []
     runtime = check_runtime(version_info=version_info, yaml_available=yaml_available)
@@ -306,15 +328,18 @@ def coordinate(
     results.append(provider_result)
     if not provider_result.ready:
         return CoordinatorReport(results=results, ready=False)
-    tmux = check_tmux(
-        allow_install=allow_install,
-        interactive=interactive,
-        find=find_tmux,
-        detect_manager=detect_manager,
-        ensure=ensure_tmux,
-    )
-    results.append(tmux)
-    if not tmux.ready:
+    if terminal_driver == "pty":
+        transport: PrerequisiteResult = check_pty()
+    else:
+        transport = check_tmux(
+            allow_install=allow_install,
+            interactive=interactive,
+            find=find_tmux,
+            detect_manager=detect_manager,
+            ensure=ensure_tmux,
+        )
+    results.append(transport)
+    if not transport.ready:
         return CoordinatorReport(results=results, ready=False)
     widget = check_widget(
         allow_install=allow_install,

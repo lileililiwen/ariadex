@@ -29,7 +29,7 @@ LEGACY_BLOCKER_POLICIES = {"record-and-stop": "stop-on-blocker"}
 # that `ariadex run` can report them as unsupported instead of claiming
 # progress. Single source of truth lives in providers.ADAPTERS.
 SUPPORTED_PROVIDERS = supported_providers()
-SUPPORTED_TERMINAL_DRIVERS = ("tmux",)
+SUPPORTED_TERMINAL_DRIVERS = ("tmux", "pty")
 
 #: Provider permission policies for approval prompts. `prompt` (default)
 #: never sends automatic approval; `project-temp-auto` approves only
@@ -112,7 +112,8 @@ def default_config_text() -> str:
 # Coding CLI provider. MVP adapters: opencode, codex.
 # Other values load successfully; `ariadex run` reports them as unsupported.
 agent_provider: opencode
-# Terminal transport. MVP driver: tmux.
+# Terminal transport. `tmux` (default) drives a tmux server; `pty`
+# drives Python-owned pty relays with no tmux binary (Unix only).
 terminal_driver: tmux
 # How a fresh session recovers context. Durable state lives in the
 # repository, specs, and handoff file; conversation history is temporary.

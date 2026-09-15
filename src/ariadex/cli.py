@@ -1807,7 +1807,7 @@ def _repair_live_runtime(project_dir: Path, cfg, st, as_json: bool = False) -> i
         return EXIT_ERROR
     session = terminal_mod.session_name_for(st.session_id)
     try:
-        driver = terminal_mod.TmuxDriver()
+        driver = _provisioned_driver(project_dir, cfg, auto_install=False)
         if _has_terminal():
             try:
                 return _attach_session(driver.attach_command(session))
@@ -1878,6 +1878,27 @@ def _attach_session(argv: list[str]) -> int:
         print(f"error: provider attach failed: {exc}", file=sys.stderr)
         return EXIT_ERROR
     return proc.returncode
+
+
+def _provisioned_driver(
+    project_dir: Path, cfg, *, auto_install: bool = True
+) -> terminal_mod.TerminalDriver:
+    """Build the configured terminal backend for `project_dir`.
+
+    The `pty` backend needs no provisioning; tmux keeps the existing
+    ensure/require path. Raises `terminal_mod.TerminalError` (or the
+    tmux setup error) with an actionable message when unavailable.
+    """
+    name = "tmux"
+    if cfg is not None:
+        configured = getattr(cfg, "terminal_driver", "tmux") or "tmux"
+        name = str(configured)
+    if name == "pty":
+        return terminal_mod.make_driver("pty", project_dir)
+    tmux_path = (
+        tmux_setup_mod.ensure_tmux() if auto_install else tmux_setup_mod.require_tmux()
+    )
+    return terminal_mod.make_driver("tmux", project_dir, executable=tmux_path)
 
 
 def _resolve_managed_config(
@@ -2155,7 +2176,11 @@ def run_managed_start(
 
     coordinate = coordinate_fn or prerequisites_mod.coordinate
     report = coordinate(
-        provider, allow_install=True, confirmed=False, interactive=interactive
+        provider,
+        allow_install=True,
+        confirmed=False,
+        interactive=interactive,
+        terminal_driver=getattr(cfg, "terminal_driver", "tmux"),
     )
     if not report.ready:
         print(prerequisites_mod.format_report(report), file=sys.stderr)
@@ -2170,7 +2195,10 @@ def run_managed_start(
     make_adapter = adapter_factory or providers_mod.get_adapter
     try:
         adapter = make_adapter(
-            provider, terminal_mod.TmuxDriver(), session, project_dir
+            provider,
+            _provisioned_driver(project_dir, cfg, auto_install=False),
+            session,
+            project_dir,
         )
     except Exception as exc:
         print(f"error: provider setup failed: {exc}", file=sys.stderr)
@@ -2361,6 +2389,7 @@ def cmd_start(
         allow_install=True,
         confirmed=False,
         interactive=interactive,
+        terminal_driver=getattr(cfg, "terminal_driver", "tmux"),
     )
     if not report.ready:
         print(prerequisites_mod.format_report(report), file=sys.stderr)
@@ -2418,7 +2447,13 @@ def cmd_start(
         print("managed runtime started; daemon owns provider, watcher, and widget")
         return EXIT_OK
     try:
-        return _attach_session(terminal_mod.TmuxDriver().attach_command(session))
+        driver = _provisioned_driver(project_dir, cfg, auto_install=False)
+        if isinstance(driver, terminal_mod.PtyDriver):
+            print(
+                "pty session: showing the live session log "
+                "(input stays in the provider session via send paths)"
+            )
+        return _attach_session(driver.attach_command(session))
     except KeyboardInterrupt:
         print("interrupted: requesting managed shutdown")
         try:
@@ -3035,15 +3070,14 @@ def cmd_watch(
     when no active OpenSpec work remains.
     """
     try:
-        tmux_path = (
-            tmux_setup_mod.ensure_tmux()
-            if auto_install
-            else tmux_setup_mod.require_tmux()
-        )
-    except tmux_setup_mod.TmuxSetupError as exc:
+        try:
+            watch_cfg = config_mod.load(project_dir)
+        except config_mod.ConfigError:
+            watch_cfg = None
+        driver = _provisioned_driver(project_dir, watch_cfg, auto_install=auto_install)
+    except (tmux_setup_mod.TmuxSetupError, terminal_mod.TerminalError) as exc:
         print(f"error: watch is unavailable: {exc}", file=sys.stderr)
         return EXIT_ERROR
-    driver = terminal_mod.TmuxDriver(executable=tmux_path)
     if list_sessions:
         try:
             names = robot_mod.list_sessions(driver)
@@ -3054,7 +3088,7 @@ def cmd_watch(
             for name in names:
                 print(f"session: {name}")
         else:
-            print("session: (no tmux sessions)")
+            print("session: (no sessions)")
         return EXIT_OK
     if hub:
         return cmd_watch_hub(
@@ -3275,16 +3309,6 @@ def cmd_watch_hub(
             )
             return EXIT_ERROR
         seen.add(key)
-    try:
-        tmux_path = (
-            tmux_setup_mod.ensure_tmux()
-            if auto_install
-            else tmux_setup_mod.require_tmux()
-        )
-    except tmux_setup_mod.TmuxSetupError as exc:
-        print(f"error: watch is unavailable: {exc}", file=sys.stderr)
-        return EXIT_ERROR
-    active_driver = driver or terminal_mod.TmuxDriver(executable=tmux_path)
     watchers: list[Any] = []
     identities: list[tuple[str, str, str]] = []
     for entry_project_text, entry_session, entry_provider in parsed:
@@ -3317,12 +3341,15 @@ def cmd_watch_hub(
             )
             return EXIT_ERROR
         try:
+            entry_driver = driver or _provisioned_driver(
+                entry_project, entry_cfg, auto_install=auto_install
+            )
             watcher = _build_hub_entry_watcher(
                 project_dir,
                 entry_project,
                 entry_session,
                 resolved,
-                active_driver,
+                entry_driver,
                 initial_prompt=shared_initial,
                 continuation_prompt=continuation_prompt,
                 confirmation_prompt=confirmation_prompt,
@@ -3335,6 +3362,9 @@ def cmd_watch_hub(
             )
         except robot_mod.RobotError as exc:
             print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        except (tmux_setup_mod.TmuxSetupError, terminal_mod.TerminalError) as exc:
+            print(f"error: hub entry backend unavailable: {exc}", file=sys.stderr)
             return EXIT_ERROR
         watchers.append(watcher)
         identities.append((str(entry_project.resolve()), resolved, entry_session))
@@ -3950,12 +3980,15 @@ def _run_loop(
     try:
         adapter = providers_mod.get_adapter(
             cfg.agent_provider,
-            terminal_mod.TmuxDriver(),
+            _provisioned_driver(project_dir, cfg, auto_install=auto_install),
             terminal_mod.session_name_for(st.session_id),
             project_dir,
         )
     except providers_mod.UnsupportedOperation as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except (tmux_setup_mod.TmuxSetupError, terminal_mod.TerminalError) as exc:
+        print(f"error: terminal backend unavailable: {exc}", file=sys.stderr)
         return EXIT_ERROR
     if cfg.terminal_driver not in config_mod.SUPPORTED_TERMINAL_DRIVERS:
         print(
@@ -3964,16 +3997,6 @@ def _run_loop(
             file=sys.stderr,
         )
         return EXIT_ERROR
-    try:
-        tmux_path = (
-            tmux_setup_mod.ensure_tmux()
-            if auto_install
-            else tmux_setup_mod.require_tmux()
-        )
-    except tmux_setup_mod.TmuxSetupError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return EXIT_ERROR
-    adapter.driver = terminal_mod.TmuxDriver(executable=tmux_path)
     runner = runner_mod.Runner(project_dir, cfg, adapter)
     cycles = runner.run()
     for cycle in cycles:
@@ -4028,15 +4051,10 @@ def cmd_attach(project_dir: Path, auto_install: bool = True) -> int:
     if st is None:
         return EXIT_ERROR
     try:
-        tmux_path = (
-            tmux_setup_mod.ensure_tmux()
-            if auto_install
-            else tmux_setup_mod.require_tmux()
-        )
-    except tmux_setup_mod.TmuxSetupError as exc:
+        driver = _provisioned_driver(project_dir, cfg, auto_install=auto_install)
+    except (tmux_setup_mod.TmuxSetupError, terminal_mod.TerminalError) as exc:
         print(f"error: attach is unavailable: {exc}", file=sys.stderr)
         return EXIT_ERROR
-    driver = terminal_mod.TmuxDriver(executable=tmux_path)
     name = terminal_mod.session_name_for(st.session_id)
     try:
         alive = driver.session_alive(name)
@@ -4048,13 +4066,18 @@ def cmd_attach(project_dir: Path, auto_install: bool = True) -> int:
         return EXIT_ERROR
     if not alive:
         print(
-            f"error: attach is unavailable: tmux session `{name}` does not "
+            f"error: attach is unavailable: session `{name}` does not "
             "exist; the Coding CLI is not running there",
             file=sys.stderr,
         )
         return EXIT_ERROR
-    # Attach replaces this process with tmux attach; argv comes from the
-    # terminal driver, never from provider output.
+    if isinstance(driver, terminal_mod.PtyDriver):
+        print(
+            "pty session: showing the live session log "
+            "(input stays in the provider session via send paths)"
+        )
+    # Attach replaces this process; argv comes from the terminal driver,
+    # never from provider output.
     os.execvp(driver.attach_command(name)[0], driver.attach_command(name))  # noqa: S606
     return EXIT_ERROR
 

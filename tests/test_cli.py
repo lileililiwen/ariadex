@@ -262,7 +262,7 @@ class RunAttachTest(unittest.TestCase):
     def test_attach_reports_missing_driver(self):
         code, _, err = run_cli(self.root, "--no-auto-install", "attach")
         self.assertNotEqual(code, 0)
-        self.assertIn("tmux", err)
+        self.assertIn("attach is unavailable", err)
 
 
 if __name__ == "__main__":
