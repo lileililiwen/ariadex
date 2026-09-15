@@ -55,6 +55,21 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Implemented, verified, and archived:
+  `2026-09-15-portable-terminal-transport`. Python-owned pty sessions
+  behind the unchanged driver contract: stdlib-only Unix relay daemon
+  (`pty_relay.py`), full `PtyDriver` ABC implementation with
+  project-local registry, backend factory with `terminal_driver: pty`
+  config, all CLI/daemon construction sites migrated with tmux
+  provisioning skipped for pty, attach observes via session log tail.
+  Verified with 1344-test suite (same 2 pre-existing environment
+  failures as HEAD), Ruff clean, mypy at baseline (13 pre-existing),
+  `openspec validate --changes/--specs --strict` passed; archived to
+  `openspec/specs/portable-terminal-transport/spec.md`. Live relay
+  protocol verified against a real session; provider-over-pty run not
+  exercised (needs model interaction). Windows ConPTY stays an explicit
+  follow-up (no Windows host to verify against); third-party terminal
+  libraries stay out per the stdlib-only runtime invariant.
+  Queue empty at archive time.
   `2026-09-15-widget-control-room`. Truthful widget controls: inline
   two-press Stop confirm with expiry (no modal dialog), busy-click
   acknowledgment without duplicate IPC, live per-spec job pile from local
