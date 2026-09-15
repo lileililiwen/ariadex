@@ -73,6 +73,41 @@ class LifecycleTest(unittest.TestCase):
             InputSurface.DRAFT,
         )
 
+    def test_opencode_status_bar_is_not_a_draft(self):
+        # Live capture: idle composer after a finished conversation. The
+        # `┃  Build · ...` status bar above the `╹` border is window
+        # chrome; misreading it as a draft blocked confirmation recovery
+        # with a boundary/record loop and no `/new` ever sent.
+        adapter, _ = make_open_code()
+        capture = (
+            "- openspec/specs/profile-history/spec.md:3 — Purpose updated\n"
+            "\n"
+            "Verification: build 0 errors, 483 tests pass\n"
+            "\n"
+            "▣  Build · minimax-m3 · 4m 25s\n"
+            "\n"
+            "┃\n"
+            "┃\n"
+            "┃\n"
+            "┃  Build · minimax-m3 newapi\n"
+            "╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n"
+            "/home/paul/code/cvunify\n"
+        )
+        self.assertIs(adapter.input_surface(capture), InputSurface.EMPTY)
+
+    def test_opencode_real_draft_above_status_bar_is_draft(self):
+        adapter, _ = make_open_code()
+        capture = (
+            "▣  Build · minimax-m3 · 4m 25s\n"
+            "\n"
+            "┃\n"
+            "┃ user is typing a correction\n"
+            "┃  Build · minimax-m3 newapi\n"
+            "╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n"
+            "/home/paul/code/cvunify\n"
+        )
+        self.assertIs(adapter.input_surface(capture), InputSurface.DRAFT)
+
     def test_terminate_removes_session(self):
         adapter, driver = make_open_code()
         adapter.start()

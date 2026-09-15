@@ -90,20 +90,50 @@ class OpenCodeAdapter(AgentAdapter):
         prompt. Its idle composer is rendered as a blank ``┃`` line followed
         by the provider footer. This deliberately requires both UI-owned
         structures and never examines the assistant's response prose.
+        The composer status bar (``┃ <model info>`` directly above the
+        ``╹`` bottom border) is window chrome, not user draft text, and is
+        excluded from draft detection so an idle composer is not mistaken
+        for a human-held draft.
         """
         lines = [line.rstrip() for line in (capture or "").splitlines()[-16:]]
         has_composer = any(line.strip() == "┃" for line in lines)
-        has_draft = any(
-            line.strip().startswith("┃") and line.strip() != "┃" for line in lines
-        )
         has_footer = any(
             line.strip().startswith("▣") and "Build" in line for line in lines
+        )
+        border_idx = max(
+            (idx for idx, line in enumerate(lines) if line.strip().startswith("╹")),
+            default=None,
+        )
+        has_draft = any(
+            line.strip().startswith("┃")
+            and line.strip() != "┃"
+            and not self._is_status_bar(lines, idx, border_idx, has_footer)
+            for idx, line in enumerate(lines)
         )
         if has_draft:
             return InputSurface.DRAFT
         if has_composer and has_footer:
             return InputSurface.EMPTY
         return super().input_surface(capture)
+
+    @staticmethod
+    def _is_status_bar(
+        lines: list[str], idx: int, border_idx: int | None, has_footer: bool
+    ) -> bool:
+        """True for the composer status bar, never for user draft text.
+
+        The status bar is the ``┃``-prefixed line directly above the
+        composer bottom border carrying ``·``-separated model info while
+        the provider footer is visible. A genuine draft sits above the
+        status line, so position plus shape plus footer context keep a
+        real draft from ever being excluded.
+        """
+        if border_idx is None or not has_footer:
+            return False
+        if idx != border_idx - 1:
+            return False
+        stripped = lines[idx].strip()
+        return stripped.startswith("┃") and stripped != "┃" and "·" in stripped
 
     @property
     def api_port(self) -> int:
