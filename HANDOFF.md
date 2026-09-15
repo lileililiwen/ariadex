@@ -77,13 +77,12 @@ that promotion has been skipped or failed.
 ## Current state
 
 - Proposed, awaiting selection (no implementation yet):
-  `2026-09-15-mini-collapse` (collapse to a draggable status strip),
   `2026-09-15-log-autoscroll` (logs follow the latest entry),
   `2026-09-15-hub-keymap` (keymap menu; yield never quits;
   quit-current and quit-all are distinct keys),
   `2026-09-15-manual-actions` (labeled manual rows: retry, model
   select from a new `models` config list, message send with
-  empty/draft/PAUSE refusals; rows, never tabs). All four validate
+  empty/draft/PAUSE refusals; rows, never tabs). All three validate
   clean (`openspec validate --changes --strict`).
   `2026-09-15-ask-before-recovery`. One bounded DONE/WORKING
   readiness ask in the current conversation before confirmation
@@ -144,6 +143,25 @@ that promotion has been skipped or failed.
   Pre-existing broken mocks in terminal-error/fresh-retry tests (failing at
   HEAD from an earlier guard capture) were updated to the redefined
   refire contract. Queue empty at archive time.
+  `2026-09-15-mini-collapse`. The mini player collapses to a
+  status-strip mode (a single 40px row with the state dot, brand
+  prefix, and the project's active-spec count) by toggling from
+  collapsed; one more toggle expands to full. The cycle is
+  `collapsed → strip → full → collapsed` (default start: collapsed).
+  The status bar becomes the drag handle in strip mode; drag motion
+  is coalesced per event burst via `after_idle` and clamps with the
+  active mode height so the strip never sticks at a screen edge sized
+  for the tall card. Cycle persists geometry per mode; toggling never
+  reaches the daemon. Verified with the 1391-test suite (same 2
+  pre-existing environment failures as HEAD: real-tmux `list-panes`
+  and the doc-consistency next-change agreement that this handoff
+  update resolves), Ruff check/format clean on touched files, mypy
+  at baseline (13 pre-existing), `openspec validate --changes/--specs
+  --strict` passed (3 active changes, 68 canonical specs);
+  promoted into `openspec/specs/floating-control/spec.md`
+  ("Strip mode parks the mini player"). Queue empties by one
+  (`mini-collapse` archived; `log-autoscroll`, `hub-keymap`,
+  `manual-actions` remain).
 
 - Implemented, verified, and archived:
   `2026-09-14-independent-runtime-processes`. Managed widget IPC and polling
@@ -719,9 +737,8 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Select `2026-09-15-mini-collapse` next when building starts, then
-`2026-09-15-log-autoscroll`, `2026-09-15-hub-keymap`,
-`2026-09-15-manual-actions`, one at a time.
+Select `2026-09-15-log-autoscroll` next when building starts, then
+`2026-09-15-hub-keymap`, `2026-09-15-manual-actions`, one at a time.
 
 ## Latest change: widget live log and queue visibility
 
