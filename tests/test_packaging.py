@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import ariadex
 from ariadex import cli as cli_mod
@@ -65,6 +66,29 @@ class PackagingMetadataTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         self.assertIn(ariadex.__version__, proc.stdout)
+
+    def test_version_flag_carries_commit_identity(self):
+        from ariadex import upgrade as upgrade_mod
+
+        with mock.patch.object(
+            upgrade_mod, "describe_build", return_value="0.1.0+gabc1234-dirty"
+        ):
+            stdout = io.StringIO()
+            with (
+                contextlib.redirect_stdout(stdout),
+                self.assertRaises(SystemExit) as ctx,
+            ):
+                cli_mod.build_parser().parse_args(["--version"])
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertIn("ariadex 0.1.0+gabc1234-dirty", stdout.getvalue())
+
+    def test_version_probe_is_lazy(self):
+        from ariadex import upgrade as upgrade_mod
+
+        with mock.patch.object(
+            upgrade_mod, "describe_build", side_effect=AssertionError("probed")
+        ):
+            cli_mod.build_parser().parse_args(["init"])
 
     def test_governance_files_present(self):
         for name in ("LICENSE", "CHANGELOG.md", "SECURITY.md", "pyproject.toml"):

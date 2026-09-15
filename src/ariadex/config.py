@@ -95,6 +95,9 @@ class Config:
     #: Operator-configured model list for the widget Manual panel
     #: (`provider/model` strings). Empty disables the model row.
     models: list = dataclasses.field(default_factory=list)
+    #: Named widget theme (`dark`, `light`, `contrast`). Unknown values
+    #: fall back to `dark` with a warning, never a refusal.
+    theme: str = "dark"
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -190,6 +193,9 @@ model_fallbacks: []
 # (`provider/model` strings, e.g. opencode/gpt-5-codex). Empty disables
 # the model row; entries must be non-empty strings.
 models: []
+# Named widget theme: dark (default), light, or contrast. Unknown values
+# fall back to dark with a warning.
+theme: dark
 """
     return text.replace("__CONFIRMATION_PROMPT__", DEFAULT_CONFIRMATION_PROMPT)
 
@@ -460,6 +466,20 @@ def validate(raw: dict, source: str = "configuration") -> Config:
             f"invalid models in {source}: "
             "expected a list of non-empty `provider/model` strings"
         )
+    from . import theme as theme_mod
+
+    theme = get("theme", base.theme)
+    if not isinstance(theme, str) or not theme.strip():
+        print(f"warning: invalid theme in {source}; using `dark`")
+        theme = "dark"
+    elif theme.strip().lower() not in theme_mod.THEMES:
+        print(
+            f"warning: unknown theme `{theme}` in {source}; "
+            f"expected one of {', '.join(theme_mod.theme_names())}; using `dark`"
+        )
+        theme = "dark"
+    else:
+        theme = theme.strip().lower()
     return Config(
         agent_provider=raw.get("agent_provider", base.agent_provider),
         terminal_driver=raw.get("terminal_driver", base.terminal_driver),
@@ -491,4 +511,5 @@ def validate(raw: dict, source: str = "configuration") -> Config:
         permission_allowlist=list(permission_allowlist),
         model_fallbacks=list(model_fallbacks),
         models=list(models),
+        theme=theme,
     )

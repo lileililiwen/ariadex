@@ -1,5 +1,6 @@
 """Tests for the manual-actions change: retry, model, message."""
 
+import contextlib
 import json
 import os
 import tempfile
@@ -512,6 +513,143 @@ class HubManualPanelTest(unittest.TestCase):
             window._on_hub_retry()
             sender.assert_not_called()
         self.assertIn("no active tab", window.hub_manual["feedback"].options["text"])
+
+
+class ManualPanelThemeTest(unittest.TestCase):
+    """Every Manual surface renders from the theme (no Tk light defaults)."""
+
+    def setUp(self):
+        from tests.test_companion import (
+            FakeAdapter,
+            FakeClient,
+            FakeTkRoot,
+            install_fake_tk,
+            live_state,
+        )
+
+        self.live_state = live_state
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": tmp.name})
+        patch.start()
+        self.addCleanup(patch.stop)
+        install_fake_tk(self)
+        self.window = companion.CompanionWindow(
+            FakeTkRoot(), FakeClient(), FakeAdapter(), "Ctrl+Esc"
+        )
+
+    def test_manual_widgets_carry_dark_backgrounds(self):
+        from ariadex import theme as theme_mod
+
+        dark = theme_mod.DARK
+        manual = self.window.manual
+        for key in (
+            "frame",
+            "retry_button",
+            "model_apply",
+            "model_option",
+            "message_text",
+            "send_button",
+            "feedback",
+        ):
+            bg = manual[key].options.get("background")
+            self.assertIn(
+                bg,
+                {dark.window_bg, dark.input_bg, dark.button_bg},
+                f"manual[{key}] background {bg!r} is not themed",
+            )
+
+    def test_message_text_is_focusable(self):
+        self.assertTrue(self.window.manual["message_text"].options.get("takefocus"))
+
+    def test_buttons_carry_themed_foreground(self):
+        from ariadex import theme as theme_mod
+
+        self.assertEqual(
+            self.window.manual["send_button"].options.get("foreground"),
+            theme_mod.DARK.button_fg,
+        )
+
+    def test_light_theme_reaches_manual_panel(self):
+        from tests.test_companion import FakeAdapter, FakeClient, FakeTkRoot
+
+        window = companion.CompanionWindow(
+            FakeTkRoot(), FakeClient(), FakeAdapter(), "Ctrl+Esc", theme="light"
+        )
+        bg = window.manual["message_text"].options.get("background")
+        self.assertEqual(bg, "#ffffff")
+        self.assertEqual(window.manual["frame"].options.get("background"), "#eef1f4")
+
+
+class RealTkTypingTest(unittest.TestCase):
+    """Real display-server typing: fake-Tk `insert` cannot prove focus works."""
+
+    def _make_window(self, root):
+        from tests.test_companion import FakeAdapter, live_state
+
+        class RecordingClient(companion.CompanionClient):
+            def __init__(self):
+                self.project_dir = Path(".")
+                self.sent = []
+
+            def refresh(self):
+                return live_state()
+
+            def send_message(self, text):
+                self.sent.append(text)
+                return live_state()
+
+        return companion.CompanionWindow(
+            root, RecordingClient(), FakeAdapter(), "Ctrl+Esc"
+        )
+
+    def test_typed_keys_land_and_send(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            self.skipTest("tkinter not installed")
+        try:
+            root = tk.Tk()
+        except Exception as exc:
+            self.skipTest(f"no display server: {exc}")
+        try:
+            window = self._make_window(root)
+            window._toggle_expanded()
+            window._toggle_expanded()
+            root.update()
+            self.assertEqual(window.display_mode, "full")
+
+            def find(name):
+                found = []
+
+                def walk(widget):
+                    if widget.winfo_name() == name:
+                        found.append(widget)
+                    for child in widget.winfo_children():
+                        walk(child)
+
+                walk(root)
+                return found[0]
+
+            box = find("mini-manual-message-text")
+            self.assertTrue(bool(box.winfo_viewable()), "message box not mapped")
+            root.deiconify()
+            root.focus_force()
+            root.update()
+            box.focus_set()
+            root.update()
+            self.assertEqual(root.focus_get(), box)
+            for char in "hi":
+                box.event_generate(f"<KeyPress-{char}>")
+            root.update()
+            self.assertEqual(box.get("1.0", "end").strip(), "hi")
+            window._on_manual_send()
+            root.update()
+            self.assertEqual(window.client.sent, ["hi"])
+            self.assertEqual(box.get("1.0", "end").strip(), "")
+        finally:
+            with contextlib.suppress(Exception):
+                root.destroy()
 
 
 if __name__ == "__main__":

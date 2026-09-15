@@ -47,12 +47,18 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 
 
-def _package_version() -> str:
-    try:
-        from . import __version__ as version
-    except ImportError:
-        return "unknown"
-    return version
+class _VersionAction(argparse.Action):
+    """Print build identity on `-V` only; never probe git otherwise.
+
+    Resolving the commit eagerly (e.g. in the `version=` string) would
+    run a git subprocess for every CLI invocation, breaking the
+    read-only guarantees the upgrade tests pin. This defers the probe
+    until the flag is actually passed.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        print(f"{parser.prog} {upgrade_mod.describe_build()}")
+        parser.exit()
 
 
 HANDOFF_TEMPLATE = """\
@@ -89,8 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-V",
         "--version",
-        action="version",
-        version="%(prog)s " + _package_version(),
+        action=_VersionAction,
+        nargs=0,
         help="print the Ariadex version and exit",
     )
     sub = parser.add_subparsers(dest="command", required=True)

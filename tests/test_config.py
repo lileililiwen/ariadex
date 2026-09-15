@@ -35,6 +35,7 @@ class DefaultsTest(unittest.TestCase):
             write_config(Path(tmp), config.default_config_text())
             cfg = config.load(Path(tmp))
         self.assertEqual(cfg, config.defaults())
+        self.assertEqual(cfg.theme, "dark")
 
 
 class ValidationTest(unittest.TestCase):
@@ -73,6 +74,18 @@ class ValidationTest(unittest.TestCase):
     def test_unknown_provider_loads_for_run_to_report(self):
         cfg = self.load_text("agent_provider: wat\n")
         self.assertEqual(cfg.agent_provider, "wat")
+
+    def test_each_supported_theme_accepted(self):
+        for name in ("dark", "light", "contrast", " Light "):
+            cfg = self.load_text(f"theme: {name}\n")
+            self.assertEqual(cfg.theme, name.strip().lower())
+
+    def test_unknown_theme_falls_back_to_dark_with_warning(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cfg = self.load_text("theme: neon\n")
+        self.assertEqual(cfg.theme, "dark")
+        self.assertIn("neon", buf.getvalue())
 
     def test_unknown_keys_warn_and_continue(self):
         buf = io.StringIO()

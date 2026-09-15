@@ -24,6 +24,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+from . import theme as theme_mod
+
 DEFAULT_HOTKEY = "Ctrl+Esc"
 
 #: Fixed brand shown ahead of the mini-player state word and in the
@@ -86,65 +88,86 @@ class CompanionError(Exception):
     """A companion, hotkey, or IPC failure (fail-closed, no input sent)."""
 
 
-def _button_press(button: object) -> None:
+def _style(widget: object, theme: theme_mod.Theme, role: str) -> None:
+    """Apply the theme role to a widget (layout stays with the caller)."""
+    widget.configure(**theme_mod.options(theme, role))  # type: ignore[attr-defined]
+
+
+def _style_menu(menu: object, theme: theme_mod.Theme) -> None:
+    """Apply the theme to a dropdown menu (OptionMenu popups)."""
+    menu.configure(**theme_mod.options(theme, "menu"))  # type: ignore[attr-defined]
+
+
+def _button_press(button: object, theme: theme_mod.Theme | None = None) -> None:
     """Give immediate pressed feedback without changing the command."""
+    resolved = theme or theme_mod.DARK
     with contextlib.suppress(Exception):
         button.configure(  # type: ignore[attr-defined]
             relief="sunken",
-            background="#3b82f6",
-            activebackground="#2563eb",
+            background=resolved.press_bg,
+            activebackground=resolved.press_active_bg,
         )
 
 
-def _button_release(button: object, root: object) -> None:
+def _button_release(
+    button: object, root: object, theme: theme_mod.Theme | None = None
+) -> None:
     """Show a short success flash after Tk dispatches a button release."""
+    resolved = theme or theme_mod.DARK
     with contextlib.suppress(Exception):
         button.configure(  # type: ignore[attr-defined]
             relief="flat",
-            background="#22c55e",
-            activebackground="#16a34a",
+            background=resolved.success_bg,
+            activebackground=resolved.success_active_bg,
         )
 
     def restore() -> None:
         with contextlib.suppress(Exception):
             button.configure(  # type: ignore[attr-defined]
                 relief="flat",
-                background="#2b313a",
-                activebackground="#3b82f6",
+                background=resolved.button_bg,
+                activebackground=resolved.button_active_bg,
             )
 
     with contextlib.suppress(Exception):
         root.after(180, restore)  # type: ignore[attr-defined]
 
 
-def _button_leave(button: object) -> None:
+def _button_leave(button: object, theme: theme_mod.Theme | None = None) -> None:
     """Cancel pressed styling when the pointer leaves without a release."""
+    resolved = theme or theme_mod.DARK
     with contextlib.suppress(Exception):
         button.configure(  # type: ignore[attr-defined]
             relief="flat",
-            background="#2b313a",
-            activebackground="#3b82f6",
+            background=resolved.button_bg,
+            activebackground=resolved.button_active_bg,
         )
 
 
-def _bind_button_feedback(button: object, root: object) -> None:
+def _bind_button_feedback(
+    button: object, root: object, theme: theme_mod.Theme | None = None
+) -> None:
     """Bind portable Tk mouse feedback while leaving command dispatch intact."""
+    resolved = theme or theme_mod.DARK
     with contextlib.suppress(Exception):
         button.configure(  # type: ignore[attr-defined]
             cursor="hand2",
             relief="flat",
-            background="#2b313a",
-            activebackground="#3b82f6",
+            background=resolved.button_bg,
+            foreground=resolved.button_fg,
+            activebackground=resolved.button_active_bg,
+            activeforeground=resolved.button_active_fg,
         )
         button.bind(  # type: ignore[attr-defined]
-            "<ButtonPress-1>", lambda _event, item=button: _button_press(item)
+            "<ButtonPress-1>",
+            lambda _event, item=button: _button_press(item, resolved),
         )
         button.bind(  # type: ignore[attr-defined]
             "<ButtonRelease-1>",
-            lambda _event, item=button: _button_release(item, root),
+            lambda _event, item=button: _button_release(item, root, resolved),
         )
         button.bind(  # type: ignore[attr-defined]
-            "<Leave>", lambda _event, item=button: _button_leave(item)
+            "<Leave>", lambda _event, item=button: _button_leave(item, resolved)
         )
 
 
@@ -942,18 +965,24 @@ def build_manual_panel(
     on_retry,
     on_send,
     on_switch,
+    theme: theme_mod.Theme | None = None,
 ) -> dict:
     """Create the labeled Manual group (Retry/Model/Message rows).
 
     Rows, never tabs: project tabs already own that pattern. Returns a
     refs dict; `refresh_manual_panel` drives states and options.
     """
+    active = theme or theme_mod.DARK
     frame = tk.Frame(parent)
+    _style(frame, active, "frame")
     header = tk.Label(frame, text="Manual", name=f"{name_prefix}-manual-header")
+    _style(header, active, "header")
     header.pack(anchor="w")
     retry_row = tk.Frame(frame)
+    _style(retry_row, active, "frame")
     retry_row.pack(fill="x")
     retry_label = tk.Label(retry_row, text="Retry")
+    _style(retry_label, active, "label")
     retry_label.pack(side="left")
     retry_button = tk.Button(
         retry_row,
@@ -964,12 +993,17 @@ def build_manual_panel(
     )
     retry_button.pack(side="left", expand=True, fill="x")
     model_row = tk.Frame(frame)
+    _style(model_row, active, "frame")
     model_row.pack(fill="x")
     model_label = tk.Label(model_row, text="Model")
+    _style(model_label, active, "label")
     model_label.pack(side="left")
     model_var = tk.StringVar(value="")
     model_option = tk.OptionMenu(model_row, model_var, "")
+    _style(model_option, active, "optionmenu")
     model_option.pack(side="left", padx=4)
+    with contextlib.suppress(Exception):
+        _style_menu(model_option["menu"], active)
     model_apply = tk.Button(
         model_row,
         text="Apply",
@@ -981,17 +1015,22 @@ def build_manual_panel(
     model_hint = tk.Label(
         model_row, text="no models configured", name=f"{name_prefix}-manual-model-hint"
     )
+    _style(model_hint, active, "muted")
     message_row = tk.Frame(frame)
+    _style(message_row, active, "frame")
     message_row.pack(fill="x")
     message_label = tk.Label(message_row, text="Message")
+    _style(message_label, active, "label")
     message_label.pack(side="left")
     message_text = tk.Text(
         message_row,
         height=3,
         width=34,
         wrap="word",
+        takefocus=True,
         name=f"{name_prefix}-manual-message-text",
     )
+    _style(message_text, active, "text_input")
     message_text.pack(side="left", expand=True, fill="x", padx=4)
     send_button = tk.Button(
         message_row,
@@ -1008,9 +1047,11 @@ def build_manual_panel(
         justify="left",
         name=f"{name_prefix}-manual-feedback",
     )
+    _style(feedback, active, "muted")
     feedback.pack(fill="x")
-    _bind_button_feedback(retry_button, root)
-    _bind_button_feedback(send_button, root)
+    _bind_button_feedback(retry_button, root, active)
+    _bind_button_feedback(send_button, root, active)
+    _bind_button_feedback(model_apply, root, active)
     return {
         "frame": frame,
         "retry_button": retry_button,
@@ -1571,10 +1612,12 @@ class CompanionWindow:
         editor: str | None = None,
         poll_interval_s: float = POLL_INTERVAL_S,
         nonblocking: bool = False,
+        theme: str = "dark",
     ) -> None:
         import tkinter as tk
 
         self.root = root
+        self._theme = theme_mod.get_theme(theme)
         self.client = client
         self.adapter = adapter
         self.hotkey = hotkey
@@ -1636,26 +1679,25 @@ class CompanionWindow:
 
         self.frame = tk.Frame(
             root,
-            background="#20242b",
             borderwidth=1,
             relief="solid",
             padx=10,
             pady=9,
         )
+        _style(self.frame, self._theme, "frame")
         self.frame.pack(fill="both", expand=True)
 
         self.status_bar = tk.Label(
             self.frame,
             text="",
             anchor="w",
-            background="#20242b",
-            foreground="#8b949e",
-            font=("TkDefaultFont", 9),
             name="status-bar",
         )
+        _style(self.status_bar, self._theme, "small")
         self.status_bar.pack(side="bottom", fill="x", pady=(4, 0))
 
-        self.titlebar = tk.Frame(self.frame, background="#20242b")
+        self.titlebar = tk.Frame(self.frame)
+        _style(self.titlebar, self._theme, "frame")
         self.titlebar.pack(fill="x")
         self.titlebar.configure(height=30)
         with contextlib.suppress(AttributeError):
@@ -1664,18 +1706,16 @@ class CompanionWindow:
             self.titlebar,
             text="●",
             width=2,
-            background="#20242b",
-            foreground="#7dd3a8",
         )
+        _style(self.dot, self._theme, "frame")
+        self.dot.configure(foreground=self._theme.accent_fg)
         self.dot.pack(side="left")
         self.state_label = tk.Label(
             self.titlebar,
             text="STARTING",
             anchor="w",
-            background="#20242b",
-            foreground="#f3f4f6",
-            font=("TkDefaultFont", 10, "bold"),
         )
+        _style(self.state_label, self._theme, "header")
         self.state_label.pack(side="left", fill="x", expand=True)
         for widget in (self.titlebar, self.state_label):
             widget.configure(cursor="hand2")
@@ -1697,24 +1737,19 @@ class CompanionWindow:
             width=2,
             name="close-button",
             takefocus=True,
-            background="#20242b",
-            foreground="#f3f4f6",
-            activebackground="#9b3d52",
-            activeforeground="#ffffff",
             relief="flat",
             command=self._on_close,
         )
+        _style(self.close_button, self._theme, "danger")
         self.close_button.pack(side="right")
 
         self.version_label = tk.Label(
             self.frame,
             text="",
             anchor="w",
-            background="#20242b",
-            foreground="#8b949e",
-            font=("TkDefaultFont", 9),
             name="version-label",
         )
+        _style(self.version_label, self._theme, "small")
         self.version_label.pack(fill="x")
 
         self.work_label = tk.Label(
@@ -1723,12 +1758,12 @@ class CompanionWindow:
             anchor="w",
             justify="left",
             wraplength=WIDGET_WIDTH - 20,
-            background="#20242b",
-            foreground="#c9d1d9",
         )
+        _style(self.work_label, self._theme, "label")
         self.work_label.pack(fill="x")
 
-        self.controls = tk.Frame(self.frame, background="#20242b")
+        self.controls = tk.Frame(self.frame)
+        _style(self.controls, self._theme, "frame")
         controls = self.controls
         controls.pack(fill="x", pady=(4, 0))
         controls.configure(height=36)
@@ -1779,7 +1814,8 @@ class CompanionWindow:
         )
         self.copy_log_button.pack(side="left", expand=True, fill="x")
 
-        self.context_log_frame = tk.Frame(self.frame, background="#20242b")
+        self.context_log_frame = tk.Frame(self.frame)
+        _style(self.context_log_frame, self._theme, "frame")
         self.context_log_frame.pack(fill="x", pady=(4, 0))
         self.context_log_scrollbar = tk.Scrollbar(
             self.context_log_frame,
@@ -1787,6 +1823,7 @@ class CompanionWindow:
             takefocus=False,
             name="context-log-scrollbar",
         )
+        _style(self.context_log_scrollbar, self._theme, "scrollbar")
         self.context_log_scrollbar.pack(side="right", fill="y")
         self.context_log = tk.Text(
             self.context_log_frame,
@@ -1797,11 +1834,13 @@ class CompanionWindow:
             name="context-log-text",
             yscrollcommand=self.context_log_scrollbar.set,
         )
+        _style(self.context_log, self._theme, "text_log")
         self.context_log.pack(side="left", fill="both", expand=True)
         self.context_log.configure(state="disabled")
         self.context_log_scrollbar.configure(command=self.context_log.yview)
 
         self.details = tk.Frame(self.frame)
+        _style(self.details, self._theme, "frame")
         self.status_text = tk.Text(
             self.details,
             height=6,
@@ -1809,9 +1848,11 @@ class CompanionWindow:
             wrap="word",
             name="status-text",
         )
+        _style(self.status_text, self._theme, "text_log")
         self.status_text.configure(state="disabled")
         self.status_text.pack(fill="x", pady=(4, 0))
         copy_row = tk.Frame(self.details)
+        _style(copy_row, self._theme, "frame")
         copy_row.pack(fill="x", pady=(4, 0))
         self.copy_context_button = tk.Button(
             copy_row,
@@ -1822,8 +1863,10 @@ class CompanionWindow:
         )
         self.copy_context_button.pack(side="left", expand=True, fill="x")
         hotkey_row = tk.Frame(self.details)
+        _style(hotkey_row, self._theme, "frame")
         hotkey_row.pack(fill="x")
         hotkey_label = tk.Label(hotkey_row, text="Hotkey:")
+        _style(hotkey_label, self._theme, "label")
         hotkey_label.pack(side="left")
         self.hotkey_var = tk.StringVar(value=hotkey)
         self.hotkey_entry = tk.Entry(
@@ -1833,6 +1876,7 @@ class CompanionWindow:
             name="hotkey-entry",
             takefocus=True,
         )
+        _style(self.hotkey_entry, self._theme, "entry")
         self.hotkey_entry.pack(side="left", padx=4)
         self.hotkey_entry.bind("<Return>", lambda _e: self._apply_hotkey())
         self.apply_button = tk.Button(
@@ -1850,6 +1894,7 @@ class CompanionWindow:
             justify="left",
             name="mini-keymap-label",
         )
+        _style(self.keymap_label, self._theme, "muted")
         self.keymap_label.pack(fill="x")
         self.manual = build_manual_panel(
             tk,
@@ -1859,9 +1904,11 @@ class CompanionWindow:
             self._on_manual_retry,
             self._on_manual_send,
             self._on_manual_switch,
+            self._theme,
         )
         self.manual["frame"].pack(fill="x", pady=(4, 0))
         extra = tk.Frame(self.details)
+        _style(extra, self._theme, "frame")
         extra.pack(fill="x", pady=(4, 0))
         self.reconcile_button = tk.Button(
             extra,
@@ -1927,7 +1974,7 @@ class CompanionWindow:
 
     def _install_button_feedback(self, buttons: tuple[object, ...]) -> None:
         for button in buttons:
-            _bind_button_feedback(button, self.root)
+            _bind_button_feedback(button, self.root, self._theme)
 
     def _drag_start(self, event: object) -> None:
         x = getattr(event, "x_root", 0)
@@ -2573,7 +2620,7 @@ class CompanionWindow:
         try:
             from . import upgrade as upgrade_mod
 
-            local_version = upgrade_mod.running_version()
+            local_version = upgrade_mod.describe_build()
         except Exception:
             local_version = ""
         try:
@@ -2624,7 +2671,7 @@ class CompanionWindow:
             )
         else:
             self.status_bar.configure(
-                foreground="#8b949e",
+                foreground=self._theme.muted_fg,
                 text=str(model.get("status_line", "")),
                 anchor="w",
             )
@@ -2980,10 +3027,12 @@ class RobotWindow:
         hotkey_adapter: HotkeyAdapter | None = None,
         hotkey: str = DEFAULT_HOTKEY,
         poll_interval_s: float = POLL_INTERVAL_S,
+        theme: str = "dark",
     ) -> None:
         import tkinter as tk
 
         self.root = root
+        self._theme = theme_mod.get_theme(theme)
         self.status_fn = status_fn
         self.on_pause = on_pause
         self.on_resume = on_resume
@@ -3007,21 +3056,19 @@ class RobotWindow:
 
         self.frame = tk.Frame(
             root,
-            background="#20242b",
             borderwidth=1,
             relief="solid",
             padx=10,
             pady=9,
         )
+        _style(self.frame, self._theme, "frame")
         self.frame.pack(fill="both", expand=True)
         self.state_label = tk.Label(
             self.frame,
             text="WATCHING",
             anchor="w",
-            background="#20242b",
-            foreground="#f3f4f6",
-            font=("TkDefaultFont", 10, "bold"),
         )
+        _style(self.state_label, self._theme, "header")
         self.state_label.pack(fill="x")
         self.identity_label = tk.Label(
             self.frame,
@@ -3029,9 +3076,8 @@ class RobotWindow:
             anchor="w",
             justify="left",
             wraplength=WIDGET_WIDTH - 20,
-            background="#20242b",
-            foreground="#c9d1d9",
         )
+        _style(self.identity_label, self._theme, "label")
         self.identity_label.pack(fill="x")
         self.event_label = tk.Label(
             self.frame,
@@ -3039,13 +3085,13 @@ class RobotWindow:
             anchor="w",
             justify="left",
             wraplength=WIDGET_WIDTH - 20,
-            background="#20242b",
-            foreground="#9aa4b2",
         )
+        _style(self.event_label, self._theme, "soft")
         self.event_label.pack(fill="x")
         self.expanded = False
         self.log_text = self._build_log_panel(tk)
-        controls = tk.Frame(self.frame, background="#20242b")
+        controls = tk.Frame(self.frame)
+        _style(controls, self._theme, "frame")
         controls.pack(fill="x", pady=(4, 0))
         self.pause_button = tk.Button(
             controls,
@@ -3074,6 +3120,12 @@ class RobotWindow:
             command=self._on_toggle,
         )
         self.toggle_button.pack(side="left", expand=True, fill="x")
+        for button in (
+            self.pause_button,
+            self.quit_button,
+            self.toggle_button,
+        ):
+            _bind_button_feedback(button, self.root, self._theme)
         if self.hotkey_adapter is not None:
             self.hotkey_adapter.register(self.hotkey, self._on_hotkey)
         self._refresh()
@@ -3090,9 +3142,8 @@ class RobotWindow:
                 height=8,
                 wrap="word",
                 takefocus=False,
-                background="#14171c",
-                foreground="#c9d1d9",
             )
+            _style(widget, self._theme, "text_log")
         except Exception:
             return None
         with contextlib.suppress(Exception):
@@ -3296,10 +3347,12 @@ class RobotHubWindow:
         on_empty: Callable[[], None] | None = None,
         adapter_factory: Callable[[], HotkeyAdapter] | None = None,
         keymap: dict | None = None,
+        theme: str = "dark",
     ) -> None:
         import tkinter as tk
 
         self._tk = tk
+        self._theme = theme_mod.get_theme(theme)
         self.root = root
         self.tabs = list(tabs)
         self.active = min(max(0, active), max(0, len(self.tabs) - 1))
@@ -3339,23 +3392,22 @@ class RobotHubWindow:
 
         self.frame = tk.Frame(
             root,
-            background="#20242b",
             borderwidth=1,
             relief="solid",
             padx=10,
             pady=9,
         )
+        _style(self.frame, self._theme, "frame")
         self.frame.pack(fill="both", expand=True)
-        self.titlebar = tk.Frame(self.frame, background="#20242b")
+        self.titlebar = tk.Frame(self.frame)
+        _style(self.titlebar, self._theme, "frame")
         self.titlebar.pack(fill="x")
         self.title_label = tk.Label(
             self.titlebar,
             text="Ariadex Robots",
             anchor="w",
-            background="#20242b",
-            foreground="#f3f4f6",
-            font=("TkDefaultFont", 10, "bold"),
         )
+        _style(self.title_label, self._theme, "header")
         self.title_label.pack(fill="x")
         for widget in (self.titlebar, self.title_label):
             widget.configure(cursor="hand2")
@@ -3365,20 +3417,19 @@ class RobotHubWindow:
         try:
             from . import upgrade as upgrade_mod
 
-            hub_version = upgrade_mod.running_version()
+            hub_version = upgrade_mod.describe_build()
         except Exception:
             hub_version = "unknown"
         self.hub_version_label = tk.Label(
             self.frame,
             text=f"v{hub_version}",
             anchor="w",
-            background="#20242b",
-            foreground="#8b949e",
-            font=("TkDefaultFont", 9),
             name="hub-version-label",
         )
+        _style(self.hub_version_label, self._theme, "small")
         self.hub_version_label.pack(fill="x")
-        self.tab_bar = tk.Frame(self.frame, background="#20242b")
+        self.tab_bar = tk.Frame(self.frame)
+        _style(self.tab_bar, self._theme, "frame")
         self.tab_bar.pack(fill="x")
         self.tab_buttons: list[object] = []
         self._rebuild_tab_bar()
@@ -3386,10 +3437,8 @@ class RobotHubWindow:
             self.frame,
             text="WATCHING",
             anchor="w",
-            background="#20242b",
-            foreground="#f3f4f6",
-            font=("TkDefaultFont", 10, "bold"),
         )
+        _style(self.state_label, self._theme, "header")
         self.state_label.pack(fill="x")
         self.identity_label = tk.Label(
             self.frame,
@@ -3397,9 +3446,8 @@ class RobotHubWindow:
             anchor="w",
             justify="left",
             wraplength=WIDGET_WIDTH - 20,
-            background="#20242b",
-            foreground="#c9d1d9",
         )
+        _style(self.identity_label, self._theme, "label")
         self.identity_label.pack(fill="x")
         self.session_label = tk.Label(
             self.frame,
@@ -3407,9 +3455,8 @@ class RobotHubWindow:
             anchor="w",
             justify="left",
             wraplength=WIDGET_WIDTH - 20,
-            background="#20242b",
-            foreground="#c9d1d9",
         )
+        _style(self.session_label, self._theme, "label")
         self.session_label.pack(fill="x")
         self.queue_label = tk.Label(
             self.frame,
@@ -3417,9 +3464,9 @@ class RobotHubWindow:
             anchor="w",
             justify="left",
             wraplength=WIDGET_WIDTH - 20,
-            background="#20242b",
-            foreground="#7db8f0",
         )
+        _style(self.queue_label, self._theme, "label")
+        self.queue_label.configure(foreground=self._theme.link_fg)
         self.queue_label.pack(fill="x")
         self.event_label = tk.Label(
             self.frame,
@@ -3427,9 +3474,8 @@ class RobotHubWindow:
             anchor="w",
             justify="left",
             wraplength=WIDGET_WIDTH - 20,
-            background="#20242b",
-            foreground="#9aa4b2",
         )
+        _style(self.event_label, self._theme, "soft")
         self.event_label.pack(fill="x")
         self.stats_label = tk.Label(
             self.frame,
@@ -3437,14 +3483,14 @@ class RobotHubWindow:
             anchor="w",
             justify="left",
             wraplength=WIDGET_WIDTH - 20,
-            background="#20242b",
-            foreground="#9aa4b2",
         )
+        _style(self.stats_label, self._theme, "soft")
         self.expanded = False
         self.log_text_frame, self.log_text, self.log_scrollbar = self._build_log_panel(
             tk
         )
-        controls = tk.Frame(self.frame, background="#20242b")
+        controls = tk.Frame(self.frame)
+        _style(controls, self._theme, "frame")
         controls.pack(fill="x", pady=(4, 0))
         self.pause_button = tk.Button(
             controls,
@@ -3509,28 +3555,28 @@ class RobotHubWindow:
             command=self._on_toggle_keymap,
         )
         self.keys_button.pack(side="left", expand=True, fill="x")
-        self.keymap_frame = tk.Frame(self.frame, background="#20242b")
+        self.keymap_frame = tk.Frame(self.frame)
+        _style(self.keymap_frame, self._theme, "frame")
         self.key_labels: dict = {}
         self.key_set_buttons: dict = {}
         for action in KEYMAP_ACTIONS:
-            row = tk.Frame(self.keymap_frame, background="#20242b")
+            row = tk.Frame(self.keymap_frame)
+            _style(row, self._theme, "frame")
             row.pack(fill="x")
             action_label = tk.Label(
                 row,
                 text=KEYMAP_LABELS[action],
                 anchor="w",
-                background="#20242b",
-                foreground="#9aa4b2",
             )
+            _style(action_label, self._theme, "soft")
             action_label.pack(side="left")
             key_label = tk.Label(
                 row,
                 text=self.keymap[action],
                 anchor="w",
-                background="#20242b",
-                foreground="#f3f4f6",
                 name=f"hub-key-{action}",
             )
+            _style(key_label, self._theme, "bright")
             key_label.pack(side="left", padx=4)
             set_button = tk.Button(
                 row,
@@ -3541,7 +3587,7 @@ class RobotHubWindow:
                 command=self._capture_fn(action),
             )
             set_button.pack(side="right")
-            _bind_button_feedback(set_button, self.root)
+            _bind_button_feedback(set_button, self.root, self._theme)
             self.key_labels[action] = key_label
             self.key_set_buttons[action] = set_button
         self.keymap_feedback = tk.Label(
@@ -3550,10 +3596,9 @@ class RobotHubWindow:
             anchor="w",
             justify="left",
             wraplength=WIDGET_WIDTH - 20,
-            background="#20242b",
-            foreground="#9aa4b2",
             name="hub-keymap-feedback",
         )
+        _style(self.keymap_feedback, self._theme, "soft")
         self.keymap_feedback.pack(fill="x")
         self.keymap_visible = False
         self.hub_manual = build_manual_panel(
@@ -3564,6 +3609,7 @@ class RobotHubWindow:
             self._on_hub_retry,
             self._on_hub_send,
             self._on_hub_switch,
+            self._theme,
         )
         self.hub_manual["frame"].pack(fill="x", pady=(4, 0))
         self._install_button_feedback(
@@ -3810,7 +3856,7 @@ class RobotHubWindow:
 
     def _install_button_feedback(self, buttons: tuple[object, ...]) -> None:
         for button in buttons:
-            _bind_button_feedback(button, self.root)
+            _bind_button_feedback(button, self.root, self._theme)
 
     def _select_fn(self, index: int) -> Callable[[], None]:
         def select() -> None:
@@ -3835,7 +3881,7 @@ class RobotHubWindow:
                 command=self._select_fn(index),
             )
             button.pack(side="left", expand=True, fill="x")
-            _bind_button_feedback(button, self.root)
+            _bind_button_feedback(button, self.root, self._theme)
             self.tab_buttons.append(button)
 
     def add_tab(self, tab: RobotHubTab) -> None:
@@ -3937,22 +3983,23 @@ class RobotHubWindow:
         try:
             frame_cls = getattr(tk, "Frame", None)
             frame = (frame_cls or text_cls)(self.frame)
+            _style(frame, self._theme, "frame")
             scrollbar = scrollbar_cls(
                 frame,
                 orient="vertical",
                 takefocus=False,
                 name="hub-log-scrollbar",
             )
+            _style(scrollbar, self._theme, "scrollbar")
             widget = text_cls(
                 frame,
                 height=8,
                 wrap="word",
                 takefocus=False,
-                background="#14171c",
-                foreground="#c9d1d9",
                 yscrollcommand=scrollbar.set,
                 name="hub-log-text",
             )
+            _style(widget, self._theme, "text_log")
         except Exception:
             return None, None, None
         with contextlib.suppress(Exception):
@@ -4282,7 +4329,24 @@ def run_robot_widget(
     return 0
 
 
-def run_robot_hub(tabs: list[RobotHubTab], *, poll_interval_s: float = 2.0) -> int:
+def _configured_theme(project_dir: Path | None) -> str:
+    """Theme name from project config; `dark` on any failure."""
+    if project_dir is None:
+        return "dark"
+    try:
+        from . import config as config_mod
+
+        return config_mod.load(project_dir).theme
+    except Exception:
+        return "dark"
+
+
+def run_robot_hub(
+    tabs: list[RobotHubTab],
+    *,
+    poll_interval_s: float = 2.0,
+    theme: str | None = None,
+) -> int:
     """Run one hub window around several watchers in worker threads.
 
     The desktop probe runs before any watcher thread starts, so an
@@ -4304,12 +4368,16 @@ def run_robot_hub(tabs: list[RobotHubTab], *, poll_interval_s: float = 2.0) -> i
     session_factory = lambda: adapter_for_session(info.session)  # noqa: E731
 
     root = tk.Tk()
+    if theme is None and tabs:
+        with contextlib.suppress(Exception):
+            theme = _configured_theme(Path(str(tabs[0].project)))
     window = RobotHubWindow(
         root,
         tabs,
         keymap=keymap,
         adapter_factory=session_factory,
         poll_interval_s=poll_interval_s,
+        theme=theme or "dark",
     )
     root.protocol("WM_DELETE_WINDOW", window._on_quit_all)
 
@@ -4346,6 +4414,7 @@ def run_companion(
     hotkey: str | None = None,
     editor: str | None = None,
     poll_interval_s: float = POLL_INTERVAL_S,
+    theme: str | None = None,
 ) -> int:
     """Launch the floating companion. Fail-closed on unsupported desktops.
 
@@ -4384,6 +4453,7 @@ def run_companion(
         editor=editor,
         poll_interval_s=poll_interval_s,
         nonblocking=True,
+        theme=theme or _configured_theme(project_dir),
     )
     with contextlib.suppress(Exception):
         root.mainloop()

@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 import urllib.request
+from collections.abc import Callable
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 
@@ -92,6 +93,55 @@ def running_version() -> str:
     from . import __version__ as version
 
     return version
+
+
+#: Bounded git probe timeout for build identity (never blocks startup).
+_GIT_TIMEOUT_S = 2
+
+
+def _git_output(args: list[str], cwd: Path | None = None) -> str | None:
+    """One bounded git probe; None on any failure (no git, no repo, timeout)."""
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed git argv, no shell
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            cwd=str(cwd) if cwd is not None else None,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return (proc.stdout or "").strip()
+
+
+def describe_build(
+    repo: Path | str | None = None,
+    _git: Callable[[list[str], Path | None], str | None] | None = None,
+) -> str:
+    """Build identity: `<version>+g<short-sha>[-dirty]`, fail-soft.
+
+    The version is the running package; the commit comes from a bounded
+    git probe of the source checkout (editable installs) or the current
+    directory. Any probe failure yields the bare version — identity
+    never raises, so `-V` and the widget label share this one helper.
+    """
+    version = running_version()
+    git = _git or _git_output
+    cwd = Path(repo) if repo is not None else None
+    try:
+        sha = git(["rev-parse", "--short", "HEAD"], cwd)
+    except Exception:
+        sha = None
+    if not sha:
+        return version
+    try:
+        dirty = git(["status", "--porcelain"], cwd)
+    except Exception:
+        dirty = None
+    suffix = "-dirty" if dirty else ""
+    return f"{version}+g{sha}{suffix}"
 
 
 def installed_distribution_version(
