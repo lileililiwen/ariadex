@@ -718,7 +718,8 @@ def _ask_init_answers(
     while True:
         permission_policy = _coerce_answer(
             read(
-                "Permission policy [prompt] (prompt/project-temp-auto/allowlist/deny): "
+                "Permission policy [prompt] "
+                "(prompt/project-temp-auto/allowlist/deny/auto): "
             ),
             defaults.permission_policy,
         )
@@ -728,6 +729,11 @@ def _ask_init_answers(
             f"error: invalid permission policy `{permission_policy}`; "
             f"choose one of {', '.join(config_mod.PERMISSION_POLICIES)}",
             file=sys.stderr,
+        )
+    if permission_policy == "auto":
+        print(
+            "warning: `auto` approves every parsed provider request at any "
+            "path; use version control as your safety net",
         )
     permission_temp_root = _coerce_answer(
         read(

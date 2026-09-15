@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: One explicit hands-off permission policy for absent operators;
+  parsed requests auto-approve, unparsed surfaces still wait, default
+  stays prompt.

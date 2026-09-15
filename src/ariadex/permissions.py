@@ -23,8 +23,10 @@ from pathlib import Path
 #: Configured `permission_policy` values. `prompt` (default) never sends
 #: automatic approval; `deny` additionally records every parsed request as
 #: denied; `project-temp-auto` approves only contained temp-root requests;
-#: `allowlist` approves only contained allowlist requests.
-PERMISSION_POLICIES = ("prompt", "project-temp-auto", "allowlist", "deny")
+#: `allowlist` approves only contained allowlist requests; `auto`
+#: (explicit opt-in) approves every parsed request with an enabled
+#: operation at any path, and still waits on unparsed surfaces.
+PERMISSION_POLICIES = ("prompt", "project-temp-auto", "allowlist", "deny", "auto")
 
 #: File operations the policy may approve. Anything else (execution,
 #: chmod/chown, sudo, shell operators) is never approved.
@@ -454,6 +456,21 @@ def evaluate(
             "deny",
             f"operation `{parsed.operation}` is not in permission_actions; "
             "automatic approval is refused; adjust the list or answer manually",
+        )
+    if policy == "auto":
+        # Hands-off opt-in: containment is the only gate skipped. Parsing,
+        # privileged-marker refusal, path resolution, and the operation
+        # allowlist above all still apply.
+        return PermissionDecision(
+            provider,
+            parsed.operation,
+            requested,
+            normalized,
+            policy,
+            "allow",
+            f"policy `auto`: approving parsed `{parsed.operation}` at any "
+            "path with the provider-owned keystroke",
+            approve_input=approve_input,
         )
     if _contained(resolved, roots):
         return PermissionDecision(

@@ -111,6 +111,11 @@ class PermissionConfigTest(unittest.TestCase):
         with self.assertRaises(config_mod.ConfigError):
             config_mod.validate({"permission_policy": "yes-to-everything"})
 
+    def test_auto_policy_accepted_explicitly(self) -> None:
+        cfg = config_mod.validate({"permission_policy": "auto"})
+        self.assertEqual(cfg.permission_policy, "auto")
+        self.assertEqual(config_mod.defaults().permission_policy, "prompt")
+
     def test_invalid_actions_rejected(self) -> None:
         with self.assertRaises(config_mod.ConfigError):
             config_mod.validate({"permission_actions": ["read", "execute"]})
@@ -320,6 +325,49 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(decision.result, "waiting")
         self.assertIn("/tmp", decision.reason)
         self.assertEqual(decision.approve_input, "")
+
+    def test_auto_policy_allows_any_parsed_path(self) -> None:
+        for target in ("/tmp/shared/out.txt", "/etc/app/config.txt"):
+            decision = self._evaluate(target, policy="auto", temp_root=None)
+            self.assertEqual(decision.result, "allow", target)
+            self.assertEqual(decision.approve_input, "y")
+
+    def test_auto_policy_still_waits_on_unparsed(self) -> None:
+        decision = permissions_mod.evaluate(
+            provider="opencode",
+            parsed=None,
+            raw_tail="approve this thing? [y/n]",
+            policy="auto",
+            temp_root=None,
+            allowlist=[],
+            allowed_actions=["read", "write", "create", "delete"],
+            approve_input="y",
+            project_dir=self.project,
+        )
+        self.assertEqual(decision.result, "waiting")
+        self.assertEqual(decision.approve_input, "")
+
+    def test_auto_policy_denies_privileged_markers(self) -> None:
+        decision = permissions_mod.evaluate(
+            provider="opencode",
+            parsed=None,
+            raw_tail="run `rm -rf /` with sudo? [y/n]",
+            policy="auto",
+            temp_root=None,
+            allowlist=[],
+            allowed_actions=["read", "write", "create", "delete"],
+            approve_input="y",
+            project_dir=self.project,
+        )
+        self.assertEqual(decision.result, "deny")
+
+    def test_auto_policy_denies_disabled_operation(self) -> None:
+        decision = self._evaluate(
+            str(self.temp_root / "a.txt"),
+            policy="auto",
+            allowed_actions=["read"],
+        )
+        self.assertEqual(decision.result, "deny")
 
     def test_allowlist_policy_allows_listed_entry(self) -> None:
         allowed = self.project / "docs"

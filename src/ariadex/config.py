@@ -35,8 +35,10 @@ SUPPORTED_TERMINAL_DRIVERS = ("tmux", "pty")
 #: never sends automatic approval; `project-temp-auto` approves only
 #: parsed file requests contained in the private project temp root;
 #: `allowlist` approves only parsed requests contained in an explicit
-#: allowlist entry; `deny` refuses every automatic approval.
-PERMISSION_POLICIES = ("prompt", "project-temp-auto", "allowlist", "deny")
+#: allowlist entry; `deny` refuses every automatic approval; `auto`
+#: (explicit opt-in) approves every parsed request with an enabled
+#: operation at any path, and still waits on unparsed surfaces.
+PERMISSION_POLICIES = ("prompt", "project-temp-auto", "allowlist", "deny", "auto")
 
 #: File operations a permission policy may approve. Execution, permission
 #: changes, and privilege escalation are never approved.
@@ -161,9 +163,11 @@ confirmation_prompt: __CONFIRMATION_PROMPT__
 # Provider permission policy for approval prompts: prompt (default, never
 # auto-approves), project-temp-auto (approves only parsed file requests
 # inside the private project temp root), allowlist (approves only parsed
-# requests inside an explicit allowlist entry), or deny (refuses every
-# automatic approval). Shared `/tmp` is never auto-approved. Unknown or
-# ambiguous requests always wait for explicit human action.
+# requests inside an explicit allowlist entry), deny (refuses every
+# automatic approval), or auto (explicit hands-off opt-in: approves every
+# parsed request with an enabled operation at any path). Shared `/tmp` is
+# never auto-approved except under `auto`. Unknown or ambiguous requests
+# always wait for explicit human action.
 permission_policy: prompt
 # Private project-scoped temporary root for unattended file operations.
 # Must stay project-relative; it is created owner-only (0700) on demand.
