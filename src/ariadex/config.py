@@ -92,6 +92,9 @@ class Config:
     #: Ordered model fallbacks for automatic model-switch recovery on
     #: quota/model errors. Empty preserves manual recovery.
     model_fallbacks: list = dataclasses.field(default_factory=list)
+    #: Operator-configured model list for the widget Manual panel
+    #: (`provider/model` strings). Empty disables the model row.
+    models: list = dataclasses.field(default_factory=list)
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -183,6 +186,10 @@ permission_allowlist: []
 # provider reports quota or model errors. Empty keeps manual recovery:
 # the watcher waits for a human to switch the model or credentials.
 model_fallbacks: []
+# Operator-configured model list for the widget Manual panel
+# (`provider/model` strings, e.g. opencode/gpt-5-codex). Empty disables
+# the model row; entries must be non-empty strings.
+models: []
 """
     return text.replace("__CONFIRMATION_PROMPT__", DEFAULT_CONFIRMATION_PROMPT)
 
@@ -445,6 +452,14 @@ def validate(raw: dict, source: str = "configuration") -> Config:
             f"invalid model_fallbacks in {source}: "
             "expected a list of non-empty model strings"
         )
+    models = get("models", base.models)
+    if not isinstance(models, list) or not all(
+        isinstance(item, str) and item.strip() for item in models
+    ):
+        raise ConfigError(
+            f"invalid models in {source}: "
+            "expected a list of non-empty `provider/model` strings"
+        )
     return Config(
         agent_provider=raw.get("agent_provider", base.agent_provider),
         terminal_driver=raw.get("terminal_driver", base.terminal_driver),
@@ -475,4 +490,5 @@ def validate(raw: dict, source: str = "configuration") -> Config:
         permission_actions=list(permission_actions),
         permission_allowlist=list(permission_allowlist),
         model_fallbacks=list(model_fallbacks),
+        models=list(models),
     )

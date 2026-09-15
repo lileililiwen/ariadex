@@ -51,6 +51,9 @@ class FakeTkWidget:
     def insert(self, index, text):
         self.text = text
 
+    def get(self, start=None, end=None):
+        return self.text
+
     def see(self, index):
         self.options["see"] = str(index)
 
@@ -63,6 +66,44 @@ class FakeTkWidget:
     def invoke(self):
         if self.command is not None:
             self.command()
+
+
+class FakeTkMenu(FakeTkWidget):
+    def __init__(self, master=None, **options):
+        super().__init__(None)
+        self.options = dict(options)
+        self.commands: list = []
+
+    def delete(self, start, end=None):
+        self.commands = []
+
+    def add_command(self, label=None, command=None):
+        self.commands.append((label, command))
+
+
+class FakeTkOptionMenu(FakeTkWidget):
+    def __init__(self, master=None, variable=None, *values, **options):
+        super().__init__(None)
+        self.options = dict(options)
+        self.variable = variable
+        self.values = list(values)
+        self.menu = FakeTkMenu()
+
+    def __getitem__(self, key):
+        if key == "menu":
+            return self.menu
+        raise KeyError(key)
+
+
+class FakeTkStringVar:
+    def __init__(self, value=""):
+        self._value = value
+
+    def get(self):
+        return self._value
+
+    def set(self, value):
+        self._value = value
 
 
 class FakeTkRoot(FakeTkWidget):
@@ -124,6 +165,8 @@ def install_fake_tk(test: unittest.TestCase):
     tk_mod.Button = FakeTkWidget  # type: ignore[attr-defined]
     tk_mod.Text = FakeTkWidget  # type: ignore[attr-defined]
     tk_mod.Scrollbar = FakeTkWidget  # type: ignore[attr-defined]
+    tk_mod.OptionMenu = FakeTkOptionMenu  # type: ignore[attr-defined]
+    tk_mod.StringVar = FakeTkStringVar  # type: ignore[attr-defined]
     saved = sys.modules.get("tkinter")
     sys.modules["tkinter"] = tk_mod
 

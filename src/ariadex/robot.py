@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -960,6 +961,13 @@ class RobotWatcher:
         self._events: list[dict] = []
         self._event_seq = 0
         self._recovery_logged = False
+        #: Serializes operator manual sends against the poll loop so a
+        #: retry/message/switch never interleaves with an automatic send.
+        self._manual_lock = threading.Lock()
+        #: Most recent full prompt text sent (bounded, in-memory only,
+        #: never durable); the retry source. Approval keystrokes and
+        #: control inputs never land here — only prompt sends record.
+        self._last_prompt: str | None = None
 
     def _record(self, category: str, message: str) -> dict:
         """Append one bounded, redacted activity event (informational only)."""
@@ -1120,6 +1128,152 @@ class RobotWatcher:
             next_action="re-run the watcher to resume supervision",
         )
         return "stopped: watcher exited; the provider session is untouched"
+
+    #: Bound for remembered prompt text (matches the IPC text bound).
+    LAST_PROMPT_MAX = 4000
+
+    def _remember_prompt(self, text: str) -> None:
+        """Keep the latest full prompt as the retry source (bounded)."""
+        with contextlib.suppress(Exception):
+            clipped = str(text or "")
+            self._last_prompt = clipped[: self.LAST_PROMPT_MAX] if clipped else None
+
+    def _configured_models(self) -> list[str]:
+        """Operator-configured model list; fail-closed to empty."""
+        from . import config as config_mod
+
+        try:
+            cfg = config_mod.load(self.project_dir)
+        except Exception:
+            return []
+        models = getattr(cfg, "models", [])
+        if not isinstance(models, list):
+            return []
+        return [m for m in models if isinstance(m, str) and m.strip()]
+
+    def _manual_paused_reason(self) -> str:
+        """Refusal reason when manual input must not move, else empty."""
+        if self._paused:
+            return "manual input refused: watcher is paused"
+        try:
+            paused_by_mode = (
+                self.mode_requested is not None and self.mode_requested() == "PAUSE"
+            )
+        except Exception:
+            paused_by_mode = False
+        if paused_by_mode:
+            return "manual input refused: daemon is paused"
+        return ""
+
+    def _draft_refusal(self) -> str:
+        """Refusal reason when the composer is unverifiable or holds a draft."""
+        try:
+            capture = self._capture()
+        except Exception as exc:
+            return f"manual input refused: cannot verify composer ({exc})"
+        try:
+            surface = self.adapter.input_surface(capture)
+        except Exception as exc:
+            return f"manual input refused: cannot classify composer ({exc})"
+        if surface is InputSurface.DRAFT:
+            return (
+                "manual input refused: composer holds a human draft; "
+                "send nothing over it"
+            )
+        return ""
+
+    def request_retry(self) -> str:
+        """Resend the most recent prompt verbatim, once. Never raises."""
+        with self._manual_lock:
+            if not self._last_prompt:
+                return "retry unavailable: nothing was ever sent"
+            refused = self._manual_paused_reason() or self._draft_refusal()
+            if refused:
+                self._record("manual", refused)
+                return refused
+            try:
+                self._send(self._last_prompt)
+            except Exception as exc:
+                note = f"retry failed: {exc}"
+                self._record("manual", note)
+                self._diag("manual", "retry failed", result="refused", message=note)
+                return note
+            self.prompts_sent += 1
+            self._fresh_exhaustions = 0
+            self.stable_polls = 0
+            self._record("manual", "retried the most recent prompt verbatim")
+            self._diag(
+                "manual",
+                "retried prompt",
+                result="sent",
+                message="resent the most recent prompt verbatim, once",
+                operation="manual-retry",
+                next_action="supervise the provider conversation",
+            )
+            return "retried: resent the most recent prompt verbatim"
+
+    def request_send(self, text: str) -> str:
+        """Send operator text once, with empty/draft/PAUSE refusals."""
+        with self._manual_lock:
+            clipped = str(text or "").strip()
+            if not clipped:
+                return "manual input refused: message text is empty"
+            refused = self._manual_paused_reason() or self._draft_refusal()
+            if refused:
+                self._record("manual", refused)
+                return refused
+            try:
+                self._send(clipped)
+            except Exception as exc:
+                note = f"manual send failed: {exc}"
+                self._record("manual", note)
+                self._diag("manual", "send failed", result="refused", message=note)
+                return note
+            self._remember_prompt(clipped)
+            self.prompts_sent += 1
+            self._fresh_exhaustions = 0
+            self.stable_polls = 0
+            self._record("manual", "sent operator message into the conversation")
+            self._diag(
+                "manual",
+                "sent operator message",
+                result="sent",
+                message="sent operator text into the conversation, once",
+                operation="manual-send",
+                next_action="supervise the provider conversation",
+            )
+            return "sent: operator message delivered"
+
+    def request_switch_model(self, target: str) -> str:
+        """Restart the provider session under a configured model."""
+        with self._manual_lock:
+            name = str(target or "").strip()
+            if not name:
+                return "model switch refused: no model named"
+            models = self._configured_models()
+            if name not in models:
+                return (
+                    f"model switch refused: `{name}` is not in the "
+                    "configured `models` list"
+                )
+            try:
+                self.adapter.switch_model(name)
+            except Exception as exc:
+                note = f"model switch failed: {exc}"
+                self._record("manual", note)
+                self._diag("manual", "switch failed", result="refused", message=note)
+                return note
+            self.stable_polls = 0
+            self._record("manual", f"switched model to `{name}`; session restarted")
+            self._diag(
+                "manual",
+                "switched model",
+                result="switched",
+                message=f"provider session restarted under `{name}`",
+                operation="manual-switch-model",
+                next_action="supervise the provider conversation",
+            )
+            return f"switched: provider session restarted under `{name}`"
 
     @property
     def paused(self) -> bool:
@@ -1335,7 +1489,7 @@ class RobotWatcher:
         return True
 
     def status_view(self) -> dict:
-        """Widget-visible robot state (pure data, no I/O)."""
+        """Widget-visible robot state (config read is fail-closed)."""
         visible = self._events[-MAX_ACTIVITY_VIEW:]
         latest = dict(visible[-1]) if visible else None
         return {
@@ -1351,6 +1505,9 @@ class RobotWatcher:
             "prompts_sent": self.prompts_sent,
             "confirmations_sent": self.confirmations_sent,
             "permissions_granted": self.permissions_granted,
+            "retry_available": self._last_prompt is not None,
+            "models": self._configured_models(),
+            "model_override": getattr(self.adapter, "model_override", None),
         }
 
     def queue_summary(self) -> dict:
@@ -1742,6 +1899,7 @@ class RobotWatcher:
         if not self._record_before_prompt("first", target, queue):
             return self.phase
         self._send(self.config.initial_prompt)
+        self._remember_prompt(self.config.initial_prompt)
         self.initial_sent = True
         self.prompts_sent += 1
         self._fresh_exhaustions = 0
@@ -2006,6 +2164,7 @@ class RobotWatcher:
             f"{self.last_fresh_ready_attempts} attempt(s)",
         )
         self._send(self.config.continuation_prompt)
+        self._remember_prompt(self.config.continuation_prompt)
         self.prompts_sent += 1
         self._fresh_exhaustions = 0
         self.stable_polls = 0
@@ -2060,6 +2219,7 @@ class RobotWatcher:
         question = readiness_ask_text(target, open_tasks)
         baseline = self._capture()
         self._send(question)
+        self._remember_prompt(question)
         self.prompts_sent += 1
         self._record("prompt", f"sent readiness ask for `{target}`; awaiting reply")
         self._diag(
@@ -2296,6 +2456,7 @@ class RobotWatcher:
             f"{self.last_fresh_ready_attempts} attempt(s)",
         )
         self._send(self.config.confirmation_prompt)
+        self._remember_prompt(self.config.confirmation_prompt)
         self.prompts_sent += 1
         self._fresh_exhaustions = 0
         self.confirmations_sent += 1

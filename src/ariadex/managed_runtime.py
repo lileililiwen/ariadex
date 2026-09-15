@@ -133,6 +133,10 @@ class ManagedRuntime:
                 daemon=True,
             )
             self._watcher_thread.start()
+            with contextlib.suppress(Exception):
+                from . import daemon as daemon_mod
+
+                daemon_mod.register_watcher(self.project_dir, self.watcher)
             write_generation(
                 self.project_dir,
                 ManagedGeneration(
@@ -145,6 +149,10 @@ class ManagedRuntime:
                 ),
             )
         except BaseException:
+            with contextlib.suppress(Exception):
+                from . import daemon as daemon_mod
+
+                daemon_mod.unregister_watcher(self.project_dir)
             with contextlib.suppress(Exception):
                 adapter.terminate()
             self.adapter = None
@@ -197,6 +205,10 @@ class ManagedRuntime:
 
     def stop(self, reason: str) -> None:
         """Request watcher stop, then terminate provider and widget once."""
+        with contextlib.suppress(Exception):
+            from . import daemon as daemon_mod
+
+            daemon_mod.unregister_watcher(self.project_dir)
         if not self.started:
             return
         self.last_stop_reason = reason

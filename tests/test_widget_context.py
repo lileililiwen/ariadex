@@ -187,6 +187,9 @@ class FakeTkText(FakeTkWidget):
     def insert(self, index, text):
         self.content += text
 
+    def get(self, start=None, end=None):
+        return self.content
+
     def see(self, index):
         self.see_calls.append(str(index))
 
@@ -208,6 +211,31 @@ class FakeTkScrollbar(FakeTkWidget):
 
     def set(self, first, last):
         self.set_calls.append((first, last))
+
+
+class FakeTkMenu(FakeTkWidget):
+    def __init__(self, master=None, **options):
+        super().__init__(master, **options)
+        self.commands: list[tuple] = []
+
+    def delete(self, start, end=None):
+        self.commands = []
+
+    def add_command(self, label=None, command=None):
+        self.commands.append((label, command))
+
+
+class FakeTkOptionMenu(FakeTkWidget):
+    def __init__(self, master=None, variable=None, *values, **options):
+        super().__init__(master, **options)
+        self.variable = variable
+        self.values = list(values)
+        self.menu = FakeTkMenu(master)
+
+    def __getitem__(self, key):
+        if key == "menu":
+            return self.menu
+        raise KeyError(key)
 
 
 class FakeTkStringVar:
@@ -286,6 +314,7 @@ class FakeTkModule:
     Button = FakeTkWidget
     Text = FakeTkText
     Scrollbar = FakeTkScrollbar
+    OptionMenu = FakeTkOptionMenu
     Entry = FakeTkWidget
     StringVar = FakeTkStringVar
     TclError = Exception
@@ -302,11 +331,13 @@ class FakeClient(companion.CompanionClient):
         self.project_dir = Path(".")
         self.timeout_s = 1.0
         self.calls = []
+        self.payloads = []
         self.state = state if state is not None else live_state()
         self.failure = None
 
-    def _call(self, request_type):
+    def _call(self, request_type, payload=None):
         self.calls.append(request_type)
+        self.payloads.append(payload)
         if self.failure is not None:
             raise companion.CompanionError(self.failure)
         return dict(self.state)
@@ -335,6 +366,7 @@ def install_fake_tk():
         "Button",
         "Text",
         "Scrollbar",
+        "OptionMenu",
         "Entry",
         "StringVar",
         "TclError",

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Labeled manual actions panel (retry, model select, message send)
+  with typed IPC and refusal guards, organized as rows not tabs.

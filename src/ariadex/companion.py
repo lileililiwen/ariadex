@@ -43,6 +43,9 @@ WIDGET_COLLAPSED_HEIGHT = 344
 WIDGET_EXPANDED_HEIGHT = 364
 # Includes both read-only text areas and every expanded action row.
 WIDGET_EXPANDED_WINDOW_HEIGHT = 694
+#: Measured height of the Manual group (Retry, Model, Message rows plus
+#: the feedback line); the full-mode window grows by exactly this.
+MANUAL_GROUP_HEIGHT = 190
 # Strip: a status-bar-only row including the state dot and a compact
 # "Ariadex — STATE  <project — n active specs>" line. The status bar is
 # the drag handle in this mode and the toggle button is hidden, so the
@@ -702,13 +705,21 @@ class CompanionClient:
         self.project_dir = project_dir
         self.timeout_s = timeout_s
 
-    def _call(self, request_type: str) -> dict:
+    def _call(self, request_type: str, payload: dict | None = None) -> dict:
         from . import daemon as daemon_mod
 
         try:
-            response = daemon_mod.send_request(
-                self.project_dir, request_type, timeout_s=self.timeout_s
-            )
+            if payload is None:
+                response = daemon_mod.send_request(
+                    self.project_dir, request_type, timeout_s=self.timeout_s
+                )
+            else:
+                response = daemon_mod.send_request(
+                    self.project_dir,
+                    request_type,
+                    payload=payload,
+                    timeout_s=self.timeout_s,
+                )
         except daemon_mod.DaemonError as exc:
             raise CompanionError(
                 f"daemon unreachable for `{request_type}`: {exc}"
@@ -745,6 +756,18 @@ class CompanionClient:
     def reconcile(self) -> dict:
         """Re-check durable reconciliation via a bounded wake request."""
         return self._call("wake")
+
+    def retry(self) -> dict:
+        """Resend the most recent prompt verbatim, once."""
+        return self._call("retry")
+
+    def send_message(self, text: str) -> dict:
+        """Send operator text once; refusals surface as CompanionError."""
+        return self._call("send_message", {"text": text})
+
+    def switch_model(self, model: str) -> dict:
+        """Restart the provider session under a configured model."""
+        return self._call("switch_model", {"model": model})
 
 
 INDICATORS = (
@@ -841,6 +864,15 @@ def build_view_model(
         "stop": alive,
         "reconcile": alive,
     }
+    manual = state.get("manual") if isinstance(state, dict) else None
+    manual = manual if isinstance(manual, dict) else {}
+    manual_models = manual.get("models")
+    manual_models = (
+        [str(m) for m in manual_models] if isinstance(manual_models, list) else []
+    )
+    actions["retry"] = alive and bool(manual.get("retry_available"))
+    actions["send"] = alive
+    actions["switch"] = alive and bool(manual_models)
     context_summary = ""
     context_latest = ""
     managed_context: dict | None = None
@@ -873,6 +905,12 @@ def build_view_model(
         "alive": alive,
         "work_label": work_label,
         "actions": actions,
+        "manual_retry_available": bool(manual.get("retry_available")),
+        "manual_models": manual_models,
+        "manual_model_override": manual.get("model_override"),
+        "manual_result": (
+            state.get("manual_result") if isinstance(state, dict) else None
+        ),
         "reconciliation_pending": indicator == "paused",
         "failure": None,
         "context_summary": context_summary,
@@ -894,6 +932,132 @@ def failure_view_model(reason: str) -> dict:
     model["work_label"] = "(daemon unreachable)"
     model["failure"] = reason
     return model
+
+
+def build_manual_panel(
+    tk,
+    parent: object,
+    root: object,
+    name_prefix: str,
+    on_retry,
+    on_send,
+    on_switch,
+) -> dict:
+    """Create the labeled Manual group (Retry/Model/Message rows).
+
+    Rows, never tabs: project tabs already own that pattern. Returns a
+    refs dict; `refresh_manual_panel` drives states and options.
+    """
+    frame = tk.Frame(parent)
+    header = tk.Label(frame, text="Manual", name=f"{name_prefix}-manual-header")
+    header.pack(anchor="w")
+    retry_row = tk.Frame(frame)
+    retry_row.pack(fill="x")
+    retry_label = tk.Label(retry_row, text="Retry")
+    retry_label.pack(side="left")
+    retry_button = tk.Button(
+        retry_row,
+        text="Retry last prompt",
+        name=f"{name_prefix}-manual-retry-button",
+        takefocus=True,
+        command=on_retry,
+    )
+    retry_button.pack(side="left", expand=True, fill="x")
+    model_row = tk.Frame(frame)
+    model_row.pack(fill="x")
+    model_label = tk.Label(model_row, text="Model")
+    model_label.pack(side="left")
+    model_var = tk.StringVar(value="")
+    model_option = tk.OptionMenu(model_row, model_var, "")
+    model_option.pack(side="left", padx=4)
+    model_apply = tk.Button(
+        model_row,
+        text="Apply",
+        name=f"{name_prefix}-manual-model-apply",
+        takefocus=True,
+        command=on_switch,
+    )
+    model_apply.pack(side="left")
+    model_hint = tk.Label(
+        model_row, text="no models configured", name=f"{name_prefix}-manual-model-hint"
+    )
+    message_row = tk.Frame(frame)
+    message_row.pack(fill="x")
+    message_label = tk.Label(message_row, text="Message")
+    message_label.pack(side="left")
+    message_text = tk.Text(
+        message_row,
+        height=3,
+        width=34,
+        wrap="word",
+        name=f"{name_prefix}-manual-message-text",
+    )
+    message_text.pack(side="left", expand=True, fill="x", padx=4)
+    send_button = tk.Button(
+        message_row,
+        text="Send",
+        name=f"{name_prefix}-manual-send-button",
+        takefocus=True,
+        command=on_send,
+    )
+    send_button.pack(side="left")
+    feedback = tk.Label(
+        frame,
+        text="",
+        anchor="w",
+        justify="left",
+        name=f"{name_prefix}-manual-feedback",
+    )
+    feedback.pack(fill="x")
+    _bind_button_feedback(retry_button, root)
+    _bind_button_feedback(send_button, root)
+    return {
+        "frame": frame,
+        "retry_button": retry_button,
+        "model_var": model_var,
+        "model_option": model_option,
+        "model_apply": model_apply,
+        "model_hint": model_hint,
+        "message_text": message_text,
+        "send_button": send_button,
+        "feedback": feedback,
+        "models_seen": [],
+    }
+
+
+def refresh_manual_panel(
+    refs: dict,
+    *,
+    retry_enabled: bool,
+    switch_enabled: bool,
+    send_enabled: bool,
+    models: list,
+    result: object,
+) -> None:
+    """Drive Manual states, model options, and the feedback line."""
+    with contextlib.suppress(Exception):
+        refs["retry_button"].configure(state="normal" if retry_enabled else "disabled")
+        refs["model_apply"].configure(state="normal" if switch_enabled else "disabled")
+        refs["send_button"].configure(state="normal" if send_enabled else "disabled")
+    with contextlib.suppress(Exception):
+        if list(models) != list(refs.get("models_seen", [])):
+            refs["models_seen"] = list(models)
+            menu = refs["model_option"]["menu"]
+            menu.delete(0, "end")
+            for name in models:
+                menu.add_command(
+                    label=name,
+                    command=lambda n=name: refs["model_var"].set(n),
+                )
+            current = refs["model_var"].get()
+            if current not in models:
+                refs["model_var"].set(models[0] if models else "")
+        if models:
+            refs["model_hint"].pack_forget()
+        else:
+            refs["model_hint"].pack(side="left")
+    with contextlib.suppress(Exception):
+        refs["feedback"].configure(text=str(result or ""))
 
 
 def format_view_text(model: dict) -> str:
@@ -1687,6 +1851,16 @@ class CompanionWindow:
             name="mini-keymap-label",
         )
         self.keymap_label.pack(fill="x")
+        self.manual = build_manual_panel(
+            tk,
+            self.details,
+            self.root,
+            "mini",
+            self._on_manual_retry,
+            self._on_manual_send,
+            self._on_manual_switch,
+        )
+        self.manual["frame"].pack(fill="x", pady=(4, 0))
         extra = tk.Frame(self.details)
         extra.pack(fill="x", pady=(4, 0))
         self.reconcile_button = tk.Button(
@@ -1765,7 +1939,7 @@ class CompanionWindow:
 
     def _active_window_height(self) -> int:
         if self.display_mode == "full":
-            return WIDGET_EXPANDED_WINDOW_HEIGHT
+            return WIDGET_EXPANDED_WINDOW_HEIGHT + MANUAL_GROUP_HEIGHT
         if self.display_mode == "strip":
             return WIDGET_STRIP_HEIGHT
         return WIDGET_COLLAPSED_HEIGHT
@@ -1886,16 +2060,25 @@ class CompanionWindow:
             self._on_play()
 
     # -- actions (IPC only) --------------------------------------------
-    def _run_client(self, action: str) -> None:
+    def _call_action(self, action: str, payload: dict | None = None) -> dict:
+        """Dispatch one widget action to the typed client method."""
+        if action == "pause":
+            return self.client.pause()
+        if action == "resume":
+            return self.client.resume()
+        if action == "stop":
+            return self.client.stop()
+        if action == "retry":
+            return self.client.retry()
+        if action == "send":
+            return self.client.send_message(str((payload or {}).get("text", "")))
+        if action == "switch":
+            return self.client.switch_model(str((payload or {}).get("model", "")))
+        return self.client.reconcile()
+
+    def _run_client(self, action: str, payload: dict | None = None) -> None:
         try:
-            if action == "pause":
-                state = self.client.pause()
-            elif action == "resume":
-                state = self.client.resume()
-            elif action == "stop":
-                state = self.client.stop()
-            else:
-                state = self.client.reconcile()
+            state = self._call_action(action, payload)
         except CompanionError as exc:
             self.model = failure_view_model(str(exc))
         else:
@@ -1904,7 +2087,10 @@ class CompanionWindow:
         self._render()
 
     def _run_client_async(
-        self, action: str, on_success: Callable[[], None] | None = None
+        self,
+        action: str,
+        payload: dict | None = None,
+        on_success: Callable[[], None] | None = None,
     ) -> None:
         """Run daemon IPC off the Tk event thread and apply its result on Tk."""
         if self._action_busy:
@@ -1917,14 +2103,7 @@ class CompanionWindow:
 
         def worker() -> None:
             try:
-                if action == "pause":
-                    state = self.client.pause()
-                elif action == "resume":
-                    state = self.client.resume()
-                elif action == "stop":
-                    state = self.client.stop()
-                else:
-                    state = self.client.reconcile()
+                state = self._call_action(action, payload)
                 error: Exception | None = None
             except Exception as exc:  # delivered as a bounded UI failure
                 state = None
@@ -2028,6 +2207,57 @@ class CompanionWindow:
             self._run_client_async("reconcile")
         else:
             self._run_client("reconcile")
+
+    def _on_manual_retry(self) -> None:
+        """Resend the most recent prompt verbatim, once."""
+        if self._nonblocking:
+            self._run_client_async("retry")
+        else:
+            self._run_client("retry")
+
+    def _manual_message_text(self) -> str:
+        get = getattr(self.manual.get("message_text"), "get", None)
+        if not callable(get):
+            return ""
+        try:
+            return str(get("1.0", "end") or "").strip()
+        except Exception:
+            return ""
+
+    def _on_manual_send(self) -> None:
+        """Send the message box text once; empty text is refused locally."""
+        text = self._manual_message_text()
+        if not text:
+            self._notice("message refused: text is empty")
+            return
+        payload = {"text": text}
+        if self._nonblocking:
+            self._run_client_async(
+                "send", payload, on_success=self._clear_manual_message
+            )
+        else:
+            self._run_client("send", payload)
+            if not self.model.get("failure"):
+                self._clear_manual_message()
+
+    def _clear_manual_message(self) -> None:
+        delete = getattr(self.manual.get("message_text"), "delete", None)
+        if callable(delete):
+            with contextlib.suppress(Exception):
+                delete("1.0", "end")
+
+    def _on_manual_switch(self) -> None:
+        """Restart the provider session under the selected model."""
+        get = getattr(self.manual.get("model_var"), "get", None)
+        target = str(get() or "").strip() if callable(get) else ""
+        if not target:
+            self._notice("model switch refused: no model selected")
+            return
+        payload = {"model": target}
+        if self._nonblocking:
+            self._run_client_async("switch", payload)
+        else:
+            self._run_client("switch", payload)
 
     def _on_editor(self) -> None:
         try:
@@ -2425,6 +2655,15 @@ class CompanionWindow:
                     f"quit all {keys['quit_all']}"
                 )
             )
+        with contextlib.suppress(Exception):
+            refresh_manual_panel(
+                self.manual,
+                retry_enabled=bool(actions.get("retry")),
+                switch_enabled=bool(actions.get("switch")),
+                send_enabled=bool(actions.get("send")),
+                models=model.get("manual_models") or [],
+                result=model.get("manual_result"),
+            )
         self._render_context_log(model)
 
 
@@ -2510,6 +2749,8 @@ def build_robot_view_model(status: dict) -> dict:
     run_stats = (
         f"prompts {prompts} · confirmations {confirmations} · approvals {approvals}"
     )
+    raw_models = status.get("models")
+    tab_models = [str(m) for m in raw_models] if isinstance(raw_models, list) else []
     return {
         "indicator": indicator,
         "indicator_text": indicator.upper(),
@@ -2522,6 +2763,9 @@ def build_robot_view_model(status: dict) -> dict:
         "latest_text": latest_text,
         "activity": activity,
         "expanded": bool(status.get("expanded", False)),
+        "retry_available": bool(status.get("retry_available")),
+        "models": tab_models,
+        "model_override": status.get("model_override"),
         "actions": {
             "pause": indicator in ("watching", "working", "waiting"),
             "resume": indicator == "paused",
@@ -3312,6 +3556,16 @@ class RobotHubWindow:
         )
         self.keymap_feedback.pack(fill="x")
         self.keymap_visible = False
+        self.hub_manual = build_manual_panel(
+            tk,
+            self.frame,
+            self.root,
+            "hub",
+            self._on_hub_retry,
+            self._on_hub_send,
+            self._on_hub_switch,
+        )
+        self.hub_manual["frame"].pack(fill="x", pady=(4, 0))
         self._install_button_feedback(
             (
                 self.pause_button,
@@ -3385,6 +3639,85 @@ class RobotHubWindow:
         """Marshal the quit-all grab onto Tk's UI thread."""
         with contextlib.suppress(Exception):
             self.root.after(0, self._on_quit_all)  # type: ignore[attr-defined]
+
+    def _hub_manual_project(self) -> Path | None:
+        """Project directory of the visible tab for manual actions."""
+        if not self.tabs:
+            return None
+        try:
+            return Path(self.tabs[self.active].project)
+        except Exception:
+            return None
+
+    def _hub_manual_feedback(self, text: str) -> None:
+        with contextlib.suppress(Exception):
+            self.hub_manual["feedback"].configure(text=text)
+
+    def _hub_manual_call(
+        self, request_type: str, payload: dict | None, verb: str
+    ) -> None:
+        """Run one manual action against the visible tab's daemon."""
+        from . import daemon as daemon_mod
+
+        project = self._hub_manual_project()
+        if project is None:
+            self._hub_manual_feedback(f"{verb} refused: no active tab")
+            return
+        try:
+            if payload is None:
+                response = daemon_mod.send_request(project, request_type)
+            else:
+                response = daemon_mod.send_request(
+                    project, request_type, payload=payload
+                )
+        except daemon_mod.DaemonError as exc:
+            self._hub_manual_feedback(f"{verb} failed: {exc}")
+            return
+        except Exception as exc:
+            self._hub_manual_feedback(f"{verb} failed: {exc}")
+            return
+        if not isinstance(response, dict) or not response.get("ok"):
+            error = ""
+            if isinstance(response, dict):
+                error = str(response.get("error") or "unknown")
+            self._hub_manual_feedback(f"{verb} refused: {error}")
+            return
+        state = response.get("state")
+        note = ""
+        if isinstance(state, dict):
+            note = str(state.get("manual_result") or "")
+        self._hub_manual_feedback(note or f"{verb} accepted")
+        if request_type == "send_message":
+            delete = getattr(self.hub_manual.get("message_text"), "delete", None)
+            if callable(delete):
+                with contextlib.suppress(Exception):
+                    delete("1.0", "end")
+        self._refresh()
+
+    def _on_hub_retry(self) -> None:
+        """Retry the visible tab's most recent prompt, once."""
+        self._hub_manual_call("retry", None, "retry")
+
+    def _on_hub_send(self) -> None:
+        """Send the hub message box text into the visible tab, once."""
+        get = getattr(self.hub_manual.get("message_text"), "get", None)
+        text = ""
+        if callable(get):
+            with contextlib.suppress(Exception):
+                text = str(get("1.0", "end") or "").strip()
+        if not text:
+            self._hub_manual_feedback("message refused: text is empty")
+            return
+        self._hub_manual_call("send_message", {"text": text}, "send")
+
+    def _on_hub_switch(self) -> None:
+        """Restart the visible tab's provider session under a model."""
+        get = getattr(self.hub_manual.get("model_var"), "get", None)
+        target = str(get() or "").strip() if callable(get) else ""
+        if not target:
+            self._hub_manual_feedback("model switch refused: no model selected")
+            return
+        self._hub_manual_call("switch_model", {"model": target}, "switch")
 
     def _on_toggle_key(self) -> None:
         """Marshal the toggle-log grab onto Tk's UI thread."""
@@ -3843,6 +4176,16 @@ class RobotHubWindow:
         self.quit_button.configure(
             state="normal" if actions.get("quit") else "disabled"
         )
+        with contextlib.suppress(Exception):
+            tab_models = model.get("models")
+            refresh_manual_panel(
+                self.hub_manual,
+                retry_enabled=bool(model.get("retry_available")),
+                switch_enabled=bool(tab_models),
+                send_enabled=True,
+                models=list(tab_models) if isinstance(tab_models, list) else [],
+                result=None,
+            )
 
     def _render_log(self, model: dict) -> None:
         """Write the read-only log; never raises into the poll loop.

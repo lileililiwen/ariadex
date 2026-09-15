@@ -26,7 +26,8 @@ def run_cli(root: Path, *argv: str) -> tuple[int, str, str]:
 def scripted(*answers: str):
     """read_answer stub replaying wizard answers in order."""
     it = iter(answers)
-    return lambda prompt: next(it)
+    # Unspecified trailing answers read as blank (wizard defaults).
+    return lambda prompt: next(it, "")
 
 
 class FirstRunWizardTest(unittest.TestCase):
@@ -108,7 +109,7 @@ class FirstRunWizardTest(unittest.TestCase):
         self.assertEqual(cfg.permission_allowlist, ["/tmp"])
 
     def test_invalid_permission_policy_reprompts_without_partial_init(self):
-        answers = iter(["opencode", "", "", "", "unsafe", "prompt", "", "", ""])
+        answers = iter(["opencode", "", "", "", "unsafe", "prompt", "", "", "", ""])
         with redirect_stderr(io.StringIO()):
             code = cli.cmd_init(self.root, read_answer=lambda prompt: next(answers))
         self.assertEqual(code, 0)
@@ -157,7 +158,7 @@ class FirstRunWizardTest(unittest.TestCase):
             mock.patch.object(sys, "stdin", fake_stdin),
             mock.patch(
                 "builtins.input",
-                side_effect=["codex", "", "", "", "", "", "", ""],
+                side_effect=["codex", "", "", "", "", "", "", "", ""],
             ),
         ):
             self.assertEqual(cli.cmd_init(self.root), 0)

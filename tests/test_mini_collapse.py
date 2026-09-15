@@ -59,7 +59,7 @@ class DisplayModeTest(unittest.TestCase):
         self.assertTrue(self.window.expanded)
         self.assertEqual(
             self.window._active_window_height(),
-            companion.WIDGET_EXPANDED_WINDOW_HEIGHT,
+            companion.WIDGET_EXPANDED_WINDOW_HEIGHT + companion.MANUAL_GROUP_HEIGHT,
         )
         self.window._toggle_expanded()
         self.assertEqual(self.window.display_mode, "collapsed")

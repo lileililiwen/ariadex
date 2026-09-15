@@ -34,11 +34,24 @@ MANAGED_RUNTIME_REL_PATH = Path(".ariadex") / "managed-runtime"
 MANAGED_CONFIG_REL_PATH = Path(".ariadex") / "managed-runtime.json"
 DAEMON_VERSION = 1
 
-REQUEST_TYPES = ("status", "pause", "resume", "stop", "wake")
+REQUEST_TYPES = (
+    "status",
+    "pause",
+    "resume",
+    "stop",
+    "wake",
+    "retry",
+    "send_message",
+    "switch_model",
+)
 DAEMON_STATUSES = ("running", "stopping", "stopped")
 
 #: Upper bound for one newline-delimited JSON message.
 MAX_MESSAGE_BYTES = 65536
+
+#: Bounds for manual-action payloads (operator text over local IPC).
+MANUAL_TEXT_MAX = 4000
+MODEL_NAME_MAX = 256
 
 #: Default bounded wait for a control round-trip and for daemon readiness.
 DEFAULT_IPC_TIMEOUT_S = 5.0
@@ -49,6 +62,39 @@ POLL_INTERVAL_S = 1.0
 
 class DaemonError(Exception):
     """A daemon lifecycle or local IPC failure (fail-closed, no input sent)."""
+
+
+#: Live watchers by resolved project directory, so typed manual-action
+#: requests can reach the in-process supervisor. The socket thread and
+#: the watcher thread meet here; watcher methods serialize sends on
+#: their own lock. Entries are removed when the runtime stops.
+_WATCHERS: dict[str, object] = {}
+_WATCHERS_LOCK = threading.Lock()
+
+
+def _watcher_key(project_dir: Path) -> str:
+    try:
+        return str(Path(project_dir).resolve())
+    except OSError:
+        return str(project_dir)
+
+
+def register_watcher(project_dir: Path, watcher: object) -> None:
+    """Publish one live watcher for manual-action routing (never raises)."""
+    with contextlib.suppress(Exception), _WATCHERS_LOCK:
+        _WATCHERS[_watcher_key(project_dir)] = watcher
+
+
+def unregister_watcher(project_dir: Path) -> None:
+    """Withdraw one watcher from manual-action routing (never raises)."""
+    with contextlib.suppress(Exception), _WATCHERS_LOCK:
+        _WATCHERS.pop(_watcher_key(project_dir), None)
+
+
+def live_watcher(project_dir: Path) -> object | None:
+    """Return the registered watcher for one project, if any."""
+    with _WATCHERS_LOCK:
+        return _WATCHERS.get(_watcher_key(project_dir))
 
 
 @dataclasses.dataclass
@@ -162,18 +208,60 @@ def daemon_alive(record: DaemonRecord | None) -> bool:
     return concurrency_mod.pid_alive(record.pid)
 
 
-def build_request(request_type: str) -> dict:
+def validate_request_payload(request_type: str, payload: object) -> dict:
+    """Validate one request payload; fail closed with DaemonError.
+
+    Payloads stay small, string-only, and type-shaped: `send_message`
+    carries `text`, `switch_model` carries `model`, every other known
+    type carries nothing. Unknown or oversized fields are refused,
+    never truncated or forwarded.
+    """
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise DaemonError("malformed request: payload object required")
+    for key, value in payload.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise DaemonError("malformed request: payload must map strings")
+    if request_type == "send_message":
+        text = payload.get("text", "")
+        if set(payload) != {"text"} or not text.strip():
+            raise DaemonError("malformed request: `send_message` needs `text`")
+        if len(text) > MANUAL_TEXT_MAX:
+            raise DaemonError(
+                f"malformed request: text above the {MANUAL_TEXT_MAX}-char bound"
+            )
+        return {"text": text}
+    if request_type == "switch_model":
+        model = payload.get("model", "")
+        if set(payload) != {"model"} or not model.strip():
+            raise DaemonError("malformed request: `switch_model` needs `model`")
+        if len(model) > MODEL_NAME_MAX:
+            raise DaemonError(
+                f"malformed request: model above the {MODEL_NAME_MAX}-char bound"
+            )
+        return {"model": model.strip()}
+    if payload:
+        raise DaemonError(f"malformed request: `{request_type}` takes no payload")
+    return {}
+
+
+def build_request(request_type: str, payload: dict | None = None) -> dict:
     """Build one typed control request (rejected unless known)."""
     if request_type not in REQUEST_TYPES:
         raise DaemonError(
             f"unknown request `{request_type}`: expected one of "
             f"{', '.join(REQUEST_TYPES)}"
         )
-    return {"version": DAEMON_VERSION, "type": request_type}
+    validated = validate_request_payload(request_type, payload)
+    message: dict = {"version": DAEMON_VERSION, "type": request_type}
+    if validated:
+        message["payload"] = validated
+    return message
 
 
-def parse_request(line: str) -> str:
-    """Validate one inbound message; return its type or raise DaemonError."""
+def parse_request(line: str) -> tuple[str, dict]:
+    """Validate one inbound message; return (type, payload) or raise."""
     if len(line.encode("utf-8")) > MAX_MESSAGE_BYTES:
         raise DaemonError("malformed request: message above the byte bound")
     try:
@@ -188,7 +276,9 @@ def parse_request(line: str) -> str:
             f"unknown request `{request_type}`: expected one of "
             f"{', '.join(REQUEST_TYPES)}"
         )
-    return str(request_type)
+    return str(request_type), validate_request_payload(
+        str(request_type), raw.get("payload")
+    )
 
 
 def build_response(ok: bool, state: dict | None = None, error: str = "") -> dict:
@@ -294,12 +384,13 @@ class UnixSocketTransport:
 def send_request(
     project_dir: Path,
     request_type: str,
+    payload: dict | None = None,
     timeout_s: float = DEFAULT_IPC_TIMEOUT_S,
     transport: ControlTransport | None = None,
 ) -> dict:
     """Send one typed control request over the local endpoint (bounded)."""
     channel = transport or UnixSocketTransport(project_dir, timeout_s)
-    return channel.send(build_request(request_type))
+    return channel.send(build_request(request_type, payload))
 
 
 #: Recent diagnostic events exposed to the start widget (IPC-bound sized).
@@ -448,6 +539,17 @@ def daemon_status_view(project_dir: Path) -> dict:
         snapshot = upgrade_mod.version_snapshot()
     except Exception:
         snapshot = {"running": "unknown", "installed": "unknown", "drift": False}
+    manual: dict = {"retry_available": False, "models": [], "model_override": None}
+    with contextlib.suppress(Exception):
+        watcher = live_watcher(project_dir)
+        status_call = getattr(watcher, "status_view", None)
+        status = status_call() if callable(status_call) else None
+        if isinstance(status, dict):
+            manual = {
+                "retry_available": bool(status.get("retry_available")),
+                "models": list(status.get("models") or []),
+                "model_override": status.get("model_override"),
+            }
     return {
         "daemon": record.to_dict() if record else None,
         "alive": daemon_alive(record),
@@ -463,6 +565,7 @@ def daemon_status_view(project_dir: Path) -> dict:
         "installed_version": snapshot["installed"],
         "package_drift": snapshot["drift"],
         "diagnostic_context": context,
+        "manual": manual,
         "widget": {
             "recorded": widget_record is not None,
             "healthy": widget_runtime_mod.is_healthy(project_dir, widget_record),
@@ -505,14 +608,19 @@ def format_status_text(view: dict) -> str:
     return "\n".join(lines)
 
 
-def handle_request(project_dir: Path, request_type: str) -> dict:
+def handle_request(
+    project_dir: Path, request_type: str, payload: dict | None = None
+) -> dict:
     """Apply one validated control request. Sends no provider input.
 
     `status` and `wake` are read-only. `pause` transitions to PAUSE and
     coordinates cancellation of in-flight work. `resume` resynchronizes
     before returning to AUTO scheduling. `stop` marks the daemon stopping;
-    the loop finishes the current cycle and exits. Unknown types are
-    rejected without touching scheduling or durable work.
+    the loop finishes the current cycle and exits. `retry`, `send_message`,
+    and `switch_model` route to the live in-process watcher, which applies
+    the same empty/draft/PAUSE guards it uses for automatic sends and
+    returns fresh status. Unknown types are rejected without touching
+    scheduling or durable work.
     """
     from . import concurrency as concurrency_mod
     from . import config as config_mod
@@ -528,6 +636,8 @@ def handle_request(project_dir: Path, request_type: str) -> dict:
         )
     if request_type in ("status", "wake"):
         return build_response(True, daemon_status_view(project_dir))
+    if request_type in ("retry", "send_message", "switch_model"):
+        return _handle_manual_action(project_dir, request_type, payload or {})
     try:
         cfg = config_mod.load(project_dir)
     except config_mod.ConfigError as exc:
@@ -593,6 +703,54 @@ def handle_request(project_dir: Path, request_type: str) -> dict:
     return build_response(True, daemon_status_view(project_dir))
 
 
+#: Watcher manual-action notes that mean "nothing changed".
+_MANUAL_REFUSAL_MARKERS = ("refus", "unavailable", "failed")
+
+
+def _manual_ok(note: str) -> bool:
+    """True when a watcher manual-action note reports a completed send."""
+    lowered = str(note or "").lower()
+    return not any(marker in lowered for marker in _MANUAL_REFUSAL_MARKERS)
+
+
+def _handle_manual_action(project_dir: Path, request_type: str, payload: dict) -> dict:
+    """Route one manual action to the live watcher; fail closed otherwise."""
+    watcher = live_watcher(project_dir)
+    if watcher is None:
+        return build_response(
+            False,
+            daemon_status_view(project_dir),
+            error="no live watcher for this project; run `ariadex start`",
+        )
+    method = {
+        "retry": "request_retry",
+        "send_message": "request_send",
+        "switch_model": "request_switch_model",
+    }[request_type]
+    argument = {
+        "send_message": payload.get("text"),
+        "switch_model": payload.get("model"),
+    }.get(request_type)
+    try:
+        call = getattr(watcher, method, None)
+        if not callable(call):
+            raise DaemonError(f"watcher has no `{method}` operation")
+        note = str(call() if argument is None else call(argument))
+    except DaemonError as exc:
+        return build_response(False, daemon_status_view(project_dir), error=str(exc))
+    except Exception as exc:
+        return build_response(
+            False,
+            daemon_status_view(project_dir),
+            error=f"{request_type} failed: {exc}",
+        )
+    view = daemon_status_view(project_dir)
+    view["manual_result"] = note
+    if not _manual_ok(note):
+        return build_response(False, view, error=note)
+    return build_response(True, view)
+
+
 def _serve_forever(
     project_dir: Path,
     server: socket.socket,
@@ -611,13 +769,13 @@ def _serve_forever(
                     if len(data) > MAX_MESSAGE_BYTES:
                         break
                 try:
-                    request_type = parse_request(data.decode("utf-8").strip())
+                    request_type, payload = parse_request(data.decode("utf-8").strip())
                 except DaemonError as exc:
                     reply = build_response(
                         False, daemon_status_view(project_dir), error=str(exc)
                     )
                 else:
-                    reply = handle_request(project_dir, request_type)
+                    reply = handle_request(project_dir, request_type, payload)
                     if request_type == "stop":
                         stop_event.set()
                 with contextlib.suppress(OSError):

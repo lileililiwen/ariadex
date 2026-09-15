@@ -66,8 +66,10 @@ def start_ipc_server(root: Path) -> tuple[threading.Event, threading.Thread]:
 
 class RequestSchemaTest(unittest.TestCase):
     def test_known_types_round_trip(self):
-        for name in ("status", "pause", "resume", "stop", "wake"):
-            self.assertEqual(daemon.parse_request(json.dumps({"type": name})), name)
+        for name in ("status", "pause", "resume", "stop", "wake", "retry"):
+            request_type, payload = daemon.parse_request(json.dumps({"type": name}))
+            self.assertEqual(request_type, name)
+            self.assertEqual(payload, {})
 
     def test_unknown_type_rejected(self):
         with self.assertRaises(daemon.DaemonError):

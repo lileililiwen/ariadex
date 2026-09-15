@@ -11,33 +11,12 @@ cannot freeze the Tk event loop or hide the controls.
 
 ## Status
 
-MVP, all eight post-MVP changes, and all six audit remediation fixes
-are implemented, tested, archived, and committed: project foundation
-and CLI, agent adapters and tmux driver, state-driven runner and
-handoff, verification/logging/observability, human control and resync,
-unattended tmux installation, live runtime evidence, packaging and
-distribution, CI/quality/security gates, human supervision ergonomics,
-single-runner concurrency and recovery, log data governance, spec
-dependency and execution governance, metrics export and notifications,
-active-spec discovery and archive isolation, bounded run completion and
-cycle limit, takeover cancellation and scheduler coordination,
- canonical spec and doc governance, real-provider live validation,
- repository identity and release readiness, release publication and
- remote verification, reproducible release and security evidence, and
-  quality gate hardening (709 tests, stdlib only). `ariadex 0.1.0` is
-  published on PyPI. The three daemon UX changes
-  (`daemon-first-runtime-and-simple-cli`,
-  `human-yield-hotkey-and-floating-control`, and
-  `local-install-and-user-deployment`) add a resident project daemon
-  with simple `start`, `stop`, `status`, `pause`, and `resume` controls,
-  an opt-in floating companion with a global yield hotkey, and
-  user-scoped install/uninstall plus service integration. Two follow-up
-  changes complete the set: `companion-prerequisite-auto-install`
-  (confirmed `python3-tk` preparation with `--no-dependency-install`
-  opt-out and fail-closed verification) and
-  `tagged-version-pypi-release-alignment` (tag/package/artifact/PyPI
-  version gates, immutable versions, exact index verification) — see
-  [ROADMAP.md](ROADMAP.md) and [HANDOFF.md](HANDOFF.md).
+The core runtime, managed daemon/widget workflow, provider adapters,
+verification gates, recovery, packaging, release, and quality foundations are
+implemented. Ariadex 0.1.0 is published on PyPI. All recorded changes are
+archived; `openspec list` is the authority for whether implementation work is
+active. See [ROADMAP.md](ROADMAP.md) for deferred scope and
+[HANDOFF.md](HANDOFF.md) for the latest verified repository state.
 
 ## Requirements
 
@@ -49,9 +28,8 @@ cycle limit, takeover cancellation and scheduler coordination,
   install packages, install tmux yourself or pass `--no-auto-install`
   to keep the stop-before-work error.
 
-No IDE plugins or LLM API keys are required. The current runtime drives the
-Coding CLIs you already use; the planned daemon and desktop companion will
-remain local control layers and will never call a provider LLM API itself.
+No IDE plugins or LLM API keys are required. The runtime drives the Coding
+CLIs you already use; Ariadex does not call a provider LLM API.
 
 ### Host memory protection
 
@@ -650,6 +628,7 @@ permission_temp_root: .ariadex/tmp # private project-relative root
 permission_actions: [read, write, create, delete]
 permission_allowlist: []           # e.g. [/tmp] only with allowlist policy
 model_fallbacks: []              # ordered models for automatic switch on quota/model errors (empty keeps manual recovery)
+models: []                       # operator model list for the widget Manual panel (provider/model strings; empty disables the model row)
 ```
 
 Add your test/build commands to `verification_commands`; the runner
@@ -668,11 +647,14 @@ instead of silently substituting another spec.
 
 ## Development
 
+Contributor workflow and project-specific agent rules are documented in
+[`AGENTS.md`](AGENTS.md) and [`.ai-rules/`](.ai-rules/workflow.md).
+
 ```bash
 ./ariadex dev setup                                  # bootstrap the locked QA toolchain
 uv run ariadex preflight                             # package, pip-audit, build, providers, tmux
-uv run python -m unittest discover -s tests           # 709 tests, stdlib only
-uv run openspec validate --changes --strict --no-interactive
+uv run python -m unittest discover -s tests
+openspec validate --changes --strict --no-interactive
 uv run ruff check src tests
 uv run ruff format --check src tests
 uv run mypy src/ariadex

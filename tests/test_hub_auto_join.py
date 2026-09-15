@@ -10,7 +10,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def install_fake_tk(test: unittest.TestCase):
-    from test_robot_hub import FakeTkRoot, FakeTkWidget
+    from test_robot_hub import (
+        FakeTkOptionMenu,
+        FakeTkRoot,
+        FakeTkStringVar,
+        FakeTkWidget,
+    )
 
     tk_mod = types.ModuleType("tkinter")
     tk_mod.Tk = FakeTkRoot  # type: ignore[attr-defined]
@@ -18,6 +23,9 @@ def install_fake_tk(test: unittest.TestCase):
     tk_mod.Label = FakeTkWidget  # type: ignore[attr-defined]
     tk_mod.Button = FakeTkWidget  # type: ignore[attr-defined]
     tk_mod.Text = FakeTkWidget  # type: ignore[attr-defined]
+    tk_mod.Scrollbar = FakeTkWidget  # type: ignore[attr-defined]
+    tk_mod.OptionMenu = FakeTkOptionMenu  # type: ignore[attr-defined]
+    tk_mod.StringVar = FakeTkStringVar  # type: ignore[attr-defined]
     saved = sys.modules.get("tkinter")
     sys.modules["tkinter"] = tk_mod
 

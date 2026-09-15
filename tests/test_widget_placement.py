@@ -120,13 +120,14 @@ class PlacementPathTest(unittest.TestCase):
         window._toggle_expanded()
         self.assertTrue(window.expanded)
         geometry = window.root.options["geometry"]
+        full_height = (
+            companion.WIDGET_EXPANDED_WINDOW_HEIGHT + companion.MANUAL_GROUP_HEIGHT
+        )
         self.assertIn(
-            f"{companion.WIDGET_WIDTH}x{companion.WIDGET_EXPANDED_WINDOW_HEIGHT}",
+            f"{companion.WIDGET_WIDTH}x{full_height}",
             geometry,
         )
-        self.assertIn(
-            f"+100+{1080 - companion.WIDGET_EXPANDED_WINDOW_HEIGHT - 8}", geometry
-        )
+        self.assertIn(f"+100+{1080 - full_height - 8}", geometry)
         window._toggle_expanded()
         self.assertFalse(window.expanded)
         self.assertEqual(window.display_mode, "collapsed")

@@ -273,6 +273,9 @@ def _daemon_status_view(state: dict, provider: str) -> dict:
     else:
         message = next_action or f"mode {mode}"
     latest = {"category": "daemon", "message": message[:280]}
+    manual = state.get("manual") if isinstance(state, dict) else None
+    manual = manual if isinstance(manual, dict) else {}
+    raw_models = manual.get("models")
     return {
         "provider": provider,
         "session": session or "agent",
@@ -286,6 +289,9 @@ def _daemon_status_view(state: dict, provider: str) -> dict:
         "prompts_sent": 0,
         "confirmations_sent": 0,
         "permissions_granted": 0,
+        "retry_available": bool(manual.get("retry_available")),
+        "models": [str(m) for m in raw_models] if isinstance(raw_models, list) else [],
+        "model_override": manual.get("model_override"),
     }
 
 

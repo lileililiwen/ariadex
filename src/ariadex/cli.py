@@ -669,7 +669,7 @@ def _coerce_answer(raw: str, default: str) -> str:
 
 def _ask_init_answers(
     read_answer=None,
-) -> tuple[str, str, str, str, str, str, list[str], list[str]]:
+) -> tuple[str, str, str, str, str, str, list[str], list[str], list[str]]:
     """Prompt for provider, managed prompts, and permission policy.
 
     `read_answer` maps a prompt string to the user's raw answer; the default
@@ -677,7 +677,7 @@ def _ask_init_answers(
     and re-prompted without touching durable state. Returns validated
     `(provider, first_prompt, continuation_prompt, confirmation_prompt,
     permission_policy, permission_temp_root, permission_actions,
-    permission_allowlist)` with validated values. Shared paths such as
+    permission_allowlist, models)` with validated values. Shared paths such as
     `/tmp` are configured through the explicit allowlist, never by changing
     the private project temp root.
     """
@@ -773,6 +773,14 @@ def _ask_init_answers(
     permission_allowlist = [
         item.strip() for item in raw_allowlist.split(",") if item.strip()
     ]
+    raw_models = _coerce_answer(
+        read(
+            "Models for the widget Manual panel "
+            "(provider/model, comma-separated; blank means none): "
+        ),
+        "",
+    )
+    models = [item.strip() for item in raw_models.split(",") if item.strip()]
     return (
         provider,
         first_prompt,
@@ -782,6 +790,7 @@ def _ask_init_answers(
         permission_temp_root,
         permission_actions,
         permission_allowlist,
+        models,
     )
 
 
@@ -794,6 +803,7 @@ def _render_config_text(
     permission_temp_root: str | None = None,
     permission_actions: list[str] | None = None,
     permission_allowlist: list[str] | None = None,
+    models: list[str] | None = None,
 ) -> str:
     """Render the commented default config with the wizard answers applied.
 
@@ -863,6 +873,11 @@ def _render_config_text(
         f"\npermission_allowlist: {json_mod.dumps(permission_allowlist)}\n",
         1,
     )
+    text = text.replace(
+        "\nmodels: []\n",
+        f"\nmodels: {json_mod.dumps(models if models is not None else [])}\n",
+        1,
+    )
     return text
 
 
@@ -876,6 +891,7 @@ def _create_missing_files(
     permission_temp_root: str | None = None,
     permission_actions: list[str] | None = None,
     permission_allowlist: list[str] | None = None,
+    models: list[str] | None = None,
 ) -> tuple[list, list]:
     """Create absent .ariadex/config.yaml, handoff, and state files.
 
@@ -900,6 +916,7 @@ def _create_missing_files(
                 permission_temp_root,
                 permission_actions,
                 permission_allowlist,
+                models,
             ),
             encoding="utf-8",
         )
@@ -960,6 +977,7 @@ def _cmd_init_force(
         permission_temp_root,
         permission_actions,
         permission_allowlist,
+        models,
     ) = _ask_init_answers(read_answer)
     print(
         "init --force removes the complete .ariadex directory (configuration, "
@@ -989,6 +1007,7 @@ def _cmd_init_force(
             permission_temp_root,
             permission_actions,
             permission_allowlist,
+            models,
         )
     except OSError as exc:
         print(
@@ -1078,6 +1097,7 @@ def cmd_init(
         permission_temp_root,
         permission_actions,
         permission_allowlist,
+        models,
     ) = _ask_init_answers(read_answer)
     try:
         created, preserved = _create_missing_files(
@@ -1090,6 +1110,7 @@ def cmd_init(
             permission_temp_root,
             permission_actions,
             permission_allowlist,
+            models,
         )
     except OSError as exc:
         print(f"error: initialization failed: {exc}", file=sys.stderr)
