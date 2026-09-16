@@ -48,6 +48,33 @@ that promotion has been skipped or failed.
   widget-crash-repair lifecycle tests, Ruff, diff check, and strict validation
   (51 canonical specs).
 
+- Implemented, verified, and archived: `approval-reply-recovery`
+  (archived as 2026-09-16-approval-reply-recovery). The boolean
+  approval latch is now bounded per-episode counter state
+  (`asks`/`quiet`/`rearm`/`escalated`, cleared on any non-approval
+  surface): first ask as today, a NOT DONE/WORKING reply re-arms one
+  further ask after 3 quiet polls with no input, and a repeated NOT
+  DONE (or a surface outlasting the re-ask with no reply) parks in
+  WAITING with `approval asked twice without progress` plus the
+  redacted shape and manual step; DONE/timeout/garbage/abort wait
+  exactly as today, replies never approve, no reset is ever sent.
+  `permissions.evaluate` reasons for `parsed is None` carry a shape
+  tag (`privileged-markers`, `no-operation-word`,
+  `ambiguous-paths(n)`) derived from already-computed signals within
+  the 280-char bound and with no raw text — including the default
+  `prompt`/`deny` early returns, which otherwise never show the
+  shape. Verified with 11 new `tests/test_approval_reply_recovery.py`
+  tests (10 proven to fail on old code; 1 pins unchanged adapter
+  parsing), touched suites (438 tests OK), Ruff check/format clean,
+  mypy at baseline (13 pre-existing, none in touched files),
+  `openspec validate --changes --strict` (2/2) and `--specs --strict`
+  (68/68) passed; promoted into `robot-agent-supervisor` and
+  `configurable-permissions`. Full-suite posture unchanged from the
+  previous entry (per-batch evidence; pre-existing tmux env failure
+  and host Tk/X11 single-process race only). Active queue after
+  archive: `widget-ux-repair` (unimplemented; tracked under Next
+  change).
+
 - Implemented, verified, and archived: `watcher-stall-loop`
   (archived as 2026-09-16-watcher-stall-loop). Draft detection is now
   structural and position-aware: only composer-region content (at/after
@@ -929,8 +956,9 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Active OpenSpec queue: `approval-reply-recovery`, `widget-ux-repair`
-(watcher-stall-loop archived as 2026-09-16-watcher-stall-loop). The next
+Active OpenSpec queue: `widget-ux-repair`
+(approval-reply-recovery archived as 2026-09-16-approval-reply-recovery;
+watcher-stall-loop archived as 2026-09-16-watcher-stall-loop). The next
 implementation must select exactly one active change per the workflow in
 .ai-rules/workflow.md and update this handoff only after its verified
 archive.
