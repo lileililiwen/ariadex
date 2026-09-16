@@ -1264,6 +1264,7 @@ def cmd_status(project_dir: Path, as_json: bool = False) -> int:
             "package_version": snapshot["running"],
             "installed_version": snapshot["installed"],
             "package_drift": snapshot["drift"],
+            "build_version": snapshot.get("build") or snapshot["running"],
         }
         print(json_mod.dumps(payload, sort_keys=True, indent=2))
         for item in blocked:
@@ -1283,6 +1284,7 @@ def cmd_status(project_dir: Path, as_json: bool = False) -> int:
             next_action=handoff.next_action,
             package_version=snapshot["running"],
             installed_version=snapshot["installed"],
+            build_version=snapshot.get("build") or snapshot["running"],
         )
     )
     for item in blocked:
@@ -3855,7 +3857,7 @@ def cmd_upgrade(
     record = daemon_mod.read_record(project_dir)
     daemon_running = daemon_mod.daemon_alive(record)
     snapshot = upgrade_mod.version_snapshot(
-        running=running, installed=(installed_dist or running)
+        running=running, installed=(installed_dist or running), build=running
     )
     payload = {
         "running": snapshot["running"],

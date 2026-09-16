@@ -538,7 +538,12 @@ def daemon_status_view(project_dir: Path) -> dict:
 
         snapshot = upgrade_mod.version_snapshot()
     except Exception:
-        snapshot = {"running": "unknown", "installed": "unknown", "drift": False}
+        snapshot = {
+            "running": "unknown",
+            "installed": "unknown",
+            "drift": False,
+            "build": "unknown",
+        }
     manual: dict = {"retry_available": False, "models": [], "model_override": None}
     with contextlib.suppress(Exception):
         watcher = live_watcher(project_dir)
@@ -564,6 +569,7 @@ def daemon_status_view(project_dir: Path) -> dict:
         "package_version": snapshot["running"],
         "installed_version": snapshot["installed"],
         "package_drift": snapshot["drift"],
+        "build_version": snapshot.get("build") or snapshot["running"],
         "diagnostic_context": context,
         "manual": manual,
         "widget": {
@@ -596,7 +602,7 @@ def format_status_text(view: dict) -> str:
         f"next: {view.get('next_action')}",
         f"queue: {view.get('open_count')} open, {view.get('blocked_count')} blocked",
     ]
-    running = view.get("package_version")
+    running = view.get("build_version") or view.get("package_version")
     installed = view.get("installed_version", running)
     if running not in (None, ""):
         lines.append(f"package: ariadex {running} (installed {installed})")

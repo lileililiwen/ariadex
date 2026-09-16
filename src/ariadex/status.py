@@ -57,6 +57,7 @@ def render_status(
     next_action: str | None,
     package_version: str | None = None,
     installed_version: str | None = None,
+    build_version: str | None = None,
 ) -> str:
     lines = [
         f"mode: {mode}",
@@ -71,7 +72,8 @@ def render_status(
     ]
     if package_version is not None:
         installed = installed_version or package_version
-        lines.append(f"package: ariadex {package_version} (installed {installed})")
+        shown = build_version or package_version
+        lines.append(f"package: ariadex {shown} (installed {installed})")
         if installed != package_version:
             lines.append(
                 "package drift: running version differs from the installed "

@@ -1296,8 +1296,9 @@ class ControlRoomTest(unittest.TestCase):
         state["package_version"] = "0.2.0"
         state["installed_version"] = "0.2.0"
         state["package_drift"] = False
+        state["build_version"] = "0.2.0+gDEF4567"
         model = companion.build_view_model(state, local_version="0.1.0")
-        self.assertEqual(model["version_text"], "v0.2.0")
+        self.assertEqual(model["version_text"], "v0.2.0+gDEF4567")
 
     def test_version_text_reports_drift(self):
         state = live_state()

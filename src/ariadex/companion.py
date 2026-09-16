@@ -815,30 +815,40 @@ WAITING_DECISIONS = ("waiting", "refire", "switched")
 def describe_version(state: dict, local_version: str = "") -> str:
     """Display-only version text for the widget menu row (pure, no I/O).
 
-    Prefers the supervision's running version from daemon IPC (what the
-    operator is actually debugging), falls back to the local code
-    version, and reports drift against the installed distribution so a
-    mismatched install is visible at a glance. Never raises.
+    Prefers the supervision's running build identity from daemon IPC
+    (what the operator is actually debugging, matching `-V`), falls
+    back to the local build version and then the bare package
+    version, and reports drift against the installed distribution so
+    a mismatched install is visible at a glance. Drift compares bare
+    versions only, so the commit suffix never reports false drift.
+    Never raises.
     """
     try:
-        running = str(state.get("package_version") or "").strip()
+        build = str(state.get("build_version") or "").strip()
     except Exception:
-        running = ""
-    if not running:
+        build = ""
+    if not build:
         try:
-            running = str(local_version or "").strip()
+            build = str(local_version or "").strip()
         except Exception:
-            running = ""
-    if not running:
-        running = "unknown"
+            build = ""
+    try:
+        bare = str(state.get("package_version") or "").strip()
+    except Exception:
+        bare = ""
+    if not bare:
+        bare = build.split("+g")[0].strip() if build else ""
+    running = build or bare or "unknown"
+    if not bare:
+        bare = running
     try:
         installed = str(state.get("installed_version") or "").strip()
         drift = bool(state.get("package_drift", False))
     except Exception:
         installed, drift = "", False
-    if installed and installed != running:
+    if installed and installed != bare:
         drift = True
-    if drift and installed and installed != running:
+    if drift and installed and installed != bare:
         return f"v{running} (installed v{installed})"
     return f"v{running}"
 

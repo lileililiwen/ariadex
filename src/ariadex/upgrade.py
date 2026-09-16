@@ -532,18 +532,38 @@ def execute_plan(plan: UpgradePlan, runner=None) -> UpgradeResult:
 def version_snapshot(
     running: str | None = None,
     installed: str | None = None,
+    build: str | None = None,
 ) -> dict:
-    """Running-versus-installed versions plus drift flag (no network)."""
+    """Running-versus-installed versions plus drift flag (no network).
+
+    `build` is the running build identity from `describe_build()`
+    (the same string `-V` prints), probed at the installed package
+    directory so an editable checkout resolves its own commit while
+    a site-packages install fails soft to the bare version. Pass an
+    explicit `build` (e.g. the bare `running`) on read-only paths
+    such as `upgrade --check` that must spawn no subprocess. Drift
+    compares bare versions only: the commit suffix never counts.
+    """
     running_text = (running if running is not None else running_version()).strip()
     installed_text = (
         installed
         if installed is not None
         else (installed_distribution_version() or running_text)
     ).strip()
+    if build is not None:
+        build_text = build.strip() or running_text
+    else:
+        try:
+            build_text = describe_build(Path(__file__).resolve().parent)
+        except Exception:
+            build_text = running_text
+    if not build_text:
+        build_text = running_text
     return {
         "running": running_text,
         "installed": installed_text,
         "drift": running_text != installed_text,
+        "build": build_text,
     }
 
 
