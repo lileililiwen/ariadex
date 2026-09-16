@@ -130,6 +130,22 @@ that promotion has been skipped or failed.
 
 ## Current state
 
+- Implemented, verified, and archived: `provider-start-pid-race`
+  (archived as `2026-09-16-provider-start-pid-race`). `start()`
+  suppresses `psutil.Error` at the pane-pid identity fallback, so
+  a process that exits between `list-panes` and `process_identity`
+  yields success with no runtime record instead of an escaping
+  `NoSuchProcess`; the tmux lifecycle stub answers `list-panes`
+  (empty output maps to `None`, the product's own unparseable
+  branch). Verified with the dead-pid regression test (proven to
+  fail on old code) plus adapter/tmux-lifecycle/provider-runtime/
+  docs suites (57 tests OK), Ruff check/format clean, mypy +1
+  `import-untyped` psutil stub error (same posture as the existing
+  `terminal.py`/`provider_runtime.py` importers; baseline now 14),
+  `--changes --strict` (1/1) and `--specs --strict` (68/68)
+  passed; promoted into `agent-adapter`. Queue empty at archive
+  time (`openspec list`: no active changes).
+
 - Implemented, verified, and archived: `widget-build-version`
   (archived as `2026-09-16-widget-build-version`).
   `version_snapshot()` now carries `build` from `describe_build()`
@@ -1025,11 +1041,10 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 ## Next change
 
 Active OpenSpec queue: none (openspec list reports no active
-changes; `permission-approval-retry` and `widget-build-version`
-are archived). The next implementation must propose a change first,
-then select exactly one active change per the workflow in
-.ai-rules/workflow.md and update this handoff only after its verified
-archive.
+changes; the pid race change is archived). The next implementation
+must propose a change first, then select exactly one active change
+per the workflow in .ai-rules/workflow.md and update this handoff
+only after its verified archive.
 
 ## Latest change: widget live log and queue visibility
 
