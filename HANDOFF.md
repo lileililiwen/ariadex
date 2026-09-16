@@ -76,6 +76,19 @@ that promotion has been skipped or failed.
 
 ## Current state
 
+- Implemented, verified, and archived: `commit-veto-confirmation`
+  (archived as `2026-09-16-commit-veto-confirmation`). A NOT DONE
+  reply to the commit question now continues to the confirmation
+  conversation with the fixed commit order sent as provider input
+  instead of parking in watching; archival NO reaches archival
+  confirmation; task WORKING still parks; DONE/timeout/garbage
+  unchanged. Verified with veto-NO and archival-NO tests (proven to
+  fail on old code) plus touched suites (218 focused tests OK),
+  Ruff check/format clean, mypy clean, `openspec validate
+  --changes/--specs --strict` passed; promoted into
+  `openspec/specs/robot-agent-supervisor/spec.md`. Queue empty at
+  archive time.
+
 - Implemented, verified, and archived: `spec-advance-safety`
   (archived as `2026-09-16-spec-advance-safety`). Confirm-first
   advance safety with no git inspection: natural confirm question
