@@ -617,7 +617,6 @@ class RealTkTypingTest(unittest.TestCase):
         try:
             window = self._make_window(root)
             window._toggle_expanded()
-            window._toggle_expanded()
             root.update()
             self.assertEqual(window.display_mode, "full")
 

@@ -55,9 +55,11 @@ MANUAL_GROUP_HEIGHT = 190
 # padding (~9px on each side). Sits between the titlebar (30) and the
 # collapsed card (344) so the cycle stays visually progressive.
 WIDGET_STRIP_HEIGHT = 40
-# Display modes for the mini player, in the order the toggle cycles.
-# Strip parks the widget; full reveals details. Hub windows are
-# unaffected and keep their own tab bar.
+# Display modes for the mini player. WIDGET_MODES lists every mode;
+# the toggle button steps collapsed → full → strip (one click from
+# collapsed reveals the Manual panel) while the strip drag-handle
+# click steps strip → full. Hub windows are unaffected and keep
+# their own tab bar.
 WIDGET_MODES: tuple[str, ...] = ("collapsed", "strip", "full")
 WIDGET_ACTION_BUTTON_WIDTH = 6
 WIDGET_COPY_BUTTON_WIDTH = 8
@@ -967,10 +969,14 @@ def build_manual_panel(
     on_switch,
     theme: theme_mod.Theme | None = None,
 ) -> dict:
-    """Create the labeled Manual group (Retry/Model/Message rows).
+    """Create the labeled Manual group (Retry/Message/Model rows).
 
-    Rows, never tabs: project tabs already own that pattern. Returns a
-    refs dict; `refresh_manual_panel` drives states and options.
+    Rows, never tabs: project tabs already own that pattern. The
+    model row packs last so its dropdown popup opens over the
+    feedback line, never over the message textarea — the message
+    input stays fully visible and focusable while the selector is
+    open. Returns a refs dict; `refresh_manual_panel` drives states
+    and options.
     """
     active = theme or theme_mod.DARK
     frame = tk.Frame(parent)
@@ -992,30 +998,6 @@ def build_manual_panel(
         command=on_retry,
     )
     retry_button.pack(side="left", expand=True, fill="x")
-    model_row = tk.Frame(frame)
-    _style(model_row, active, "frame")
-    model_row.pack(fill="x")
-    model_label = tk.Label(model_row, text="Model")
-    _style(model_label, active, "label")
-    model_label.pack(side="left")
-    model_var = tk.StringVar(value="")
-    model_option = tk.OptionMenu(model_row, model_var, "")
-    _style(model_option, active, "optionmenu")
-    model_option.pack(side="left", padx=4)
-    with contextlib.suppress(Exception):
-        _style_menu(model_option["menu"], active)
-    model_apply = tk.Button(
-        model_row,
-        text="Apply",
-        name=f"{name_prefix}-manual-model-apply",
-        takefocus=True,
-        command=on_switch,
-    )
-    model_apply.pack(side="left")
-    model_hint = tk.Label(
-        model_row, text="no models configured", name=f"{name_prefix}-manual-model-hint"
-    )
-    _style(model_hint, active, "muted")
     message_row = tk.Frame(frame)
     _style(message_row, active, "frame")
     message_row.pack(fill="x")
@@ -1040,6 +1022,30 @@ def build_manual_panel(
         command=on_send,
     )
     send_button.pack(side="left")
+    model_row = tk.Frame(frame)
+    _style(model_row, active, "frame")
+    model_row.pack(fill="x")
+    model_label = tk.Label(model_row, text="Model")
+    _style(model_label, active, "label")
+    model_label.pack(side="left")
+    model_var = tk.StringVar(value="")
+    model_option = tk.OptionMenu(model_row, model_var, "")
+    _style(model_option, active, "optionmenu")
+    model_option.pack(side="left", padx=4)
+    with contextlib.suppress(Exception):
+        _style_menu(model_option["menu"], active)
+    model_apply = tk.Button(
+        model_row,
+        text="Apply",
+        name=f"{name_prefix}-manual-model-apply",
+        takefocus=True,
+        command=on_switch,
+    )
+    model_apply.pack(side="left")
+    model_hint = tk.Label(
+        model_row, text="no models configured", name=f"{name_prefix}-manual-model-hint"
+    )
+    _style(model_hint, active, "muted")
     feedback = tk.Label(
         frame,
         text="",
@@ -1052,7 +1058,7 @@ def build_manual_panel(
     _bind_button_feedback(retry_button, root, active)
     _bind_button_feedback(send_button, root, active)
     _bind_button_feedback(model_apply, root, active)
-    return {
+    refs = {
         "frame": frame,
         "retry_button": retry_button,
         "model_var": model_var,
@@ -1063,7 +1069,36 @@ def build_manual_panel(
         "send_button": send_button,
         "feedback": feedback,
         "models_seen": [],
+        "theme": active,
     }
+    _size_model_selector(refs)
+    return refs
+
+
+def _size_model_selector(refs: dict) -> None:
+    """Size the model selector button to its longest option (chars).
+
+    Long provider model names must render untruncated; an empty
+    option list keeps a narrow sane default. Never raises: fake or
+    partially built refs stay untouched.
+    """
+    with contextlib.suppress(Exception):
+        models = [str(name) for name in refs.get("models_seen", []) if str(name)]
+        width = max([len(name) for name in models] + [8])
+        refs["model_option"].configure(width=width)
+
+
+def _theme_manual_selector(refs: dict, theme: theme_mod.Theme) -> None:
+    """Re-apply the active theme to the selector button and popup.
+
+    Build-time styling alone leaves the popup half-styled after a
+    runtime theme switch, so every refresh restyles both roles. The
+    existing `KeyError` contract for unknown roles is kept: a
+    half-styled control never renders silently.
+    """
+    refs["theme"] = theme
+    _style(refs["model_option"], theme, "optionmenu")
+    _style_menu(refs["model_option"]["menu"], theme)
 
 
 def refresh_manual_panel(
@@ -1074,12 +1109,24 @@ def refresh_manual_panel(
     send_enabled: bool,
     models: list,
     result: object,
+    theme: theme_mod.Theme | None = None,
 ) -> None:
-    """Drive Manual states, model options, and the feedback line."""
+    """Drive Manual states, model options, and the feedback line.
+
+    Every refresh re-applies the active theme to the selector
+    button and its popup (not only at build) and resizes the
+    button to the longest current option, so runtime theme
+    switches restyle the open options and long model names render
+    untruncated.
+    """
     with contextlib.suppress(Exception):
         refs["retry_button"].configure(state="normal" if retry_enabled else "disabled")
         refs["model_apply"].configure(state="normal" if switch_enabled else "disabled")
         refs["send_button"].configure(state="normal" if send_enabled else "disabled")
+    active = theme if theme is not None else refs.get("theme")
+    if active is not None:
+        with contextlib.suppress(Exception):
+            _theme_manual_selector(refs, active)
     with contextlib.suppress(Exception):
         if list(models) != list(refs.get("models_seen", [])):
             refs["models_seen"] = list(models)
@@ -1093,6 +1140,7 @@ def refresh_manual_panel(
             current = refs["model_var"].get()
             if current not in models:
                 refs["model_var"].set(models[0] if models else "")
+            _size_model_selector(refs)
         if models:
             refs["model_hint"].pack_forget()
         else:
@@ -1338,6 +1386,36 @@ def format_managed_log_text(projection: dict) -> str:
     for note in projection.get("notes", []):
         lines.append(f"note: {note}")
     return "\n".join(lines)
+
+
+def format_merged_log_text(model: dict) -> str:
+    """Single-surface log text: managed context head + status body.
+
+    The expanded widget shows exactly one read-only log surface, so
+    this merges the managed-context projection (labeled head
+    section) with the activity/status lines (labeled body section).
+    Lines already carried by the context section (`context:` and
+    `latest:`, both derived from the same projection) are dropped
+    from the body, and any remaining body line that duplicates a
+    context line is dropped too — no line appears twice.
+    """
+    projection = model.get("managed_context")
+    if isinstance(projection, dict):
+        context_lines = format_managed_log_text(projection).splitlines()
+    else:
+        context_lines = ["diagnostic context: (daemon unreachable or not started yet)"]
+    body_all = format_view_text(model).splitlines()
+    seen = set(context_lines)
+    body_lines: list[str] = []
+    for line in body_all:
+        stripped = line.strip()
+        if stripped.startswith("context:") or stripped.startswith("latest:"):
+            continue
+        if line in seen:
+            continue
+        seen.add(line)
+        body_lines.append(line)
+    return "\n".join(["[context]", *context_lines, "[status]", *body_lines])
 
 
 def format_context_snapshot(projection: dict, state: dict) -> str:
@@ -2343,7 +2421,7 @@ class CompanionWindow:
         if projection is None:
             self._notice("no diagnostic context yet; nothing to copy")
             return
-        self._copy_text(format_managed_log_text(projection), "log")
+        self._copy_text(format_merged_log_text(self.model), "log")
 
     def _on_copy_context(self) -> None:
         projection = self._managed_projection()
@@ -2365,15 +2443,35 @@ class CompanionWindow:
         self._render()
 
     def _toggle_expanded(self) -> None:
-        self._cycle_display_mode()
+        """Toggle button path: collapsed → full → strip.
+
+        One click from collapsed reveals the Manual panel directly;
+        strip stays reachable from full and via its own drag-handle
+        click (see `_drag_stop`), but never sits between the operator
+        and the manual controls. Unknown modes fall back to collapsed.
+        """
+        current = (
+            self.display_mode if self.display_mode in WIDGET_MODES else "collapsed"
+        )
+        if current == "collapsed":
+            next_mode = "full"
+        elif current == "full":
+            next_mode = "strip"
+        elif current == "strip":
+            next_mode = "full"
+        else:  # pragma: no cover - guarded above, kept for clarity
+            next_mode = "collapsed"
+        self._set_display_mode(next_mode)
 
     def _cycle_display_mode(self) -> None:
         """Advance one step in the collapsed → strip → full cycle.
 
-        The strip mode cycles through clicks on its drag handle; the
-        expanded toggle button is only visible in collapsed/full and
-        therefore only cycles the same sequence when the user can see
-        it. Unknown modes fall back to collapsed.
+        This is the strip-affordance path: strip-mode clicks on the
+        drag handle (see `_drag_stop`) cycle strip → full. The
+        toggle button uses `_toggle_expanded` instead
+        (collapsed → full → strip) so one click from collapsed
+        reveals the Manual panel. Unknown modes fall back to
+        collapsed.
         """
         current = (
             self.display_mode if self.display_mode in WIDGET_MODES else "collapsed"
@@ -2529,19 +2627,19 @@ class CompanionWindow:
             )
 
     def _render_context_log(self, model: dict) -> None:
-        """Write the read-only managed log; never raises into the poll loop.
+        """Write the single read-only merged log; never raises into polling.
 
-        After every rewrite the viewport follows the latest entry
-        (`see("end")`) so new activity is visible without manual
-        scrolling; a slim vertical scrollbar tracks the content
-        length. The follow is viewport work only — log bounds,
-        redaction, and durable state are unchanged.
+        The expanded view carries exactly one log surface: the
+        managed-context projection is the labeled head section and
+        the activity/status lines the labeled body section (see
+        `format_merged_log_text`; no line appears twice). After every
+        rewrite the viewport follows the latest entry (`see("end")`)
+        so new activity is visible without manual scrolling; a slim
+        vertical scrollbar tracks the content length. The follow is
+        viewport work only — log bounds, redaction, and durable state
+        are unchanged.
         """
-        projection = model.get("managed_context")
-        if not isinstance(projection, dict):
-            lines = ["diagnostic context: (daemon unreachable or not started yet)"]
-        else:
-            lines = format_managed_log_text(projection).splitlines()
+        lines = format_merged_log_text(model).splitlines()
         with contextlib.suppress(Exception):
             self.context_log.configure(state="normal")
             self.context_log.delete("1.0", "end")
@@ -2686,13 +2784,25 @@ class CompanionWindow:
         self.stop_button.configure(
             state="normal" if actions.get("stop") else "disabled"
         )
-        text = format_view_text(model)
+        # Single log surface: the details-panel status text is retired
+        # as a second scroll area. The widget object stays (callers and
+        # tests may reference it) but is hidden, cleared, and disabled;
+        # the merged context+status log in `context_log` is the only
+        # read-only log surface. A hotkey error is appended to the
+        # merged model below so it stays visible in that surface.
+        with contextlib.suppress(Exception):
+            self.status_text.pack_forget()
+        with contextlib.suppress(Exception):
+            self.status_text.configure(state="normal")
+            self.status_text.delete("1.0", "end")
+            self.status_text.configure(state="disabled")
         if self.hotkey_error and not self.hotkey_active:
-            text += f"\nhotkey: {self.hotkey_error}"
-        self.status_text.configure(state="normal")
-        self.status_text.delete("1.0", "end")
-        self.status_text.insert("1.0", text)
-        self.status_text.configure(state="disabled")
+            model = dict(model)
+            model["failure"] = "\n".join(
+                part
+                for part in (model.get("failure"), f"hotkey: {self.hotkey_error}")
+                if part
+            )
         with contextlib.suppress(Exception):
             keys = effective_keymap()
             self.keymap_label.configure(
@@ -2710,6 +2820,7 @@ class CompanionWindow:
                 send_enabled=bool(actions.get("send")),
                 models=model.get("manual_models") or [],
                 result=model.get("manual_result"),
+                theme=self._theme,
             )
         self._render_context_log(model)
 
@@ -4232,6 +4343,7 @@ class RobotHubWindow:
                 send_enabled=True,
                 models=list(tab_models) if isinstance(tab_models, list) else [],
                 result=None,
+                theme=self._theme,
             )
 
     def _render_log(self, model: dict) -> None:

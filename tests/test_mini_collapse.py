@@ -15,7 +15,7 @@ from tests.test_companion import (
 
 
 class DisplayModeTest(unittest.TestCase):
-    """The mini player cycles collapsed -> strip -> full on toggle."""
+    """The mini player toggles collapsed -> full; strip is a side stop."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -48,12 +48,9 @@ class DisplayModeTest(unittest.TestCase):
         self.assertGreater(companion.WIDGET_STRIP_HEIGHT, 0)
 
     def test_toggle_advances_through_modes(self):
-        self.window._toggle_expanded()
-        self.assertEqual(self.window.display_mode, "strip")
-        self.assertFalse(self.window.expanded)
-        self.assertEqual(
-            self.window._active_window_height(), companion.WIDGET_STRIP_HEIGHT
-        )
+        # One click from collapsed reveals full (with the Manual
+        # panel); a second toggle parks in strip; the strip
+        # drag-handle click returns to full.
         self.window._toggle_expanded()
         self.assertEqual(self.window.display_mode, "full")
         self.assertTrue(self.window.expanded)
@@ -62,6 +59,16 @@ class DisplayModeTest(unittest.TestCase):
             companion.WIDGET_EXPANDED_WINDOW_HEIGHT + companion.MANUAL_GROUP_HEIGHT,
         )
         self.window._toggle_expanded()
+        self.assertEqual(self.window.display_mode, "strip")
+        self.assertFalse(self.window.expanded)
+        self.assertEqual(
+            self.window._active_window_height(), companion.WIDGET_STRIP_HEIGHT
+        )
+        self.window._drag_start(mock.Mock(x_root=100, y_root=100))
+        self.window._drag_stop(mock.Mock(x_root=100, y_root=100))
+        self.assertEqual(self.window.display_mode, "full")
+        self.assertTrue(self.window.expanded)
+        self.window._set_display_mode("collapsed")
         self.assertEqual(self.window.display_mode, "collapsed")
         self.assertFalse(self.window.expanded)
 

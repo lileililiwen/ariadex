@@ -456,8 +456,7 @@ class ManagedWindowTest(unittest.TestCase):
     def test_expand_collapse_preserves_pause_gating(self):
         window = self.make_window(context_state())
         self.assertFalse(window.expanded)
-        # Cycle: collapsed → strip → full (expanded).
-        window._toggle_expanded()
+        # One toggle: collapsed → full (expanded).
         window._toggle_expanded()
         self.assertTrue(window.expanded)
         actions = window.model.get("actions", {})
@@ -465,6 +464,7 @@ class ManagedWindowTest(unittest.TestCase):
         self.assertFalse(actions.get("play"))
         window._toggle_expanded()
         self.assertFalse(window.expanded)
+        self.assertEqual(window.display_mode, "strip")
 
     def test_rendered_log_matches_projection(self):
         window = self.make_window(context_state())

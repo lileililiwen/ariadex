@@ -115,8 +115,7 @@ class PlacementPathTest(unittest.TestCase):
         # Move near the bottom edge, then expand: position must move up.
         window.root.winfo_x = lambda: 100
         window.root.winfo_y = lambda: 1080 - companion.WIDGET_COLLAPSED_HEIGHT - 8
-        # Cycle: collapsed → strip → full.
-        window._toggle_expanded()
+        # One toggle: collapsed → full.
         window._toggle_expanded()
         self.assertTrue(window.expanded)
         geometry = window.root.options["geometry"]
@@ -130,7 +129,7 @@ class PlacementPathTest(unittest.TestCase):
         self.assertIn(f"+100+{1080 - full_height - 8}", geometry)
         window._toggle_expanded()
         self.assertFalse(window.expanded)
-        self.assertEqual(window.display_mode, "collapsed")
+        self.assertEqual(window.display_mode, "strip")
 
     def test_persist_clamps_before_save(self):
         window = self._window()

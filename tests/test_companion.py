@@ -477,18 +477,18 @@ class WidgetSmokeTest(unittest.TestCase):
                 int(window.copy_log_button.cget("width")),
                 companion.WIDGET_COPY_BUTTON_WIDTH,
             )
-            # Collapsed by default; cycle collapsed → strip → full.
+            # Collapsed by default; one toggle reveals full, a second
+            # parks in strip, the strip click returns to full.
             self.assertFalse(window.expanded)
             self.assertEqual(window.display_mode, "collapsed")
-            window._toggle_expanded()
-            self.assertEqual(window.display_mode, "strip")
             window._toggle_expanded()
             self.assertTrue(window.expanded)
             self.assertEqual(window.display_mode, "full")
             find("reconcile-button")
             window._toggle_expanded()
             self.assertFalse(window.expanded)
-            self.assertEqual(window.display_mode, "collapsed")
+            self.assertEqual(window.display_mode, "strip")
+            window._set_display_mode("collapsed")
             # Actions render from daemon truth without raising.
             window._on_pause()
             text = companion.format_view_text(window.model)
@@ -827,8 +827,7 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.assertEqual(self.client.calls, [])
 
     def test_expanded_height_includes_diagnostic_textareas(self):
-        # Two toggles advance collapsed → strip → full.
-        self.window._toggle_expanded()
+        # One toggle advances collapsed → full.
         self.window._toggle_expanded()
         self.assertEqual(
             self.window._active_window_height(),
@@ -853,19 +852,15 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.assertEqual(self.client.calls, [])
 
     def test_expand_toggle(self):
-        # Cycle: collapsed → strip → full → collapsed.
+        # Toggle: collapsed → full → strip; strip click → full.
         self.assertFalse(self.window.expanded)
         self.assertEqual(self.window.display_mode, "collapsed")
-        self.window._toggle_expanded()
-        self.assertEqual(self.window.display_mode, "strip")
-        self.assertFalse(self.window.expanded)
-        self.assertFalse(self.window.details.packed)
         self.window._toggle_expanded()
         self.assertTrue(self.window.expanded)
         self.assertEqual(self.window.display_mode, "full")
         self.assertTrue(self.window.details.packed)
         self.window._toggle_expanded()
-        self.assertEqual(self.window.display_mode, "collapsed")
+        self.assertEqual(self.window.display_mode, "strip")
         self.assertFalse(self.window.expanded)
         self.assertFalse(self.window.details.packed)
 
@@ -894,7 +889,7 @@ class HeadlessWidgetTest(unittest.TestCase):
         self.window._refresh()
         self.assertEqual(self.window.model["indicator"], "working")
         self.assertIn("refused", self.window.model["failure"])
-        self.assertIn("failure: daemon unreachable", self.window.status_text.content)
+        self.assertIn("failure: daemon unreachable", self.window.context_log.content)
 
     def test_apply_valid_hotkey_persists(self):
         self.window.hotkey_var.set("Alt+F9")
@@ -918,7 +913,7 @@ class HeadlessWidgetTest(unittest.TestCase):
             FakeTkRoot(), FakeClient(), adapter, "Ctrl+Esc"
         )
         self.assertFalse(window.hotkey_active)
-        self.assertIn("taken", window.status_text.content)
+        self.assertIn("taken", window.context_log.content)
 
     def test_reconcile_editor_session_notices(self):
         self.window._on_reconcile()
