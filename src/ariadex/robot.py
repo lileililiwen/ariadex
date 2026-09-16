@@ -379,6 +379,19 @@ FRESH_EXHAUSTION_LIMIT = 3
 #: within the existing poll-interval bounds.
 APPROVAL_REASK_QUIET_POLLS = 3
 
+#: Total approval-input sends for one persisting approved request
+#: (the initial send plus at most two retries); afterwards the watcher
+#: parks visibly instead of sending again.
+PERMISSION_MAX_SENDS = 3
+
+#: Polls a persisting approved surface must outlast before a retry
+#: send; mirrors the approval re-ask quiet scale.
+PERMISSION_RETRY_QUIET_POLLS = APPROVAL_REASK_QUIET_POLLS
+
+#: Identical permission-waiting diagnostics are recorded on the
+#: transition and then at most once per this many repeats.
+PERMISSION_DIAG_REPEAT_WINDOW = 3
+
 
 class RobotError(Exception):
     """Typed robot failure: configuration, session, or boundary refusal."""
@@ -1074,6 +1087,19 @@ class RobotWatcher:
         #: (provider/operation/normalized path). A repeated surface for the
         #: same key waits instead of resending approval input.
         self._last_permission_key = ""
+        #: Bounded per-episode approval-send memory for the current key:
+        #: `sends` counts adapter-owned inputs sent, `quiet` counts polls
+        #: since the last send, `via` names the last send method
+        #: ("keys" or "text"), `parked` marks the visible no-more-sends
+        #: state, and `last_summary`/`diag_repeats` throttle identical
+        #: waiting diagnostics. All are cleared on any non-approval
+        #: surface, exactly like the re-ask episode state below.
+        self._permission_sends = 0
+        self._permission_quiet = 0
+        self._permission_via = ""
+        self._permission_parked = False
+        self._permission_last_summary = ""
+        self._permission_diag_repeats = 0
         #: Bounded per-episode approval re-ask state. `asks` counts the
         #: unconfirmed questions sent for the current stuck dialog;
         #: `quiet` counts polls since the last ask while a re-ask is
@@ -1459,14 +1485,45 @@ class RobotWatcher:
             list(cfg.permission_allowlist),
         )
 
+    def _describe_last_send(self, keys: list[str], approve_input: str) -> str:
+        """Human-readable name of the last approval input sent (bounded)."""
+        if self._permission_via == "keys":
+            names = " ".join(keys[:8]) if keys else "selector keys"
+            return f"keys [{names}]"
+        text = (approve_input or "")[:16]
+        return f"text `{text}`"
+
+    def _throttle_identical_waiting(self, summary: str) -> bool:
+        """True when this identical waiting summary should skip recording.
+
+        The transition is always recorded; repeats are recorded at most
+        once per `PERMISSION_DIAG_REPEAT_WINDOW`. Keeps the diagnostic
+        stream bounded while a surface persists.
+        """
+        if summary != self._permission_last_summary:
+            self._permission_last_summary = summary
+            self._permission_diag_repeats = 0
+            return False
+        self._permission_diag_repeats += 1
+        return self._permission_diag_repeats % PERMISSION_DIAG_REPEAT_WINDOW != 0
+
+    def _waiting_phase(self, summary: str) -> None:
+        """Park in WAITING on a throttled repeat without recording."""
+        self.phase = WAITING
+        self.stable_polls = 0
+        self.block_reason = summary
+
     def _handle_approval(self, capture: str) -> str:
         """Evaluate one provider approval surface against the policy.
 
         Returns the watcher phase (always WAITING for approvals). Sends
         the adapter-owned keystroke (or key sequence for choice-selector
         surfaces) only for a verified, contained request under an auto
-        policy, at most once per distinct request. Every other surface
-        waits for explicit human action with the exact reason recorded;
+        policy, at most three sends per distinct request: the initial
+        send, a same-input retry, then an alternate-input retry when
+        the adapter declares both. A surface that outlasts all sends
+        parks visibly with the manual step. Every other surface waits
+        for explicit human action with the exact reason recorded;
         nothing is ever denied blindly or approved without a parsed
         operation and contained path.
         """
@@ -1523,17 +1580,77 @@ class RobotWatcher:
                 (decision.provider, decision.operation, decision.normalized_path)
             )
             if key and key == self._last_permission_key:
-                decision = permissions_mod.PermissionDecision(
-                    decision.provider,
-                    decision.operation,
-                    decision.requested_path,
-                    decision.normalized_path,
-                    decision.policy,
-                    "waiting",
-                    "already approved once; waiting for the provider to "
-                    "proceed instead of resending approval input",
-                )
-                summary = permissions_mod.decision_summary(decision)
+                self._permission_quiet += 1
+                if self._permission_sends >= PERMISSION_MAX_SENDS:
+                    decision = permissions_mod.PermissionDecision(
+                        decision.provider,
+                        decision.operation,
+                        decision.requested_path,
+                        decision.normalized_path,
+                        decision.policy,
+                        "waiting",
+                        f"approval input sent {PERMISSION_MAX_SENDS} times "
+                        f"without progress for `{decision.operation}` at "
+                        f"`{decision.normalized_path}` via "
+                        f"{self._describe_last_send(keys, decision.approve_input)}; "
+                        "answer the approval in the provider session",
+                    )
+                    self._permission_parked = True
+                    summary = permissions_mod.decision_summary(decision)
+                    if self._throttle_identical_waiting(summary):
+                        self._waiting_phase(summary)
+                        return self.phase
+                elif self._permission_quiet >= PERMISSION_RETRY_QUIET_POLLS:
+                    send_keys_now = use_keys
+                    if self._permission_sends >= 2:
+                        # Second retry: try the alternate input when the
+                        # adapter declares both, in case the first input
+                        # never dismissed the live surface.
+                        if self._permission_via == "keys" and decision.approve_input:
+                            send_keys_now = False
+                        elif self._permission_via == "text" and use_keys:
+                            send_keys_now = True
+                    try:
+                        if send_keys_now:
+                            self._send_keys(keys)
+                        else:
+                            self._send(decision.approve_input)
+                    except RobotError as exc:
+                        decision = permissions_mod.PermissionDecision(
+                            decision.provider,
+                            decision.operation,
+                            decision.requested_path,
+                            decision.normalized_path,
+                            decision.policy,
+                            "waiting",
+                            f"approval delivery failed ({exc}); answer the "
+                            "approval in the provider session",
+                        )
+                        summary = permissions_mod.decision_summary(decision)
+                    else:
+                        self.permissions_granted += 1
+                        self._permission_sends += 1
+                        self._permission_quiet = 0
+                        self._permission_via = "keys" if send_keys_now else "text"
+                        self._permission_parked = False
+                else:
+                    decision = permissions_mod.PermissionDecision(
+                        decision.provider,
+                        decision.operation,
+                        decision.requested_path,
+                        decision.normalized_path,
+                        decision.policy,
+                        "waiting",
+                        f"already approved ({self._permission_sends}/"
+                        f"{PERMISSION_MAX_SENDS} sends); waiting for the "
+                        "provider to proceed; retrying while the surface "
+                        "persists, else answer the approval in the provider "
+                        "session",
+                    )
+                    summary = permissions_mod.decision_summary(decision)
+                    if self._throttle_identical_waiting(summary):
+                        self._waiting_phase(summary)
+                        return self.phase
             else:
                 try:
                     if use_keys:
@@ -1555,6 +1672,10 @@ class RobotWatcher:
                 else:
                     self.permissions_granted += 1
                     self._last_permission_key = key
+                    self._permission_sends = 1
+                    self._permission_quiet = 0
+                    self._permission_via = "keys" if use_keys else "text"
+                    self._permission_parked = False
         elif decision.result == "allow":
             decision = permissions_mod.PermissionDecision(
                 decision.provider,
@@ -1888,6 +2009,13 @@ class RobotWatcher:
             self._approval_quiet = 0
             self._approval_rearm = False
             self._approval_escalated = False
+            self._last_permission_key = ""
+            self._permission_sends = 0
+            self._permission_quiet = 0
+            self._permission_via = ""
+            self._permission_parked = False
+            self._permission_last_summary = ""
+            self._permission_diag_repeats = 0
         if observed == CLASS_APPROVAL:
             # Approval/confirmation belongs to the provider conversation.
             # The permission policy decides: contained temp-root or
