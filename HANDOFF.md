@@ -130,6 +130,26 @@ that promotion has been skipped or failed.
 
 ## Current state
 
+- Implemented, verified, and archived: `permission-approval-retry`
+  (archived as `2026-09-16-permission-approval-retry`). A persisting
+  approved surface is now retried at most twice more at spaced polls
+  (same input, then the alternate selector/text input when the
+  adapter declares both), then parks visibly naming the sent input,
+  operation, path, and manual step; the dedup key and retry counters
+  reset on any non-approval classification; identical waiting
+  diagnostics record transitions plus one reminder per 3 repeats.
+  Verified with 6 new `tests/test_approval_retry.py` tests (4 proven
+  to fail on old code; 2 pin unchanged waiting/deny and selector
+  behavior), touched suites (73 permissions/approval-recovery + 210
+  robot/adapter/diagnostics/boundary/runner tests OK), full 1601-test
+  suite except the pre-existing tmux `list-panes` environment error,
+  Ruff check/format clean, mypy clean on touched files,
+  `openspec validate --changes --strict` (1/1 at archive) and
+  `--specs --strict` (68/68) passed; promoted into
+  `robot-agent-supervisor` and `observability`. Active queue after
+  archive: `widget-build-version` (unimplemented; tracked under Next
+  change).
+
 - Implemented, verified, and archived: `widget-ux-repair`
   (archived as `2026-09-16-widget-ux-repair`). The toggle path now
   goes collapsed → full → strip (one click from collapsed reveals
@@ -986,12 +1006,11 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Active OpenSpec queue: none (openspec list reports no active
-changes; the widget, approval-reply, and watcher-stall changes are
-all archived). The next implementation must propose a change first,
-then select exactly one active change per the workflow in
-.ai-rules/workflow.md and update this handoff only after its verified
-archive.
+Active OpenSpec queue: `widget-build-version` (widget/status
+version row shows the `describe_build()` build identity matching
+`-V`; drift stays on bare versions). Implement exactly one active
+change at a time per the workflow in .ai-rules/workflow.md and
+update this handoff only after its verified archive.
 
 ## Latest change: widget live log and queue visibility
 
