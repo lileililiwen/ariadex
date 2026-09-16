@@ -102,6 +102,17 @@ def parse_readiness_reply(capture: str, baseline: str) -> str | None:
 CONFIRM_BACKUP_TEXT = "Reply with exactly one line: DONE or NOT DONE."
 
 
+#: Fixed complete-and-commit order for the commit-fallback path. Sent
+#: as provider input when a commit question is vetoed, so the fresh
+#: confirmation conversation carries an actionable order instead of a
+#: generic prompt. Single constant so the veto call and the recovery
+#: cannot drift apart.
+COMMIT_INSTRUCTION = (
+    "Continue to complete all remaining work for the current spec and "
+    "commit it. Do not start the next spec until the tree is committed."
+)
+
+
 def commit_readiness_ask_text(spec: str) -> str:
     """Natural commit confirm question (protocol text, never configured).
 
@@ -2328,11 +2339,14 @@ class RobotWatcher:
             self.phase = PAUSED
             self._record("pause", "automatic continuation cancelled by operator")
             return self.phase
-        if check.decision == "complete" and next_target.strip():
+        if check.decision == "complete" and (check.current_spec or "").strip():
             # Finished work for a recorded change: confirm finished and
             # committed before advancing, so the next spec never starts
             # on uncommitted work. The ask vetoes only: a clear no (or
-            # NOT DONE) waits with no reset, anything else advances.
+            # NOT DONE) continues to confirmation with the commit order
+            # instead of parking, anything else advances. The recorded
+            # target is required: the proof path (no recorded change)
+            # advances as today.
             commit = self._ask_confirm(
                 next_target,
                 list(check.active),
@@ -2343,32 +2357,12 @@ class RobotWatcher:
             if commit in ("paused", "stopped"):
                 return self._abort_fresh_wait(next_target, list(check.active))
             if commit == "not-done":
-                # Veto: the agent is not finished and committed. Keep
-                # watching the current conversation with no reset; the next
-                # finished screen asks again. Only the agent judges commit
-                # state — the tree is never inspected.
-                self.stable_polls = 0
-                self.phase = WORKING if self.initial_sent else ATTACHED
-                self._record(
-                    "readiness",
-                    f"agent reports NOT DONE for `{next_target}`; advance "
-                    "vetoed, watching continues",
+                return self._open_confirmation(
+                    check,
+                    COMMIT_INSTRUCTION,
+                    send_instruction=True,
+                    skip_ask=True,
                 )
-                self._diag(
-                    "prompt",
-                    "commit reply NOT DONE; advance vetoed",
-                    result="working",
-                    message=f"agent reports NOT DONE for `{next_target}`; "
-                    "advance vetoed, watching continues",
-                    current_spec=next_target,
-                    open_tasks=0,
-                    active_queue=tuple(check.active),
-                    evidence_source=check.evidence_source,
-                    decision="working",
-                    operation="commit-ask",
-                    next_action="keep watching; ask again on the next advance",
-                )
-                return self.phase
         # "done" or undecided (timeout/garbage): advance as today.
         self.phase = NEW_CONVERSATION
         try:
@@ -2616,7 +2610,13 @@ class RobotWatcher:
             parser=parse_confirmation_reply,
         )
 
-    def _open_confirmation(self, check: BoundaryCheck, instruction: str = "") -> str:
+    def _open_confirmation(
+        self,
+        check: BoundaryCheck,
+        instruction: str = "",
+        send_instruction: bool = False,
+        skip_ask: bool = False,
+    ) -> str:
         """Recover unfinished tasks via the adapter contract only.
 
         The confirmation target is recorded before any provider input.
@@ -2664,50 +2664,55 @@ class RobotWatcher:
             self.phase = PAUSED
             self._record("pause", "automatic confirmation cancelled by operator")
             return self.phase
-        if check.decision == "ready-to-archive":
-            # Complete tasks, still active: confirm finished-and-committed
-            # before the archival recovery, so the next spec never starts
-            # on uncommitted work. Natural question first, strict backup
-            # on an unclear reply; only the agent judges commit state.
-            ask = self._ask_confirm(
-                target,
-                list(check.active),
-                check.evidence_source,
-                "commit",
-                commit_readiness_ask_text(target),
-            )
-        else:
-            ask = self._ask_readiness(
-                target,
-                check.open_tasks,
-                list(check.active),
-                check.evidence_source,
-            )
-        if ask in ("paused", "stopped"):
-            return self._abort_fresh_wait(target, list(check.active))
-        if ask in ("working", "not-done"):
-            self.stable_polls = 0
-            self.phase = WORKING if self.initial_sent else ATTACHED
-            self._record(
-                "readiness",
-                f"agent reports {ask.upper()} for `{target}`; no reset "
-                "performed, watching continues",
-            )
-            self._diag(
-                "prompt",
-                f"readiness reply {ask.upper()}",
-                result="working",
-                message=f"agent reports {ask.upper()} for `{target}`; "
-                "no reset performed",
-                current_spec=target,
-                open_tasks=check.open_tasks,
-                active_queue=tuple(check.active),
-                evidence_source=check.evidence_source,
-                decision="working",
-                operation="readiness-ask",
-                next_action="keep watching the current conversation",
-            )
-            return self.phase
+        if not skip_ask:
+            if check.decision == "ready-to-archive":
+                # Complete tasks, still active: confirm finished-and-committed
+                # before the archival recovery, so the next spec never starts
+                # on uncommitted work. Natural question first, strict backup
+                # on an unclear reply; only the agent judges commit state.
+                commit_ask = True
+                ask = self._ask_confirm(
+                    target,
+                    list(check.active),
+                    check.evidence_source,
+                    "commit",
+                    commit_readiness_ask_text(target),
+                )
+            else:
+                commit_ask = False
+                ask = self._ask_readiness(
+                    target,
+                    check.open_tasks,
+                    list(check.active),
+                    check.evidence_source,
+                )
+            if ask in ("paused", "stopped"):
+                return self._abort_fresh_wait(target, list(check.active))
+            if ask == "working" or (ask == "not-done" and not commit_ask):
+                # A commit NO falls through to confirmation recovery below;
+                # only the task ask still parks without reset.
+                self.stable_polls = 0
+                self.phase = WORKING if self.initial_sent else ATTACHED
+                self._record(
+                    "readiness",
+                    f"agent reports {ask.upper()} for `{target}`; no reset "
+                    "performed, watching continues",
+                )
+                self._diag(
+                    "prompt",
+                    f"readiness reply {ask.upper()}",
+                    result="working",
+                    message=f"agent reports {ask.upper()} for `{target}`; "
+                    "no reset performed",
+                    current_spec=target,
+                    open_tasks=check.open_tasks,
+                    active_queue=tuple(check.active),
+                    evidence_source=check.evidence_source,
+                    decision="working",
+                    operation="readiness-ask",
+                    next_action="keep watching the current conversation",
+                )
+                return self.phase
         self.phase = NEW_CONVERSATION
         detail = check.task_detail or (
             f"`{check.current_spec}` has {check.open_tasks} open task(s)"
@@ -2796,8 +2801,14 @@ class RobotWatcher:
             "fresh input-ready surface observed after "
             f"{self.last_fresh_ready_attempts} attempt(s)",
         )
-        self._send(self.config.confirmation_prompt)
-        self._remember_prompt(self.config.confirmation_prompt)
+        prompt = self.config.confirmation_prompt
+        if send_instruction and instruction.strip():
+            # The commit order must reach the provider session as input,
+            # not only the diagnostic record; other recoveries keep the
+            # configured confirmation prompt byte-identical.
+            prompt = f"{prompt}\n{instruction.strip()}"
+        self._send(prompt)
+        self._remember_prompt(prompt)
         self.prompts_sent += 1
         self._fresh_exhaustions = 0
         self.confirmations_sent += 1

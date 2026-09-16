@@ -241,17 +241,19 @@ class CommitVetoTest(unittest.TestCase):
         with unittest.mock.patch.object(
             watcher,
             "_capture",
-            side_effect=[READY, READY, READY, echo, replied, replied],
+            side_effect=[READY, READY, READY, echo, replied, replied] + [READY] * 6,
         ):
-            phase = watcher.poll()
-        self.assertIn(phase, ("working", "attached"))
+            self.assertEqual(watcher.poll(), "continuing")
         sent = driver.sent_inputs("agent")
         self.assertEqual(sent[0], "please start")
         self.assertIn("finished and committed", sent[1])
-        # Clear no: vetoed, no reset, no backup needed.
-        self.assertNotIn("/new", sent)
-        self.assertEqual(len(sent), 2)
-        self.assertEqual(watcher.confirmations_sent, 0)
+        # Clear no: no advance, no park — the fresh confirmation
+        # conversation carries the commit order instead.
+        self.assertNotIn("please continue", sent)
+        self.assertIn("/new", sent)
+        self.assertTrue(sent[-1].startswith("please finish the rest"))
+        self.assertIn(robot_mod.COMMIT_INSTRUCTION, sent[-1])
+        self.assertEqual(watcher.confirmations_sent, 1)
 
     def test_done_advances_as_today(self) -> None:
         project = make_project(self._tmp)
@@ -343,6 +345,29 @@ class PromptSelectionTest(unittest.TestCase):
         self.assertTrue(
             any("archive" in entry["message"] for entry in view["activity"])
         )
+
+    def test_archival_no_reaches_confirmation_instead_of_parking(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [x] Done\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        watcher = make_watcher(project, driver)
+        watcher.poll()  # initial prompt
+        echo = READY + "question-echo\n"
+        replied = echo + "NOT DONE\n"
+        with unittest.mock.patch.object(
+            watcher,
+            "_capture",
+            side_effect=[READY, READY, echo, replied, replied] + [READY] * 6,
+        ):
+            self.assertEqual(watcher.poll(), "continuing")
+        sent = driver.sent_inputs("agent")
+        self.assertIn("finished and committed", sent[1])
+        # NO on the archival path recovers with the archival
+        # confirmation instead of stalling in watching.
+        self.assertIn("/new", sent)
+        self.assertEqual(sent[-1], "please finish the rest")
+        self.assertEqual(watcher.confirmations_sent, 1)
 
     def test_empty_queue_stops_without_any_prompt(self) -> None:
         project = make_project(self._tmp)

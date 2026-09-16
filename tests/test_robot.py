@@ -132,13 +132,7 @@ class ClassifyTest(unittest.TestCase):
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
         self.assertEqual(
             driver.sent_inputs("agent"),
-            [
-                "please start",
-                robot_mod.commit_readiness_ask_text("next-change"),
-                robot_mod.CONFIRM_BACKUP_TEXT,
-                "/new",
-                robot_mod.DEFAULT_CONTINUATION_PROMPT,
-            ],
+            ["please start", "/new", robot_mod.DEFAULT_CONTINUATION_PROMPT],
         )
 
     def test_opencode_ready_is_finished(self) -> None:
