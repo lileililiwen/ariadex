@@ -76,6 +76,22 @@ that promotion has been skipped or failed.
 
 ## Current state
 
+- Implemented, verified, and archived: `spec-advance-safety`
+  (archived as `2026-09-16-spec-advance-safety`). Confirm-first
+  advance safety with no git inspection: natural confirm question
+  first ("finished and committed?"), strict DONE-or-NOT-DONE backup
+  only on unclear replies; clear yes advances, clear no vetoes and
+  waits with re-ask; timeout/garbage advances as today. Unparsable
+  approvals get one two-step confirmation per episode and never
+  reset. Directory parse falls through on file failure; approval
+  markers are UI phrases (bare `confirm` removed). Verified with
+  new behavior tests plus touched suites (267 focused tests OK),
+  new tests proven to fail on old code, Ruff check/format clean,
+  mypy clean, `openspec validate --changes/--specs --strict`
+  passed; promoted into
+  `openspec/specs/robot-agent-supervisor/spec.md`. Queue empty at
+  archive time.
+
 - Implemented, verified, and archived: `provider-directory-approval`
   (archived as `2026-09-15-provider-directory-approval`). Approval
   surfaces now win over busy provider state so the permission branch
