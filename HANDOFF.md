@@ -130,6 +130,24 @@ that promotion has been skipped or failed.
 
 ## Current state
 
+- Implemented, verified, and archived: `widget-build-version`
+  (archived as `2026-09-16-widget-build-version`).
+  `version_snapshot()` now carries `build` from `describe_build()`
+  probed at the package directory (editable checkout resolves its
+  commit; installs fail soft to bare); the daemon view and CLI
+  status merge carry `build_version`; the widget row and
+  `format_status_text` prefer it (matching `-V`); drift compares
+  bare versions only; `upgrade --check` passes an explicit build to
+  stay zero-subprocess. Verified with 8 new
+  `tests/test_widget_build_version.py` tests plus the updated
+  daemon-preference companion test (4 proven to fail on old code),
+  touched suites (199 companion/upgrade/daemon/packaging/theme/
+  approval-retry/build-version tests OK), full 1601-test suite
+  except the pre-existing tmux `list-panes` environment error,
+  Ruff check/format clean, mypy clean on touched files,
+  `--specs --strict` (68/68) passed; promoted into `companion`.
+  Queue empty at archive time (`openspec list`: no active changes).
+
 - Implemented, verified, and archived: `permission-approval-retry`
   (archived as `2026-09-16-permission-approval-retry`). A persisting
   approved surface is now retried at most twice more at spaced polls
@@ -1006,11 +1024,12 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Active OpenSpec queue: `widget-build-version` (widget/status
-version row shows the `describe_build()` build identity matching
-`-V`; drift stays on bare versions). Implement exactly one active
-change at a time per the workflow in .ai-rules/workflow.md and
-update this handoff only after its verified archive.
+Active OpenSpec queue: none (openspec list reports no active
+changes; `permission-approval-retry` and `widget-build-version`
+are archived). The next implementation must propose a change first,
+then select exactly one active change per the workflow in
+.ai-rules/workflow.md and update this handoff only after its verified
+archive.
 
 ## Latest change: widget live log and queue visibility
 
