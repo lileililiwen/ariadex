@@ -130,6 +130,36 @@ that promotion has been skipped or failed.
 
 ## Current state
 
+- Implemented, verified, and archived: `widget-ux-repair`
+  (archived as `2026-09-16-widget-ux-repair`). The toggle path now
+  goes collapsed → full → strip (one click from collapsed reveals
+  Retry/Model/Message; strip stays reachable from full and via its
+  drag-handle click, which still expands strip → full); the
+  expanded view carries exactly one read-only log surface
+  (`format_merged_log_text`: `[context]` managed projection head
+  plus `[status]` activity body with `context:`/`latest:` and
+  cross-surface duplicates removed, follow-tail and scrollbar
+  kept, retired `status_text` hidden/cleared/disabled, `Copy log`
+  copies the single surface); the model selector re-applies the
+  `optionmenu`/`menu` theme roles on every refresh, sizes to the
+  longest option, and packs last (popup opens over the feedback
+  line, never the message textarea) — hub inherits via the shared
+  builder. Verified with 13 new `tests/test_widget_ux_repair.py`
+  tests (11 proven to fail on old code; 2 pin unchanged
+  no-input/strip-click behavior), touched suites (420 tests OK
+  across companion/mini-collapse/widget-context/widget-placement/
+  manual-actions/log-autoscroll/log-governance/theme/hub-keymap/
+  robot-hub/docs-consistency), remaining suites per-file OK except
+  the pre-existing tmux `list-panes` environment failure (fails
+  identically on the clean tree) and the pre-existing Tk/X11
+  single-process race (full discover aborts on this host;
+  evidence per batch), Ruff check/format clean, mypy at baseline
+  (13 pre-existing, none in touched files), `openspec validate
+  --changes --strict` (1/1) and `--specs --strict` (68/68)
+  passed; promoted into
+  `openspec/specs/robot-widget-runtime/spec.md`. Queue empty at
+  archive time (`openspec list`: no active changes).
+
 - Implemented, verified, and archived: `commit-veto-confirmation`
   (archived as `2026-09-16-commit-veto-confirmation`). A NOT DONE
   reply to the commit question now continues to the confirmation
