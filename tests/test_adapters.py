@@ -1,5 +1,6 @@
 """Tests for the AgentAdapter lifecycle contract and reset selection."""
 
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -16,7 +17,12 @@ from ariadex.adapters import (
     UnsupportedOperation,
     select_reset,
 )
-from ariadex.terminal import FakeTerminalDriver, SessionMissing, TmuxNotAvailable
+from ariadex.terminal import (
+    FakeTerminalDriver,
+    SessionMissing,
+    TmuxDriver,
+    TmuxNotAvailable,
+)
 
 
 def make_open_code(driver=None):
@@ -37,6 +43,26 @@ class LifecycleTest(unittest.TestCase):
         adapter, _driver = make_open_code()
         adapter.start()
         self.assertEqual(adapter.start(), "connected")
+
+    def test_start_survives_vanished_pane_pid(self):
+        # 4194304 exceeds the maximum Linux pid: process_identity must
+        # raise NoSuchProcess, and start() must still report success
+        # with no runtime record instead of escaping the exception.
+        with tempfile.TemporaryDirectory() as tmp:
+            driver = mock.create_autospec(TmuxDriver, instance=True)
+            driver.create_or_connect.return_value = "created"
+            driver.session_pid.return_value = 4194304
+            adapter = providers.OpenCodeAdapter(driver, "test-session", tmp)
+            with (
+                mock.patch.object(provider_runtime, "find_process", return_value=None),
+                mock.patch.object(
+                    provider_runtime,
+                    "endpoint_is_responsive",
+                    return_value=False,
+                ),
+            ):
+                self.assertEqual(adapter.start(), "created")
+            self.assertIsNone(provider_runtime.read_record(Path(tmp)))
 
     def test_send_delivers_text(self):
         adapter, driver = make_open_code()

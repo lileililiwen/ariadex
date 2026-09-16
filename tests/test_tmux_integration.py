@@ -50,6 +50,14 @@ class FakeTmuxServer:
             return self._result(0, "", "")
         if verb == "list-sessions":
             return self._result(0, "\n".join(sorted(self.sessions)), "")
+        if verb == "list-panes":
+            name = cmd[cmd.index("-t") + 1]
+            if name not in self.sessions:
+                return self._result(1, "", "no such session")
+            # Fresh session with no foreground pid yet: the driver maps
+            # empty output to None and the adapter skips runtime-record
+            # identity, exactly like the product's unparseable branch.
+            return self._result(0, "", "")
         return self._result(1, "", f"unexpected tmux verb {verb!r}")
 
     @staticmethod

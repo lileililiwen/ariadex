@@ -31,6 +31,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+import psutil
+
 from . import diagnostics as diagnostics_mod
 from . import provider_runtime
 from .adapters import (
@@ -241,7 +243,11 @@ class OpenCodeAdapter(AgentAdapter):
             if process is None:
                 pid = self.driver.session_pid(self.session_name)
                 if pid is not None:
-                    with contextlib.suppress(OSError, ValueError):
+                    # Identity is best-effort: the pane process may exit
+                    # between the probe and this call (NoSuchProcess is a
+                    # psutil.Error, not an OSError). A start whose session
+                    # was created reports success with no runtime record.
+                    with contextlib.suppress(OSError, ValueError, psutil.Error):
                         process = provider_runtime.process_identity(pid)
             if process is not None:
                 provider_runtime.write_record(

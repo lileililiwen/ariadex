@@ -1,8 +1,5 @@
-# agent-adapter Specification
+## MODIFIED Requirements
 
-## Purpose
-Defines the provider-neutral adapter contract: one lifecycle interface (start, send, interrupt, new-session, capture, idle detection, terminate) with explicit capability reporting, so the runner drives OpenCode, Codex, or future providers without provider-specific commands.
-## Requirements
 ### Requirement: Providers implement one lifecycle contract
 
 Each provider adapter MUST implement start, send, interrupt, new-session, output capture, idle detection, and terminate operations, or explicitly report an unsupported operation. Provider start MUST NOT fail when the pane pid vanishes between the session probe and process identity: runtime-record identity is best-effort, and a start whose session was created MUST report success with no runtime record rather than raise.
@@ -14,12 +11,3 @@ Each provider adapter MUST implement start, send, interrupt, new-session, output
 #### Scenario: Start survives a vanished pane pid
 - **WHEN** the session is created but its pid exits before process identity resolves
 - **THEN** `start()` returns success and writes no runtime record instead of raising
-
-### Requirement: Capabilities are inspectable
-
-An adapter MUST expose interactive, soft-reset, hard-reset, token-usage, structured-output, interrupt, and manual-takeover capabilities.
-
-#### Scenario: Usage is unavailable
-- **WHEN** a provider does not expose token usage
-- **THEN** the adapter reports `token_usage: false` and metrics use `usage: unavailable`
-
