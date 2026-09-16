@@ -7,6 +7,7 @@ safety, bounded redacted activity events, pure widget view models, and
 Tk expand/collapse wiring.
 """
 
+import contextlib
 import sys
 import tempfile
 import types
@@ -86,9 +87,10 @@ def make_watcher(
 
 
 def clean_git(test: unittest.TestCase):
-    return unittest.mock.patch.object(
-        robot_mod, "_git_tree_clean", return_value=(True, "")
-    )
+    # No-op retained for call-site compatibility: commit state is judged
+    # by the agent through the commit ask, never by inspecting git, so
+    # tests need no tree mocking.
+    return contextlib.nullcontext()
 
 
 class ConfirmationConfigTest(unittest.TestCase):
@@ -209,6 +211,68 @@ class BoundaryDecisionTest(unittest.TestCase):
         self.assertTrue(check.ok)
         self.assertEqual(check.decision, "unfinished")
         self.assertEqual(check.current_spec, "other")
+
+
+class CommitVetoTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp: list = []
+        self.addCleanup(lambda: [tmp.cleanup() for tmp in self._tmp])
+
+    def _stub_complete(self, watcher):
+        real_check = robot_mod.check_boundary
+        robot_mod.check_boundary = lambda *a, **k: robot_mod.BoundaryCheck(  # type: ignore[assignment]
+            ok=True,
+            active=["next-change"],
+            decision="complete",
+            current_spec="demo",
+        )
+        self.addCleanup(setattr, robot_mod, "check_boundary", real_check)
+
+    def test_not_done_vetoes_advance_without_reset(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [x] Done\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        watcher = make_watcher(project, driver, debounce_polls=1)
+        self._stub_complete(watcher)
+        watcher.poll()  # initial prompt
+        echo = READY + "question-echo\n"
+        replied = echo + "NOT DONE\n"
+        with unittest.mock.patch.object(
+            watcher,
+            "_capture",
+            side_effect=[READY, READY, READY, echo, replied, replied],
+        ):
+            phase = watcher.poll()
+        self.assertIn(phase, ("working", "attached"))
+        sent = driver.sent_inputs("agent")
+        self.assertEqual(sent[0], "please start")
+        self.assertIn("finished and committed", sent[1])
+        # Clear no: vetoed, no reset, no backup needed.
+        self.assertNotIn("/new", sent)
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(watcher.confirmations_sent, 0)
+
+    def test_done_advances_as_today(self) -> None:
+        project = make_project(self._tmp)
+        make_change(project, "demo", "# Tasks\n\n- [x] Done\n")
+        driver = FakeDriver()
+        driver.sessions["agent"] = {"command": [], "output": READY, "workdir": "/t"}
+        watcher = make_watcher(project, driver, debounce_polls=1)
+        self._stub_complete(watcher)
+        watcher.poll()  # initial prompt
+        echo = READY + "question-echo\n"
+        replied = echo + "DONE\n"
+        with unittest.mock.patch.object(
+            watcher,
+            "_capture",
+            side_effect=[READY, READY, READY, echo, replied, replied] + [READY] * 6,
+        ):
+            self.assertEqual(watcher.poll(), "continuing")
+        sent = driver.sent_inputs("agent")
+        self.assertIn("finished and committed", sent[1])
+        self.assertIn("/new", sent)
+        self.assertEqual(sent[-1], "please continue")
 
 
 class PromptSelectionTest(unittest.TestCase):
@@ -346,7 +410,16 @@ class PromptSelectionTest(unittest.TestCase):
                 watcher = make_watcher(project, driver)
                 with clean_git(self):
                     self.assertEqual(watcher.poll(), phase)
-                self.assertEqual(driver.sent_inputs("agent"), [])
+                sent = driver.sent_inputs("agent")
+                if surface == APPROVAL:
+                    # One unconfirmed episode (natural question plus the
+                    # strict backup), still no confirmation or reset.
+                    self.assertEqual(len(sent), 2)
+                    self.assertIn("approval prompt is showing", sent[0])
+                    self.assertEqual(sent[1], robot_mod.CONFIRM_BACKUP_TEXT)
+                else:
+                    self.assertEqual(sent, [])
+                self.assertNotIn("/new", sent)
                 self.assertEqual(watcher.confirmations_sent, 0)
 
     def test_confirmation_refires_when_fresh_surface_missing(self) -> None:
@@ -699,6 +772,28 @@ class ReadinessAskTest(unittest.TestCase):
         self.assertIsNone(parse("base DONE\n", "base\n"))
         self.assertIsNone(parse("DONE\nmore\n", "DONE\n"))
         self.assertIsNone(parse("", ""))
+
+    def test_confirm_parser_matrix(self) -> None:
+        parse = robot_mod.parse_confirmation_reply
+        self.assertEqual(parse("base\nDONE\n", "base\n"), "done")
+        self.assertEqual(parse("base\nNOT DONE\n", "base\n"), "not-done")
+        self.assertEqual(parse("base\n  not done  \n", "base\n"), "not-done")
+        self.assertEqual(parse("base\nNOTDONE\n", "base\n"), "not-done")
+        self.assertEqual(parse("base\nWORKING\n", "base\n"), "not-done")
+        self.assertIsNone(parse("base\n", "base\n"))
+        self.assertIsNone(parse("base\necho\n", "base\n"))
+        self.assertIsNone(parse("base\necho\nDONE\nthanks\n", "base\n"))
+        self.assertIsNone(parse("base DONE\n", "base\n"))
+        self.assertIsNone(parse("", ""))
+
+    def test_confirm_ask_texts(self) -> None:
+        natural = robot_mod.commit_readiness_ask_text("demo")
+        self.assertIn("finished and committed", natural)
+        self.assertNotIn("DONE", natural)
+        self.assertIn("NOT DONE", robot_mod.CONFIRM_BACKUP_TEXT)
+        approval = robot_mod.unconfirmed_approval_text("some reason")
+        self.assertIn("approval prompt is showing", approval)
+        self.assertIn("some reason", approval)
 
     def test_working_reply_skips_reset(self) -> None:
         project = make_project(self._tmp)

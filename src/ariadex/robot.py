@@ -55,6 +55,13 @@ READINESS_REPLY_DONE = "DONE"
 READINESS_REPLY_WORKING = "WORKING"
 READINESS_REPLIES = (READINESS_REPLY_DONE, READINESS_REPLY_WORKING)
 
+#: Strict backup tokens for confirm questions. The natural confirm
+#: question comes first; only an unclear reply reaches the backup, which
+#: demands exactly one line: DONE or NOT DONE. Legacy WORKING still
+#: counts as "not done" so older agents stay understood.
+CONFIRM_REPLY_NOT_DONE = "NOT DONE"
+CONFIRM_REPLY_NOTDONE = "NOTDONE"
+
 
 def readiness_ask_text(spec: str, open_tasks: int) -> str:
     """Fixed readiness-ask prompt (protocol text, never user-configured).
@@ -91,6 +98,73 @@ def parse_readiness_reply(capture: str, baseline: str) -> str | None:
     return None
 
 
+#: Strict backup demand appended only after an unclear confirm reply.
+CONFIRM_BACKUP_TEXT = "Reply with exactly one line: DONE or NOT DONE."
+
+
+def commit_readiness_ask_text(spec: str) -> str:
+    """Natural commit confirm question (protocol text, never configured).
+
+    Asked before advancing: is this spec finished and committed? Kept
+    free of token demands so the agent answers in its own words; a
+    strict token on its own line still counts as a clear answer, and
+    anything else routes to the strict backup. Only the agent can judge
+    its own commit state — the tree is never inspected.
+    """
+    name = (spec or "").strip() or "(unknown spec)"
+    return (
+        f"Spec `{name}` looks finished. Is everything finished and "
+        "committed for this spec? Answer briefly."
+    )
+
+
+def unconfirmed_approval_text(reason: str) -> str:
+    """Natural approval confirmation question (protocol text, fixed).
+
+    Sent when an approval surface cannot be parsed: names what is
+    showing and asks the agent to answer the prompt in the session.
+    Like the commit question, a strict token on its own line counts
+    as a clear answer; anything else routes to the strict backup.
+    """
+    detail = (reason or "").strip()
+    if len(detail) > 200:
+        detail = detail[:200] + "..."
+    return (
+        "An approval prompt is showing that cannot be approved "
+        f"automatically ({detail}). Please answer it in this session "
+        "and tell me when done."
+    )
+
+
+def parse_confirmation_reply(capture: str, baseline: str) -> str | None:
+    """Strict confirm token from text added since `baseline`.
+
+    Returns "done" for an exact DONE line, "not-done" for an exact NOT
+    DONE, NOTDONE, or legacy WORKING line, else None. Same last-line,
+    appended-text-only discipline as the readiness parser so
+    pre-existing prose and our own question echo never decide.
+    """
+    current = capture or ""
+    base = baseline or ""
+    if current == base:
+        return None
+    added = current[len(base) :] if base and current.startswith(base) else current
+    for line in reversed(added.splitlines()):
+        text = line.strip().upper()
+        if not text:
+            continue
+        if text == READINESS_REPLY_DONE:
+            return "done"
+        if text in (
+            CONFIRM_REPLY_NOT_DONE,
+            CONFIRM_REPLY_NOTDONE,
+            READINESS_REPLY_WORKING,
+        ):
+            return "not-done"
+        return None
+    return None
+
+
 #: Maximum stored activity events per watcher (in-memory, informational only).
 MAX_ACTIVITY_EVENTS = 50
 
@@ -113,12 +187,17 @@ READY_MARKERS: dict[str, tuple[str, ...]] = {
 }
 
 # An approval/confirmation request always blocks continuation: the human
-# must answer inside the user-owned session, never the robot.
+# must answer inside the user-owned session, never the robot. Markers are
+# UI phrases, never bare words: agent prose such as "commit only when you
+# confirm" must not classify as a live approval prompt.
 APPROVAL_MARKERS = (
     "approve",
     "approval",
     "permission",
-    "confirm",
+    "enter confirm",
+    "enter to confirm",
+    "confirm?",
+    "confirm:",
     "allow?",
     "[y/n]",
     "(y/n)",
@@ -963,7 +1042,7 @@ class RobotWatcher:
         #: undecided boundary that was asked, so the same boundary never
         #: asks twice in a row. Any progress (new target, fewer open
         #: tasks) mismatches the memory and re-arms the ask.
-        self._readiness_asked: tuple[str, int] | None = None
+        self._readiness_asked: tuple[str, str, int] | None = None
         # Empty initial prompt means attach to the current conversation and
         # never inject a synthetic first request.
         self.initial_sent = not self.config.initial_prompt.strip()
@@ -976,6 +1055,10 @@ class RobotWatcher:
         #: (provider/operation/normalized path). A repeated surface for the
         #: same key waits instead of resending approval input.
         self._last_permission_key = ""
+        #: Whether the current approval episode already received its one
+        #: unconfirmed question. Cleared on any non-approval surface so
+        #: each stuck dialog gets exactly one poke, never one per poll.
+        self._approval_asked = False
         #: Recoverable boundary category driving the current debounce
         #: ("" for a clean finish, "max-steps"/"terminal-error" otherwise).
         #: Recorded in boundary diagnostics without raw provider captures.
@@ -1455,6 +1538,23 @@ class RobotWatcher:
                 "declared); answer the approval in the provider session",
             )
             summary = permissions_mod.decision_summary(decision)
+        if (
+            decision.result == "waiting"
+            and not decision.operation
+            and not self._approval_asked
+        ):
+            # Unparsable or ambiguous surface: ask the agent once per
+            # episode to answer the prompt in the session. Every outcome
+            # below keeps waiting in the current conversation — approvals
+            # never reset, whatever the reply.
+            self._approval_asked = True
+            self._ask_confirm(
+                "",
+                [],
+                "internal",
+                "approval",
+                unconfirmed_approval_text(decision.reason),
+            )
         self.phase = WAITING
         self.stable_polls = 0
         self.block_reason = summary
@@ -1719,6 +1819,8 @@ class RobotWatcher:
             elif provider_state == "error":
                 observed = CLASS_ERROR
         self.last_classification = observed
+        if observed != CLASS_APPROVAL:
+            self._approval_asked = False
         if observed == CLASS_APPROVAL:
             # Approval/confirmation belongs to the provider conversation.
             # The permission policy decides: contained temp-root or
@@ -2226,6 +2328,48 @@ class RobotWatcher:
             self.phase = PAUSED
             self._record("pause", "automatic continuation cancelled by operator")
             return self.phase
+        if check.decision == "complete" and next_target.strip():
+            # Finished work for a recorded change: confirm finished and
+            # committed before advancing, so the next spec never starts
+            # on uncommitted work. The ask vetoes only: a clear no (or
+            # NOT DONE) waits with no reset, anything else advances.
+            commit = self._ask_confirm(
+                next_target,
+                list(check.active),
+                check.evidence_source,
+                "commit",
+                commit_readiness_ask_text(next_target),
+            )
+            if commit in ("paused", "stopped"):
+                return self._abort_fresh_wait(next_target, list(check.active))
+            if commit == "not-done":
+                # Veto: the agent is not finished and committed. Keep
+                # watching the current conversation with no reset; the next
+                # finished screen asks again. Only the agent judges commit
+                # state — the tree is never inspected.
+                self.stable_polls = 0
+                self.phase = WORKING if self.initial_sent else ATTACHED
+                self._record(
+                    "readiness",
+                    f"agent reports NOT DONE for `{next_target}`; advance "
+                    "vetoed, watching continues",
+                )
+                self._diag(
+                    "prompt",
+                    "commit reply NOT DONE; advance vetoed",
+                    result="working",
+                    message=f"agent reports NOT DONE for `{next_target}`; "
+                    "advance vetoed, watching continues",
+                    current_spec=next_target,
+                    open_tasks=0,
+                    active_queue=tuple(check.active),
+                    evidence_source=check.evidence_source,
+                    decision="working",
+                    operation="commit-ask",
+                    next_action="keep watching; ask again on the next advance",
+                )
+                return self.phase
+        # "done" or undecided (timeout/garbage): advance as today.
         self.phase = NEW_CONVERSATION
         try:
             self.adapter.new_conversation()
@@ -2322,29 +2466,39 @@ class RobotWatcher:
         active: list[str],
         evidence_source: str,
         sleep: Callable[[float], None] | None = None,
+        kind: str = "tasks",
+        question: str = "",
+        once: bool = True,
+        parser: Callable[[str, str], str | None] = parse_readiness_reply,
     ) -> str:
-        """One bounded DONE/WORKING ask in the current conversation.
+        """One bounded ask in the current conversation.
 
         Backup disambiguation before confirmation recovery: the screen is
         finished but the evidence is incomplete, so the agent may be
-        pausing mid-work or truly stuck. Returns "done", "working",
-        "unknown" (timeout, garbage, or already asked for this boundary),
-        "paused", or "stopped". Only "working"/"paused"/"stopped" divert
-        from today's recovery path; everything else falls through to it.
-        The reply is parsed only from text added after the ask on a
-        settled screen, so streamed partial tokens never decide.
+        pausing mid-work or truly stuck. Returns "done", "working" (task
+        parser) or "not-done" (confirm parser), "unknown" (timeout,
+        garbage, or already asked for this boundary), "paused", or
+        "stopped". `kind` separates guard memory per ask purpose;
+        `question` overrides the task wording; `once=False` asks every
+        time (commit vetoes and episode flags manage their own repeat
+        rules instead). The reply is parsed only from text added after
+        the ask on a settled screen, so streamed partial tokens never
+        decide.
         """
         do_sleep = sleep if sleep is not None else time.sleep
-        key = (target, max(int(open_tasks), 0))
-        if self._readiness_asked == key:
-            return "unknown"
-        self._readiness_asked = key
-        question = readiness_ask_text(target, open_tasks)
+        key = (target, kind, max(int(open_tasks), 0))
+        if once:
+            if self._readiness_asked == key:
+                return "unknown"
+            self._readiness_asked = key
+        ask_text = question.strip() or readiness_ask_text(target, open_tasks)
         baseline = self._capture()
-        self._send(question)
-        self._remember_prompt(question)
+        self._send(ask_text)
+        self._remember_prompt(ask_text)
         self.prompts_sent += 1
-        self._record("prompt", f"sent readiness ask for `{target}`; awaiting reply")
+        self._record(
+            "prompt", f"sent {kind} readiness ask for `{target}`; awaiting reply"
+        )
         self._diag(
             "prompt",
             "sent readiness ask",
@@ -2377,7 +2531,7 @@ class RobotWatcher:
                 return "paused"
             capture = self._capture()
             if previous is not None and capture == previous:
-                token = parse_readiness_reply(capture, baseline)
+                token = parser(capture, baseline)
                 if token is not None:
                     self._record(
                         "readiness",
@@ -2396,7 +2550,10 @@ class RobotWatcher:
                         operation="readiness-ask",
                         next_action="route on the reply",
                     )
-                    return "done" if token == READINESS_REPLY_DONE else "working"
+                    upper = token.upper()
+                    if upper == READINESS_REPLY_DONE:
+                        return "done"
+                    return "working" if upper == READINESS_REPLY_WORKING else "not-done"
                 if capture != baseline:
                     self._record(
                         "readiness",
@@ -2414,6 +2571,50 @@ class RobotWatcher:
             "recovering as without the ask",
         )
         return "unknown"
+
+    def _ask_confirm(
+        self,
+        target: str,
+        active: list[str],
+        evidence_source: str,
+        kind: str,
+        natural: str,
+        sleep: Callable[[float], None] | None = None,
+    ) -> str:
+        """Two-step confirm: natural question first, strict backup after.
+
+        Sends the natural confirm question and routes on a clear reply
+        ("done"/"not-done"); only an unclear reply ("unknown") triggers
+        the strict DONE-or-NOT-DONE backup. Returns "done", "not-done",
+        "unknown", "paused", or "stopped". Asks repeat freely
+        (`once=False`): callers own the repeat rules — the commit veto
+        re-asks every advance, the approval episode flag asks once per
+        episode.
+        """
+        first = self._ask_readiness(
+            target,
+            0,
+            active,
+            evidence_source,
+            sleep=sleep,
+            kind=kind,
+            question=natural,
+            once=False,
+            parser=parse_confirmation_reply,
+        )
+        if first != "unknown":
+            return first
+        return self._ask_readiness(
+            target,
+            0,
+            active,
+            evidence_source,
+            sleep=sleep,
+            kind=f"{kind}-backup",
+            question=CONFIRM_BACKUP_TEXT,
+            once=False,
+            parser=parse_confirmation_reply,
+        )
 
     def _open_confirmation(self, check: BoundaryCheck, instruction: str = "") -> str:
         """Recover unfinished tasks via the adapter contract only.
@@ -2463,24 +2664,41 @@ class RobotWatcher:
             self.phase = PAUSED
             self._record("pause", "automatic confirmation cancelled by operator")
             return self.phase
-        ask = self._ask_readiness(
-            target, check.open_tasks, list(check.active), check.evidence_source
-        )
+        if check.decision == "ready-to-archive":
+            # Complete tasks, still active: confirm finished-and-committed
+            # before the archival recovery, so the next spec never starts
+            # on uncommitted work. Natural question first, strict backup
+            # on an unclear reply; only the agent judges commit state.
+            ask = self._ask_confirm(
+                target,
+                list(check.active),
+                check.evidence_source,
+                "commit",
+                commit_readiness_ask_text(target),
+            )
+        else:
+            ask = self._ask_readiness(
+                target,
+                check.open_tasks,
+                list(check.active),
+                check.evidence_source,
+            )
         if ask in ("paused", "stopped"):
             return self._abort_fresh_wait(target, list(check.active))
-        if ask == "working":
+        if ask in ("working", "not-done"):
             self.stable_polls = 0
             self.phase = WORKING if self.initial_sent else ATTACHED
             self._record(
                 "readiness",
-                f"agent reports WORKING for `{target}`; no reset performed, "
-                "watching continues",
+                f"agent reports {ask.upper()} for `{target}`; no reset "
+                "performed, watching continues",
             )
             self._diag(
                 "prompt",
-                "readiness reply WORKING",
+                f"readiness reply {ask.upper()}",
                 result="working",
-                message=f"agent reports WORKING for `{target}`; no reset performed",
+                message=f"agent reports {ask.upper()} for `{target}`; "
+                "no reset performed",
                 current_spec=target,
                 open_tasks=check.open_tasks,
                 active_queue=tuple(check.active),

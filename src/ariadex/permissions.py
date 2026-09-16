@@ -173,7 +173,9 @@ def parse_permission_request(text: str) -> ParsedRequest | None:
     distinct paths), privileged, or names no permitted file action.
     Provider directory-access prompts (one unambiguous directory on the
     access line) additionally parse as a `read` request for the directory
-    itself; surrounding pattern and history lines are context only.
+    itself; surrounding pattern and history lines are context only. A
+    failed file parse (for example scrollback commands that add extra
+    paths) falls through to the directory attempt instead of stopping.
     Callers must treat None as waiting: never approve, never deny-blindly.
     """
     tail = "\n".join((text or "").splitlines()[-16:])
@@ -192,17 +194,15 @@ def parse_permission_request(text: str) -> ParsedRequest | None:
                 break
         if operation is not None:
             break
-    if operation is None:
-        return _parse_directory_access(tail)
-    candidates = _path_candidates(tail)
-    if len(candidates) != 1:
-        return None
-    requested = candidates[0]
-    if any(char in requested for char in _SHELL_CHARS):
-        return None
-    if not requested.strip():
-        return None
-    return ParsedRequest(operation=operation, requested_path=requested)
+    if operation is not None:
+        candidates = _path_candidates(tail)
+        if len(candidates) == 1:
+            requested = candidates[0]
+            if not any(char in requested for char in _SHELL_CHARS) and (
+                requested.strip()
+            ):
+                return ParsedRequest(operation=operation, requested_path=requested)
+    return _parse_directory_access(tail)
 
 
 def _parse_directory_access(tail: str) -> ParsedRequest | None:

@@ -132,7 +132,13 @@ class ClassifyTest(unittest.TestCase):
             robot_mod.check_boundary = real_check  # type: ignore[assignment]
         self.assertEqual(
             driver.sent_inputs("agent"),
-            ["please start", "/new", robot_mod.DEFAULT_CONTINUATION_PROMPT],
+            [
+                "please start",
+                robot_mod.commit_readiness_ask_text("next-change"),
+                robot_mod.CONFIRM_BACKUP_TEXT,
+                "/new",
+                robot_mod.DEFAULT_CONTINUATION_PROMPT,
+            ],
         )
 
     def test_opencode_ready_is_finished(self) -> None:
@@ -169,6 +175,26 @@ class ClassifyTest(unittest.TestCase):
 
     def test_approval_blocks(self) -> None:
         self.assertEqual(robot_mod.classify_capture("opencode", APPROVAL), "approval")
+
+    def test_agent_prose_with_confirm_is_not_approval(self) -> None:
+        capture = (
+            "- HANDOFF updated with verification evidence.\n"
+            "- Changes are unstaged; commit only when you confirm.\n"
+            "\n"
+            "Build · minimax-m3\n"
+        )
+        self.assertNotEqual(robot_mod.classify_capture("opencode", capture), "approval")
+
+    def test_selector_confirm_hints_are_approval(self) -> None:
+        for surface in (
+            "Allow once   Allow always   Reject   select  enter confirm",
+            "press enter to confirm the write",
+            "confirm: proceed with the change?",
+        ):
+            with self.subTest(surface=surface):
+                self.assertEqual(
+                    robot_mod.classify_capture("opencode", surface), "approval"
+                )
 
     def test_error_blocks(self) -> None:
         self.assertEqual(
@@ -528,7 +554,15 @@ class WatcherStateTest(unittest.TestCase):
         watcher = make_watcher(project, driver, debounce_polls=1)
         self.assertEqual(watcher.poll(), robot_mod.WAITING)
         self.assertIn("approval", watcher.block_reason)
-        self.assertEqual(driver.sent_inputs("agent"), [])
+        # One unconfirmed episode: the natural question plus the strict
+        # backup, then silence. Never a reset, never approval input.
+        sent = driver.sent_inputs("agent")
+        self.assertEqual(len(sent), 2)
+        self.assertIn("approval prompt is showing", sent[0])
+        self.assertEqual(sent[1], robot_mod.CONFIRM_BACKUP_TEXT)
+        self.assertNotIn("/new", sent)
+        self.assertEqual(watcher.poll(), robot_mod.WAITING)
+        self.assertEqual(driver.sent_inputs("agent"), sent)
 
     def test_initial_prompt_is_not_resent_when_provider_waits_for_approval(
         self,
@@ -547,12 +581,39 @@ class WatcherStateTest(unittest.TestCase):
 
         driver.sessions["agent"]["output"] = APPROVAL
         self.assertEqual(watcher.poll(), robot_mod.WAITING)
-        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+        sent = driver.sent_inputs("agent")
+        self.assertEqual(sent[0], "please start")
+        self.assertIn("approval prompt is showing", sent[1])
+        self.assertEqual(sent[2], robot_mod.CONFIRM_BACKUP_TEXT)
         self.assertIn("answer the approval", watcher.block_reason)
 
         driver.sessions["agent"]["output"] = BUSY
         self.assertEqual(watcher.poll(), "working")
-        self.assertEqual(driver.sent_inputs("agent"), ["please start"])
+        self.assertEqual(driver.sent_inputs("agent"), sent)
+
+    def test_approval_done_reply_still_waits_without_reset(self) -> None:
+        project = make_project(self._tmp)
+        driver = FakeDriver()
+        driver.sessions["agent"] = {
+            "command": [],
+            "output": APPROVAL,
+            "workdir": "/t",
+        }
+        watcher = make_watcher(project, driver, debounce_polls=1)
+        echo = APPROVAL + "question-echo\n"
+        replied = echo + "DONE\n"
+        with unittest.mock.patch.object(
+            watcher,
+            "_capture",
+            side_effect=[APPROVAL, APPROVAL, echo, replied, replied],
+        ):
+            self.assertEqual(watcher.poll(), robot_mod.WAITING)
+        # Clear reply: natural question only, no backup, and still no
+        # reset — approvals never open a new conversation.
+        sent = driver.sent_inputs("agent")
+        self.assertEqual(len(sent), 1)
+        self.assertIn("approval prompt is showing", sent[0])
+        self.assertNotIn("/new", sent)
 
     def test_error_is_blocked_without_input(self) -> None:
         project = make_project(self._tmp)

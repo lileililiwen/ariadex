@@ -4,6 +4,14 @@ Ariadex is a human-supervised runtime for existing Coding CLIs. It is not an
 IDE, editor, LLM client, or replacement CLI. Read `README.md`, `ROADMAP.md`,
 and `HANDOFF.md` before project changes.
 
+## Change authorization
+
+NEVER change code directly without an OpenSpec change driving it.
+Research means read-only investigation (read, search, run
+diagnostics); no edits, no new files, no deletions. Every behavior
+change is implemented only through its active change package and the
+workflow below.
+
 ## Required workflow
 
 - Use OpenSpec for every non-trivial behavior change. Select one active change

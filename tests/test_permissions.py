@@ -281,6 +281,20 @@ class ParseTest(unittest.TestCase):
                 (parsed.operation, parsed.requested_path), ("read", target)
             )
 
+    def test_directory_access_with_file_word_scrollback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "work")
+            capture = (
+                f"cat {tmp}/match-start.json | head -c 2000\n"
+                + directory_selector_capture(target)
+            )
+            parsed = permissions_mod.parse_permission_request(capture)
+            self.assertIsNotNone(parsed)
+            assert parsed is not None
+            self.assertEqual(
+                (parsed.operation, parsed.requested_path), ("read", target)
+            )
+
     def test_directory_access_two_directories_are_ambiguous(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             first = os.path.join(tmp, "one")
@@ -674,7 +688,11 @@ class WatcherApprovalTest(unittest.TestCase):
         driver = FakeDriver()
         watcher = make_watcher(project, driver, APPROVAL_UNKNOWN)
         self.assertEqual(watcher.poll(), robot_mod.WAITING)
-        self.assertEqual(driver.sent_inputs("agent"), [])
+        # One unconfirmed episode, never approval input or a reset.
+        sent = driver.sent_inputs("agent")
+        self.assertEqual(len(sent), 2)
+        self.assertIn("approval prompt is showing", sent[0])
+        self.assertNotIn("/new", sent)
         record = last_record(project)
         self.assertEqual(record["decision"], "waiting")
 
