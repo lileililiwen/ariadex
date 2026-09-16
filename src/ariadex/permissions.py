@@ -142,6 +142,25 @@ def contains_privileged_markers(text: str) -> bool:
     return _PRIVILEGED_RE.search(text or "") is not None
 
 
+def request_shape(raw_tail: str) -> str:
+    """Redacted shape tag for an unparsable approval surface.
+
+    Derived only from already-computed signals (privileged markers,
+    operation words, path-candidate count) over the classification
+    tail; no raw provider text ever leaves the pane. One of
+    `privileged-markers`, `no-operation-word`, or
+    `ambiguous-paths(n)`, so operators can tell a must-never-approve
+    execution prompt from a parser gap on an approvable file
+    request.
+    """
+    tail = "\n".join((raw_tail or "").splitlines()[-16:])
+    if contains_privileged_markers(tail):
+        return "privileged-markers"
+    if _OPERATION_RE.search(tail.lower()) is None:
+        return "no-operation-word"
+    return f"ambiguous-paths({len(_path_candidates(tail))})"
+
+
 def _path_candidates(text: str) -> list[str]:
     """Ordered path-like tokens from quoted spans, then bare tokens.
 
@@ -423,6 +442,12 @@ def evaluate(
         )
     if policy == "prompt":
         operation, requested, normalized = _informational_paths(parsed, project_dir)
+        reason = (
+            "policy `prompt`: automatic approval is disabled; answer the "
+            "approval in the provider session; watching resumes afterwards"
+        )
+        if parsed is None:
+            reason = f"[{request_shape(raw_tail)}] {reason}"
         return PermissionDecision(
             provider,
             operation,
@@ -430,11 +455,16 @@ def evaluate(
             normalized,
             policy,
             "waiting",
-            "policy `prompt`: automatic approval is disabled; answer the "
-            "approval in the provider session; watching resumes afterwards",
+            reason,
         )
     if policy == "deny":
         operation, requested, normalized = _informational_paths(parsed, project_dir)
+        reason = (
+            "policy `deny`: automatic approval is refused; answer the "
+            "approval in the provider session"
+        )
+        if parsed is None:
+            reason = f"[{request_shape(raw_tail)}] {reason}"
         return PermissionDecision(
             provider,
             operation,
@@ -442,8 +472,7 @@ def evaluate(
             normalized,
             policy,
             "deny",
-            "policy `deny`: automatic approval is refused; answer the "
-            "approval in the provider session",
+            reason,
         )
     if parsed is None:
         if contains_privileged_markers(raw_tail):
@@ -454,8 +483,9 @@ def evaluate(
                 "",
                 policy,
                 "deny",
-                "privileged or destructive request (execution, chmod/chown, "
-                "sudo, or shell operators); automatic approval is refused; "
+                "[privileged-markers] privileged or destructive request "
+                "(execution, chmod/chown, sudo, or shell operators); "
+                "automatic approval is refused; "
                 "answer the approval in the provider session",
             )
         return PermissionDecision(
@@ -465,9 +495,9 @@ def evaluate(
             "",
             policy,
             "waiting",
-            "unparsable or ambiguous provider request; no automatic "
-            "approval without a verified operation and path; answer the "
-            "approval in the provider session",
+            f"[{request_shape(raw_tail)}] unparsable or ambiguous provider "
+            "request; no automatic approval without a verified operation "
+            "and path; answer the approval in the provider session",
         )
     requested = parsed.requested_path[:MAX_PATH_CHARS]
     if project_dir is None:

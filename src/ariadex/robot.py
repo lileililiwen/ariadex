@@ -371,6 +371,14 @@ CLASSIFICATION_TAIL_LINES = 16
 #: unattended /new retries while absence-first waiting stays state-keyed.
 FRESH_EXHAUSTION_LIMIT = 3
 
+#: Quiet polls before an unanswered approval question is asked once more.
+#: A NOT DONE/WORKING reply re-arms exactly one further ask after this
+#: many polls with no new input meanwhile; a repeated NOT DONE (or a
+#: surface that outlasts the re-ask with no reply) escalates to a visible
+#: wait instead of asking again. No new configuration: the interval lives
+#: within the existing poll-interval bounds.
+APPROVAL_REASK_QUIET_POLLS = 3
+
 
 class RobotError(Exception):
     """Typed robot failure: configuration, session, or boundary refusal."""
@@ -1066,10 +1074,20 @@ class RobotWatcher:
         #: (provider/operation/normalized path). A repeated surface for the
         #: same key waits instead of resending approval input.
         self._last_permission_key = ""
-        #: Whether the current approval episode already received its one
-        #: unconfirmed question. Cleared on any non-approval surface so
-        #: each stuck dialog gets exactly one poke, never one per poll.
-        self._approval_asked = False
+        #: Bounded per-episode approval re-ask state. `asks` counts the
+        #: unconfirmed questions sent for the current stuck dialog;
+        #: `quiet` counts polls since the last ask while a re-ask is
+        #: owed; `rearm` means a NOT DONE/WORKING reply requested one
+        #: further ask after the quiet interval; `escalated` means the
+        #: episode parked visibly and must never ask again. All four are
+        #: cleared on any non-approval surface so each stuck dialog gets
+        #: at most two pokes, never one per poll. Replies never approve
+        #: anything: only the permission policy on a parsed request may
+        #: send approval input.
+        self._approval_asks = 0
+        self._approval_quiet = 0
+        self._approval_rearm = False
+        self._approval_escalated = False
         #: Recoverable boundary category driving the current debounce
         #: ("" for a clean finish, "max-steps"/"terminal-error" otherwise).
         #: Recorded in boundary diagnostics without raw provider captures.
@@ -1552,24 +1570,57 @@ class RobotWatcher:
         if (
             decision.result == "waiting"
             and not decision.operation
-            and not self._approval_asked
+            and not self._approval_escalated
         ):
-            # Unparsable or ambiguous surface: ask the agent once per
-            # episode to answer the prompt in the session. Every outcome
-            # below keeps waiting in the current conversation — approvals
-            # never reset, whatever the reply.
-            self._approval_asked = True
-            self._ask_confirm(
-                "",
-                [],
-                "internal",
-                "approval",
-                unconfirmed_approval_text(decision.reason),
-            )
+            # Unparsable or ambiguous surface: ask the agent to answer
+            # the prompt in the session, at most twice per episode. The
+            # first ask fires immediately; a NOT DONE/WORKING reply
+            # re-arms one further ask after a bounded quiet interval
+            # with no input meanwhile; a repeated NOT DONE (or a
+            # surface that outlasts the re-ask with no reply) parks
+            # visibly instead of asking again. DONE, timeout, garbage,
+            # and operator aborts keep waiting exactly as before.
+            # Every outcome below keeps waiting in the current
+            # conversation — approvals never reset, and a reply never
+            # approves anything, whatever it says.
+            if self._approval_asks == 0:
+                self._approval_asks = 1
+                self._approval_quiet = 0
+                reply = self._ask_confirm(
+                    "",
+                    [],
+                    "internal",
+                    "approval",
+                    unconfirmed_approval_text(decision.reason),
+                )
+                if reply in ("not-done", "working"):
+                    self._approval_rearm = True
+            elif self._approval_rearm and self._approval_asks == 1:
+                if self._approval_quiet >= APPROVAL_REASK_QUIET_POLLS:
+                    self._approval_asks = 2
+                    self._approval_rearm = False
+                    reply = self._ask_confirm(
+                        "",
+                        [],
+                        "internal",
+                        "approval",
+                        unconfirmed_approval_text(decision.reason),
+                    )
+                    if reply != "done":
+                        self._approval_escalated = True
+                else:
+                    self._approval_quiet += 1
         self.phase = WAITING
         self.stable_polls = 0
-        self.block_reason = summary
-        self._record("waiting", summary)
+        waiting_text = summary
+        if self._approval_escalated:
+            waiting_text = (
+                f"{summary}; approval asked twice without progress — "
+                "answer the approval in the provider session, "
+                "then watching resumes"
+            )
+        self.block_reason = waiting_text
+        self._record("waiting", waiting_text)
         recovery = (
             "approved with the provider-owned keystroke; watching resumes"
             if decision.result == "allow"
@@ -1583,7 +1634,9 @@ class RobotWatcher:
             message=summary,
             classification=CLASS_APPROVAL,
             decision=decision.result,
-            blocker="" if decision.result == "allow" else decision.reason,
+            blocker=""
+            if decision.result == "allow"
+            else (waiting_text if self._approval_escalated else decision.reason),
             operation=decision.operation,
             next_action=recovery,
             requested_path=decision.requested_path,
@@ -1831,7 +1884,10 @@ class RobotWatcher:
                 observed = CLASS_ERROR
         self.last_classification = observed
         if observed != CLASS_APPROVAL:
-            self._approval_asked = False
+            self._approval_asks = 0
+            self._approval_quiet = 0
+            self._approval_rearm = False
+            self._approval_escalated = False
         if observed == CLASS_APPROVAL:
             # Approval/confirmation belongs to the provider conversation.
             # The permission policy decides: contained temp-root or
@@ -2615,12 +2671,12 @@ class RobotWatcher:
         """Two-step confirm: natural question first, strict backup after.
 
         Sends the natural confirm question and routes on a clear reply
-        ("done"/"not-done"); only an unclear reply ("unknown") triggers
+        (        "done"/"not-done"); only an unclear reply ("unknown") triggers
         the strict DONE-or-NOT-DONE backup. Returns "done", "not-done",
         "unknown", "paused", or "stopped". Asks repeat freely
         (`once=False`): callers own the repeat rules — the commit veto
-        re-asks every advance, the approval episode flag asks once per
-        episode.
+        re-asks every advance, the approval episode re-asks at most once
+        more after a quiet interval before parking visibly.
         """
         first = self._ask_readiness(
             target,
