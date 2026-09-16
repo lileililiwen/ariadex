@@ -986,10 +986,10 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Active OpenSpec queue: `widget-ux-repair`
-(approval-reply-recovery archived as 2026-09-16-approval-reply-recovery;
-watcher-stall-loop archived as 2026-09-16-watcher-stall-loop). The next
-implementation must select exactly one active change per the workflow in
+Active OpenSpec queue: none (openspec list reports no active
+changes; the widget, approval-reply, and watcher-stall changes are
+all archived). The next implementation must propose a change first,
+then select exactly one active change per the workflow in
 .ai-rules/workflow.md and update this handoff only after its verified
 archive.
 
