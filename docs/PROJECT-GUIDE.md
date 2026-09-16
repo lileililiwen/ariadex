@@ -181,9 +181,20 @@ runtime state directly and does not inject keystrokes into an editor.
 - top-right `×`: requests daemon shutdown, then exits the widget process.
 - expanded controls: reconcile status, open the configured editor, and attach
   to the provider session.
+- display modes: one toggle goes collapsed → full so the Manual controls are
+  one click away; a second toggle parks the widget in a one-line strip
+  (status bar only), and clicking the strip expands it again. Toggling never
+  sends provider input and never changes scheduling.
+- Manual group: `Retry` resends the most recent prompt verbatim (disabled
+  when nothing was sent yet); `Model` switches the provider session to the
+  selected configured model (the selector follows the active theme and sizes
+  to the longest model name; the row is disabled with empty `models`);
+  `Message` sends the message box text once (empty text is refused locally).
 - live log: read-only chronological watcher diagnostics (current spec,
   OpenSpec task progress, phase, latest event, recent boundary decisions),
   visible in both compact and expanded states and refreshed on every poll.
+  The expanded view shows a single log surface: a labeled context section
+  plus a labeled status section with no duplicated lines.
   OpenSpec task counts are labeled separately from HANDOFF unresolved counts.
 - `Copy log` is available in the always-visible collapsed controls; `Copy
   context` is available after expansion. They place the bounded log or a
