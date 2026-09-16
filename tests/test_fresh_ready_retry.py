@@ -98,7 +98,7 @@ class FreshReadyRetryTest(unittest.TestCase):
         watcher.initial_sent = True
         # Fresh-wait mechanics under test, not the readiness ask:
         # pre-arm its once-per-boundary guard.
-        watcher._readiness_asked = ("demo", 1)
+        watcher._readiness_asked = ("demo", "tasks", 1)
         with (
             clean_git(),
             unittest.mock.patch.object(
@@ -126,7 +126,7 @@ class FreshReadyRetryTest(unittest.TestCase):
         watcher.initial_sent = True
         # Fresh-wait mechanics under test, not the readiness ask:
         # pre-arm its once-per-boundary guard.
-        watcher._readiness_asked = ("demo", 1)
+        watcher._readiness_asked = ("demo", "tasks", 1)
         with (
             clean_git(),
             unittest.mock.patch.object(
@@ -156,7 +156,7 @@ class FreshReadyRetryTest(unittest.TestCase):
         watcher.initial_sent = True
         # Fresh-wait mechanics under test, not the readiness ask:
         # pre-arm its once-per-boundary guard.
-        watcher._readiness_asked = ("demo", 1)
+        watcher._readiness_asked = ("demo", "tasks", 1)
         # Three boundary cycles: READY reaches the boundary, BLANKs exhaust
         # the short wait. The third exhaustion parks instead of refiring.
         # Each cycle consumes poll + guard + two attempts.
@@ -184,7 +184,7 @@ class FreshReadyRetryTest(unittest.TestCase):
         watcher.initial_sent = True
         # Fresh-wait mechanics under test, not the readiness ask:
         # pre-arm its once-per-boundary guard.
-        watcher._readiness_asked = ("demo", 1)
+        watcher._readiness_asked = ("demo", "tasks", 1)
         with (
             clean_git(),
             unittest.mock.patch.object(
@@ -210,7 +210,7 @@ class FreshReadyRetryTest(unittest.TestCase):
         watcher.initial_sent = True
         # Fresh-wait mechanics under test, not the readiness ask:
         # pre-arm its once-per-boundary guard.
-        watcher._readiness_asked = ("demo", 1)
+        watcher._readiness_asked = ("demo", "tasks", 1)
         with (
             clean_git(),
             unittest.mock.patch.object(

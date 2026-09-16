@@ -107,6 +107,13 @@ class OpenCodeAdapter(AgentAdapter):
         ``╹`` bottom border) is window chrome, not user draft text, and is
         excluded from draft detection so an idle composer is not mistaken
         for a human-held draft.
+        Draft detection is positional, not marker-tight: only lines in
+        the composer region (at/after the last blank ``┃`` composer line
+        above the ``╹`` bottom border, excluding the status bar itself)
+        may report a draft. Scrollback output above that region — even
+        when the renderer prefixes it with ``┃`` — never does. When no
+        border structure is recognizable the surface is unverifiable, so
+        the legacy rule applies unchanged (fail-closed toward ``DRAFT``).
         """
         lines = [line.rstrip() for line in (capture or "").splitlines()[-16:]]
         has_composer = any(line.strip() == "┃" for line in lines)
@@ -117,10 +124,15 @@ class OpenCodeAdapter(AgentAdapter):
             (idx for idx, line in enumerate(lines) if line.strip().startswith("╹")),
             default=None,
         )
+        region_start: int | None = None
+        if border_idx is not None:
+            blanks = [idx for idx in range(border_idx) if lines[idx].strip() == "┃"]
+            region_start = max(blanks) if blanks else border_idx
         has_draft = any(
             line.strip().startswith("┃")
             and line.strip() != "┃"
             and not self._is_status_bar(lines, idx, border_idx, has_footer)
+            and (region_start is None or idx >= region_start)
             for idx, line in enumerate(lines)
         )
         if has_draft:

@@ -2296,8 +2296,12 @@ class RobotWatcher:
     def _open_continuation(self, check: BoundaryCheck) -> str:
         """Open the next conversation via the adapter contract only.
 
-        The next target is recorded before any provider input so the
-        boundary never advances on a stale assumption. Provider
+        The next target is recorded before any provider input is sent so
+        the boundary never advances on a stale assumption. Draft-composer
+        and operator-pause gates run first so a deferred poll writes no
+        durable conversation state, records a durable deferral
+        diagnostic, and restarts the debounce count instead of re-firing
+        every poll. Provider
         commands, restart details, and input-delivery rules stay inside
         the adapter (`new_conversation`); this method never branches on
         provider identity or command strings. Any failure enters
@@ -2323,21 +2327,54 @@ class RobotWatcher:
                 next_action="stop the managed workflow",
             )
             return self.phase
-        if not self._record_before_prompt(
-            "continuation", next_target, list(check.active)
-        ):
-            return self.phase
         if self.adapter.input_surface(self._capture()) is InputSurface.DRAFT:
             self.phase = PAUSED
+            self.stable_polls = 0
             self._record(
                 "pause", "automatic continuation deferred while input is not empty"
+            )
+            self._diag(
+                "boundary",
+                "automatic continuation deferred while input is not empty",
+                result="deferred",
+                message="composer holds a human draft; no prompt was sent",
+                current_spec=next_target,
+                open_tasks=check.open_tasks,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="deferred",
+                blocker="composer holds a human draft; no prompt was sent",
+                operation="new-conversation",
+                next_action="clear the provider composer, then resume watching "
+                "so the open boundary refires",
             )
             return self.phase
         if self._paused or (
             self.mode_requested is not None and self.mode_requested() == "PAUSE"
         ):
             self.phase = PAUSED
+            self.stable_polls = 0
             self._record("pause", "automatic continuation cancelled by operator")
+            self._diag(
+                "boundary",
+                "automatic continuation cancelled by operator",
+                result="deferred",
+                message="daemon mode PAUSE observed before the continuation "
+                "prompt; no prompt was sent",
+                current_spec=next_target,
+                open_tasks=check.open_tasks,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="deferred",
+                blocker="daemon mode PAUSE observed before the continuation "
+                "prompt; no prompt was sent",
+                operation="new-conversation",
+                next_action="resume watching to retry the open boundary",
+            )
+            return self.phase
+        if not self._record_before_prompt(
+            "continuation", next_target, list(check.active)
+        ):
             return self.phase
         if check.decision == "complete" and (check.current_spec or "").strip():
             # Finished work for a recorded change: confirm finished and
@@ -2619,10 +2656,12 @@ class RobotWatcher:
     ) -> str:
         """Recover unfinished tasks via the adapter contract only.
 
-        The confirmation target is recorded before any provider input.
-        A `ready-to-archive` boundary carries the archival instruction so
-        the recovery conversation archives and validates instead of
-        advancing. Provider commands, restart details, and
+        The confirmation target is recorded before any provider input
+        is sent. Draft-composer and operator-pause gates run first so a
+        deferred poll writes no durable conversation state, records a
+        durable deferral diagnostic, and restarts the debounce count
+        instead of re-firing every poll. Provider commands, restart
+        details, and
         input-delivery rules stay inside the adapter
         (`new_conversation`); this method never branches on provider
         identity or command strings. The confirmation prompt is sent only
@@ -2650,19 +2689,52 @@ class RobotWatcher:
                 next_action="verify the conversation record before continuing",
             )
             return self.phase
-        if not self._record_before_prompt("confirmation", target, list(check.active)):
-            return self.phase
         if self.adapter.input_surface(self._capture()) is InputSurface.DRAFT:
             self.phase = PAUSED
+            self.stable_polls = 0
             self._record(
                 "pause", "automatic confirmation deferred while input is not empty"
+            )
+            self._diag(
+                "boundary",
+                "automatic confirmation deferred while input is not empty",
+                result="deferred",
+                message="composer holds a human draft; no prompt was sent",
+                current_spec=target,
+                open_tasks=check.open_tasks,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="deferred",
+                blocker="composer holds a human draft; no prompt was sent",
+                operation="new-conversation",
+                next_action="clear the provider composer, then resume watching "
+                "so the open boundary refires",
             )
             return self.phase
         if self._paused or (
             self.mode_requested is not None and self.mode_requested() == "PAUSE"
         ):
             self.phase = PAUSED
+            self.stable_polls = 0
             self._record("pause", "automatic confirmation cancelled by operator")
+            self._diag(
+                "boundary",
+                "automatic confirmation cancelled by operator",
+                result="deferred",
+                message="daemon mode PAUSE observed before the confirmation "
+                "prompt; no prompt was sent",
+                current_spec=target,
+                open_tasks=check.open_tasks,
+                active_queue=tuple(check.active),
+                evidence_source=check.evidence_source,
+                decision="deferred",
+                blocker="daemon mode PAUSE observed before the confirmation "
+                "prompt; no prompt was sent",
+                operation="new-conversation",
+                next_action="resume watching to retry the open boundary",
+            )
+            return self.phase
+        if not self._record_before_prompt("confirmation", target, list(check.active)):
             return self.phase
         if not skip_ask:
             if check.decision == "ready-to-archive":

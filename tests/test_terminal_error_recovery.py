@@ -251,6 +251,10 @@ class RoutingTest(unittest.TestCase):
             ),
             unittest.mock.patch.object(watcher.adapter, "new_conversation"),
             unittest.mock.patch.object(robot_mod, "check_boundary", ok_complete),
+            # Routing under test, not the commit ask (which repeats
+            # freely by design): answer it directly so the continuation
+            # recovery is reached.
+            unittest.mock.patch.object(watcher, "_ask_confirm", return_value="done"),
         ):
             try:
                 self.assertEqual(watcher.poll(), "continuing")
