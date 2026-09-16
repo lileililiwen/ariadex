@@ -48,9 +48,36 @@ that promotion has been skipped or failed.
   widget-crash-repair lifecycle tests, Ruff, diff check, and strict validation
   (51 canonical specs).
 
-- No active OpenSpec change remains. The next implementation must begin by
-  selecting a change from `openspec list` and updating this handoff only after
-  its verified archive.
+- Implemented, verified, and archived: `watcher-stall-loop`
+  (archived as 2026-09-16-watcher-stall-loop). Draft detection is now
+  structural and position-aware: only composer-region content (at/after
+  the last blank composer line above the bottom border, excluding the
+  status bar) may report `DRAFT`; scrollback output above the region
+  never does, and borderless surfaces keep the legacy fail-closed rule.
+  Draft/pause defers in `_open_confirmation` and `_open_continuation`
+  now record a durable `deferred` diagnostic, write no conversation
+  record, and reset `stable_polls`; the record is written only after
+  the gates pass. The `_readiness_asked` guard pre-arms in
+  `test_boundary_diagnostics.py` and `test_fresh_ready_retry.py` are
+  fixed to the real `(target, kind, open_tasks)` 3-tuple (repairing 5
+  pre-existing suite errors plus 1 failure), and the same commit-ask
+  scripting fix repairs
+  `test_failed_new_conversation_names_operation_and_blocker` and
+  `test_terminal_error_after_completed_work_sends_continuation`.
+  Verified with 8 new `tests/test_watcher_stall_loop.py` tests (5 proven
+  to fail on old code; 3 pin unchanged behavior), touched suites (350
+  tests OK), Ruff check/format clean, mypy at baseline (13
+  pre-existing, none new), `openspec validate --changes --strict`
+  passed (3/3) and `--specs --strict` passed (68/68); promoted into
+  `provider-input-surface-interface`, `robot-agent-supervisor`, and
+  `observability` canonical specs. Full 1563-test suite passes except
+  the pre-existing tmux `list-panes` environment failure and the 4
+  queue-agreement items this handoff update resolves; the suite's
+  Tk/X11 thread race aborts default single-process discover on this
+  host (pre-existing race, proven allocation-timing-sensitive: the full
+  suite completes with cyclic GC disabled), so evidence is reported per
+  batch. Active queue after archive: `approval-reply-recovery` and
+  `widget-ux-repair` (both unimplemented; tracked under Next change).
 - Implemented, verified, and archived:
   `2026-09-13-provider-owned-input-readiness`. `AgentAdapter` now owns
   input-ready detection; OpenCode 1.18.x recognizes its current blank
@@ -902,9 +929,11 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-No active OpenSpec change remains. The next implementation must begin by
-selecting a change from `openspec list` and updating this handoff only after
-its verified archive.
+Active OpenSpec queue: `approval-reply-recovery`, `widget-ux-repair`
+(watcher-stall-loop archived as 2026-09-16-watcher-stall-loop). The next
+implementation must select exactly one active change per the workflow in
+.ai-rules/workflow.md and update this handoff only after its verified
+archive.
 
 ## Latest change: widget live log and queue visibility
 
