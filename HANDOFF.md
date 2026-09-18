@@ -130,6 +130,27 @@ that promotion has been skipped or failed.
 
 ## Current state
 
+- Implemented, verified, and archived: `unattended-permission-scope`
+  (archived as `2026-09-18-unattended-permission-scope`).
+  Privileged evaluation is scoped to the approval lines
+  (`_APPROVAL_PHRASES` mirroring `robot.APPROVAL_MARKERS`,
+  sync-tested) so scrollback prose no longer poisons clean file
+  approvals; same-line execution still denies and unidentifiable
+  surfaces fall back to whole-tail refusal. Shared file-parse loop
+  deduplicated into `_parse_file_action` (first-match-wins
+  preserved). No path is hardcoded; containment still resolves
+  from `permission_temp_root` / `permission_allowlist`. Verified
+  with 8 new `ApprovalScopeTest` tests (3 failures + 2 errors
+  proven on old code before the fix), touched suites (344
+  permission/robot/adapter/diagnostics tests OK), full 1610-test
+  suite except 1 pre-existing environment failure
+  (`test_pid_alive_branches` asserts pid 1234 dead; that pid
+  exists on this host and fails on the pristine tree too), ruff
+  check/format clean on touched files, mypy clean,
+  `--changes --strict` (1/1) and `--specs --strict` (68/68)
+  passed; promoted into `configurable-permissions`. Queue empty
+  at archive time (`openspec list`: no active changes).
+
 - Implemented, verified, and archived: `provider-start-pid-race`
   (archived as `2026-09-16-provider-start-pid-race`). `start()`
   suppresses `psutil.Error` at the pane-pid identity fallback, so
@@ -1041,10 +1062,10 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 ## Next change
 
 Active OpenSpec queue: none (openspec list reports no active
-changes; the pid race change is archived). The next implementation
-must propose a change first, then select exactly one active change
-per the workflow in .ai-rules/workflow.md and update this handoff
-only after its verified archive.
+changes; the permission-scope change is archived). The next
+implementation must propose a change first, then select exactly
+one active change per the workflow in .ai-rules/workflow.md and
+update this handoff only after its verified archive.
 
 ## Latest change: widget live log and queue visibility
 
