@@ -842,5 +842,118 @@ class WidgetProjectionTest(unittest.TestCase):
         self.assertIn("path=/tmp/shared/out.txt", snapshot)
 
 
+class ApprovalScopeTest(unittest.TestCase):
+    """Approval-line-scoped privileged evaluation (unattended-permission-scope).
+
+    Scrollback prose carrying privileged words must not poison an
+    otherwise clean file approval; execution on the approval lines
+    themselves must still refuse. No path is hardcoded here beyond
+    illustrative config values.
+    """
+
+    SCROLLBACK_POISONED = (
+        "Build complete: shell script finished, rm old cache, curl done\n"
+        "Ask anything\n"
+        "Approval required: allow read of "
+        "`/proj/.ariadex/tmp/report.txt`? [y/n]\n"
+    )
+    APPROVAL_LINE_EXEC = (
+        "Build complete: all tests pass\n"
+        "Ask anything\n"
+        "Approval required: allow `chmod 600 /proj/x`? [y/n]\n"
+    )
+
+    def test_scrollback_privileged_prose_does_not_poison_clean_approval(self) -> None:
+        parsed = permissions_mod.parse_permission_request(self.SCROLLBACK_POISONED)
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(
+            (parsed.operation, parsed.requested_path),
+            ("read", "/proj/.ariadex/tmp/report.txt"),
+        )
+
+    def test_approval_line_execution_still_refused(self) -> None:
+        self.assertIsNone(
+            permissions_mod.parse_permission_request(self.APPROVAL_LINE_EXEC)
+        )
+
+    def test_request_shape_ignores_scrollback_privileged_prose(self) -> None:
+        self.assertNotEqual(
+            permissions_mod.request_shape(self.SCROLLBACK_POISONED),
+            "privileged-markers",
+        )
+
+    def test_request_shape_names_approval_line_privileged(self) -> None:
+        self.assertEqual(
+            permissions_mod.request_shape(self.APPROVAL_LINE_EXEC),
+            "privileged-markers",
+        )
+
+    def test_evaluate_scrollack_only_privileged_waits_not_denies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            decision = permissions_mod.evaluate(
+                provider="opencode",
+                parsed=None,
+                raw_tail=(
+                    "ran shell script, rm cache\nApproval required: proceed? [y/n]"
+                ),
+                policy="auto",
+                temp_root=None,
+                allowlist=[],
+                allowed_actions=["read", "write", "create", "delete"],
+                approve_input="y",
+                project_dir=project,
+            )
+            self.assertEqual(decision.result, "waiting")
+
+    def test_evaluate_without_approval_lines_stays_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            decision = permissions_mod.evaluate(
+                provider="opencode",
+                parsed=None,
+                raw_tail="ran shell script, rm cache\nstatus: done",
+                policy="auto",
+                temp_root=None,
+                allowlist=[],
+                allowed_actions=["read", "write", "create", "delete"],
+                approve_input="y",
+                project_dir=project,
+            )
+            self.assertEqual(decision.result, "deny")
+
+    def test_auto_allows_scrollback_poisoned_clean_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            temp_root = permissions_mod.ensure_temp_root(project, ".ariadex/tmp")
+            target = temp_root / "report.txt"
+            capture = (
+                "Build complete: shell script finished, rm old cache\n"
+                "Ask anything\n"
+                f"Approval required: allow read of `{target}`? [y/n]\n"
+            )
+            parsed = permissions_mod.parse_permission_request(capture)
+            self.assertIsNotNone(parsed)
+            decision = permissions_mod.evaluate(
+                provider="opencode",
+                parsed=parsed,
+                raw_tail=capture,
+                policy="auto",
+                temp_root=None,
+                allowlist=[],
+                allowed_actions=["read", "write", "create", "delete"],
+                approve_input="y",
+                project_dir=project,
+            )
+            self.assertEqual(decision.result, "allow")
+
+    def test_approval_phrases_mirror_robot_markers(self) -> None:
+        self.assertEqual(
+            tuple(permissions_mod._APPROVAL_PHRASES),
+            tuple(robot_mod.APPROVAL_MARKERS),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

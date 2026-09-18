@@ -137,6 +137,38 @@ def canonical_operation(word: str) -> str | None:
     return None
 
 
+#: Approval-surface phrases mirroring `robot.APPROVAL_MARKERS` (kept local
+#: because `robot` imports this module; a test asserts they stay in sync).
+#: Lines carrying one of these phrases describe the live approval; every
+#: other tail line is scrollback context. Privileged evaluation is scoped
+#: to the approval lines so scrollback prose cannot poison a clean file
+#: approval; unidentifiable surfaces fall back to whole-tail refusal.
+_APPROVAL_PHRASES = (
+    "approve",
+    "approval",
+    "permission",
+    "enter confirm",
+    "enter to confirm",
+    "confirm?",
+    "confirm:",
+    "allow?",
+    "[y/n]",
+    "(y/n)",
+    "would you like",
+    "press y",
+)
+
+
+def _approval_lines(lines: list[str]) -> list[str]:
+    """Approval-relevant lines from an already-sliced tail window."""
+    scoped = []
+    for line in lines or []:
+        lowered = line.lower()
+        if any(phrase in lowered for phrase in _APPROVAL_PHRASES):
+            scoped.append(line)
+    return scoped
+
+
 def contains_privileged_markers(text: str) -> bool:
     """True when the request names privileged/destructive operations."""
     return _PRIVILEGED_RE.search(text or "") is not None
@@ -151,14 +183,18 @@ def request_shape(raw_tail: str) -> str:
     `privileged-markers`, `no-operation-word`, or
     `ambiguous-paths(n)`, so operators can tell a must-never-approve
     execution prompt from a parser gap on an approvable file
-    request.
+    request. Privileged markers are evaluated on the approval lines
+    when identifiable, so scrollback-only prose folds into the
+    non-privileged classes instead of forcing `privileged-markers`.
     """
-    tail = "\n".join((raw_tail or "").splitlines()[-16:])
-    if contains_privileged_markers(tail):
+    lines = (raw_tail or "").splitlines()[-16:]
+    scoped = _approval_lines(lines)
+    text = "\n".join(scoped) if scoped else "\n".join(lines)
+    if contains_privileged_markers(text):
         return "privileged-markers"
-    if _OPERATION_RE.search(tail.lower()) is None:
+    if _OPERATION_RE.search(text.lower()) is None:
         return "no-operation-word"
-    return f"ambiguous-paths({len(_path_candidates(tail))})"
+    return f"ambiguous-paths({len(_path_candidates(text))})"
 
 
 def _path_candidates(text: str) -> list[str]:
@@ -184,25 +220,15 @@ def _path_candidates(text: str) -> list[str]:
     return [item[:MAX_PATH_CHARS] for item in found]
 
 
-def parse_permission_request(text: str) -> ParsedRequest | None:
-    """Parse one provider file request from a pane tail (fail-closed).
+def _parse_file_action(scope_text: str) -> ParsedRequest | None:
+    """Parse one unambiguous file operation plus path from scoped text.
 
-    Returns the canonical operation plus the single unambiguous requested
-    path, or None when the surface is unknown, ambiguous (zero or several
-    distinct paths), privileged, or names no permitted file action.
-    Provider directory-access prompts (one unambiguous directory on the
-    access line) additionally parse as a `read` request for the directory
-    itself; surrounding pattern and history lines are context only. A
-    failed file parse (for example scrollback commands that add extra
-    paths) falls through to the directory attempt instead of stopping.
-    Callers must treat None as waiting: never approve, never deny-blindly.
+    Returns the canonical operation and single path, or None when the
+    text names no permitted file action, carries zero or several paths,
+    or embeds shell-operator characters. Privileged screening stays
+    with the caller so approval-line scoping applies uniformly.
     """
-    tail = "\n".join((text or "").splitlines()[-16:])
-    if not tail.strip():
-        return None
-    if contains_privileged_markers(tail):
-        return None
-    lowered = tail.lower()
+    lowered = scope_text.lower()
     operation: str | None = None
     for canonical, synonyms in _OPERATION_WORDS:
         for word in synonyms:
@@ -213,14 +239,54 @@ def parse_permission_request(text: str) -> ParsedRequest | None:
                 break
         if operation is not None:
             break
-    if operation is not None:
-        candidates = _path_candidates(tail)
-        if len(candidates) == 1:
-            requested = candidates[0]
-            if not any(char in requested for char in _SHELL_CHARS) and (
-                requested.strip()
-            ):
-                return ParsedRequest(operation=operation, requested_path=requested)
+    if operation is None:
+        return None
+    candidates = _path_candidates(scope_text)
+    if len(candidates) != 1:
+        return None
+    requested = candidates[0]
+    if any(char in requested for char in _SHELL_CHARS) or not requested.strip():
+        return None
+    return ParsedRequest(operation=operation, requested_path=requested)
+
+
+def parse_permission_request(text: str) -> ParsedRequest | None:
+    """Parse one provider file request from a pane tail (fail-closed).
+
+    Returns the canonical operation plus the single unambiguous requested
+    path, or None when the surface is unknown, ambiguous (zero or several
+    distinct paths), privileged, or names no permitted file action.
+    Privileged markers and the operation/path parse are scoped to the
+    approval lines when identifiable, so scrollback prose (build output
+    naming `shell`, `script`, `rm`, ...) cannot poison a clean file
+    approval; a privileged word on the approval lines themselves still
+    refuses. Surfaces without identifiable approval lines keep the
+    legacy whole-tail refusal (fail closed). Provider directory-access
+    prompts (one unambiguous directory on the access line) additionally
+    parse as a `read` request for the directory itself; surrounding
+    pattern and history lines are context only. A failed file parse
+    (for example scrollback commands that add extra paths) falls
+    through to the directory attempt instead of stopping. Callers must
+    treat None as waiting: never approve, never deny-blindly.
+    """
+    lines = (text or "").splitlines()[-16:]
+    tail = "\n".join(lines)
+    if not tail.strip():
+        return None
+    scoped = _approval_lines(lines)
+    if scoped:
+        scope_text = "\n".join(scoped)
+        if contains_privileged_markers(scope_text):
+            return None
+        parsed = _parse_file_action(scope_text)
+        if parsed is not None:
+            return parsed
+        return _parse_directory_access(tail)
+    if contains_privileged_markers(tail):
+        return None
+    parsed = _parse_file_action(tail)
+    if parsed is not None:
+        return parsed
     return _parse_directory_access(tail)
 
 
@@ -475,7 +541,10 @@ def evaluate(
             reason,
         )
     if parsed is None:
-        if contains_privileged_markers(raw_tail):
+        tail_lines = (raw_tail or "").splitlines()[-16:]
+        scoped = _approval_lines(tail_lines)
+        privileged_text = "\n".join(scoped) if scoped else "\n".join(tail_lines)
+        if contains_privileged_markers(privileged_text):
             return PermissionDecision(
                 provider,
                 "",
