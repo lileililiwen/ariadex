@@ -1061,11 +1061,37 @@ Point-in-time completion records. Test counts, validation tallies, and status cl
 
 ## Next change
 
-Active OpenSpec queue: none (openspec list reports no active
-changes; the permission-scope change is archived). The next
-implementation must propose a change first, then select exactly
-one active change per the workflow in .ai-rules/workflow.md and
-update this handoff only after its verified archive.
+Active OpenSpec queue: none (the quota resume change is implemented,
+verified, and archived; see Latest change below). The next implementation
+must propose a change first, then select exactly one active change per the
+workflow in .ai-rules/workflow.md and update this handoff only after its
+verified archive.
+
+## Latest change: quota resume via command
+
+- Implemented, verified, and archived `quota-resume-cli` as
+  `2026-09-19-quota-resume-cli`. New canonical spec `direct-resume` (+2
+  requirements); `robot-watch-stability` and `human-operator-cli` amended.
+- `robot.py`: quota markers now match whole tokens (`_token_present`
+  excludes `[A-Za-z0-9_-]` joins), so `platform-notify-rate-quota` in the
+  pane tail no longer parks the watcher; genuine phrases (`quota expired`,
+  `rate limit reached`, `out of credits`) still wait. WAITING
+  blocker/next-action name only `ariadex switch-model` / `ariadex retry`
+  and the widget Switch control.
+- `cli.py`: new `reconcile` (→ `wake`), `retry`, `send --text`,
+  `switch-model --model` commands routed to existing daemon IPC with
+  fail-closed behavior and `--json`; `resume` idempotent from `AUTO`
+  (daemon + local fallback, no input). `ADMIN_COMMANDS` extended for the
+  `admin` namespace.
+- `daemon.py`: `resume` from `AUTO` returns success with the resync report
+  instead of rejecting; `PAUSE`→`AUTO` resync unchanged.
+- Verification: full suite `PYTHONPATH=src python3 -m unittest discover -s
+  tests` 1619/1619 green; `ruff check` + `ruff format --check` clean;
+  `openspec validate --changes --strict` 1/1 and `--specs --strict` 69/69
+  passed before/after archive (no `--skip-specs`).
+- Note: `resume` stays `PAUSE`-only in `control.transition`; idempotence is
+  handled at the daemon/CLI layers. Widget `Play` semantics unchanged
+  (enabled for `PAUSE`/`MANUAL` only).
 
 ## Latest change: widget live log and queue visibility
 
