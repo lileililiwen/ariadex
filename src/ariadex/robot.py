@@ -331,6 +331,30 @@ QUOTA_MARKERS = (
     "insufficient credits",
 )
 
+#: Characters that join a marker to a larger identifier. A marker occurrence
+#: with one of these on either side (e.g. the `quota` in
+#: `platform-notify-rate-quota`) is an identifier part, not a provider
+#: signal, and must not match.
+_TOKEN_JOIN_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+)
+
+
+def _token_present(haystack: str, marker: str) -> bool:
+    """True when `marker` occurs as a standalone token in `haystack`."""
+    start = 0
+    while True:
+        idx = haystack.find(marker, start)
+        if idx < 0:
+            return False
+        before = haystack[idx - 1] if idx > 0 else ""
+        end = idx + len(marker)
+        after = haystack[end] if end < len(haystack) else ""
+        if before not in _TOKEN_JOIN_CHARS and after not in _TOKEN_JOIN_CHARS:
+            return True
+        start = idx + 1
+
+
 # Fresh activity proves the agent is still working, even beside a stale
 # ready prompt further up the scrollback.
 BUSY_MARKERS = (
@@ -443,7 +467,7 @@ def classify_capture(provider: str, text: str, input_ready: bool | None = None) 
     lowered = "\n".join((text or "").splitlines()[-CLASSIFICATION_TAIL_LINES:]).lower()
     if any(marker in lowered for marker in APPROVAL_MARKERS):
         return CLASS_APPROVAL
-    if any(marker in lowered for marker in QUOTA_MARKERS):
+    if any(_token_present(lowered, marker) for marker in QUOTA_MARKERS):
         return CLASS_QUOTA
     if any(marker in lowered for marker in AUTH_MARKERS):
         return CLASS_ERROR
@@ -1799,7 +1823,7 @@ class RobotWatcher:
                 decision="failed",
                 blocker=reason,
                 operation="switch-model",
-                next_action="switch the model or credentials manually, "
+                next_action="run `ariadex switch-model --model <name>`, "
                 "then watching resumes",
             )
             return False
@@ -2031,8 +2055,9 @@ class RobotWatcher:
             self.phase = WAITING
             self.stable_polls = 0
             self.block_reason = (
-                "provider quota or rate limit reached; switch the model or "
-                "credentials, then watcher will resume"
+                "provider quota or rate limit reached; run "
+                "`ariadex switch-model --model <name>` (or `ariadex retry` "
+                "once the limit resets), then watching resumes"
             )
             self._record("waiting", self.block_reason)
             self._diag(
@@ -2045,7 +2070,9 @@ class RobotWatcher:
                 decision="waiting",
                 blocker=self.block_reason,
                 operation="observe",
-                next_action="switch the model or credentials, then watching resumes",
+                next_action="run `ariadex switch-model --model <name>` (or "
+                "switch credentials / `ariadex retry` once the limit resets), "
+                "then watching resumes",
             )
             return self.phase
         if observed == CLASS_ERROR:

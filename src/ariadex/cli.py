@@ -154,9 +154,54 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit stable JSON instead of human-readable text",
     )
     resume_parser = sub.add_parser(
-        "resume", help="leave PAUSE and return to AUTO scheduling"
+        "resume",
+        help="return to AUTO scheduling; idempotent when already AUTO",
     )
     resume_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit stable JSON instead of human-readable text",
+    )
+    reconcile_parser = sub.add_parser(
+        "reconcile",
+        help="re-check supervision state now without sending provider input",
+    )
+    reconcile_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit stable JSON instead of human-readable text",
+    )
+    retry_parser = sub.add_parser(
+        "retry", help="resend the most recent prompt verbatim, once"
+    )
+    retry_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit stable JSON instead of human-readable text",
+    )
+    send_parser = sub.add_parser(
+        "send", help="send operator text once into the current conversation"
+    )
+    send_parser.add_argument(
+        "--text",
+        required=True,
+        help="message text to deliver (refused when empty)",
+    )
+    send_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit stable JSON instead of human-readable text",
+    )
+    switch_parser = sub.add_parser(
+        "switch-model",
+        help="restart the provider session under a configured model",
+    )
+    switch_parser.add_argument(
+        "--model",
+        required=True,
+        help="configured model name to switch to",
+    )
+    switch_parser.add_argument(
         "--json",
         action="store_true",
         help="emit stable JSON instead of human-readable text",
@@ -1214,6 +1259,81 @@ def _daemon_ipc_or_none(project_dir: Path, request_type: str) -> dict | None:
     return state if isinstance(state, dict) else {}
 
 
+def _daemon_request_or_none(
+    project_dir: Path, request_type: str, payload: dict | None = None
+) -> dict | None:
+    """One bounded IPC round-trip with payload; None when no daemon answers.
+
+    Unlike `_daemon_ipc_or_none`, the raw response (including refusals) is
+    returned so mutating recovery commands can fail closed with the exact
+    reason instead of falling back to local behavior.
+    """
+    try:
+        record = daemon_mod.read_record(project_dir)
+    except Exception:
+        return None
+    if not daemon_mod.daemon_alive(record):
+        return None
+    try:
+        if payload is None:
+            response = daemon_mod.send_request(project_dir, request_type)
+        else:
+            response = daemon_mod.send_request(
+                project_dir, request_type, payload=payload
+            )
+    except daemon_mod.DaemonError:
+        return None
+    return response if isinstance(response, dict) else None
+
+
+def _report_manual_result(
+    project_dir: Path,
+    request_type: str,
+    payload: dict | None,
+    as_json: bool,
+) -> int:
+    """Route one recovery command to the daemon; fail closed without one."""
+    response = _daemon_request_or_none(project_dir, request_type, payload)
+    if response is None:
+        detail = (
+            f"no live daemon for `{project_dir}`; run `ariadex start` "
+            "(nothing was sent)"
+        )
+        if as_json:
+            import json as json_mod
+
+            print(json_mod.dumps({"ok": False, "error": detail}, sort_keys=True))
+        else:
+            print(detail)
+        return EXIT_ERROR
+    if not response.get("ok"):
+        detail = str(response.get("error") or f"daemon refused `{request_type}`")
+        if as_json:
+            import json as json_mod
+
+            print(
+                json_mod.dumps(
+                    {"ok": False, "error": detail, "daemon": response.get("state")},
+                    sort_keys=True,
+                    indent=2,
+                )
+            )
+        else:
+            print(detail)
+        return EXIT_ERROR
+    import json as json_mod
+
+    state = response.get("state")
+    if as_json:
+        print(json_mod.dumps({"daemon": state}, sort_keys=True, indent=2))
+    else:
+        print(daemon_mod.format_status_text(state))
+        manual_result = state.get("manual_result") if isinstance(state, dict) else None
+        if manual_result:
+            print(str(manual_result))
+    return EXIT_OK
+
+
 def cmd_status(project_dir: Path, as_json: bool = False) -> int:
     # When a healthy daemon answers, report its resulting state: the CLI
     # connects to the project socket, sends a typed JSON request, waits for
@@ -1751,7 +1871,8 @@ def cmd_pause(project_dir: Path, as_json: bool = False) -> int:
 
 
 def cmd_resume(project_dir: Path, as_json: bool = False) -> int:
-    # Valid only from PAUSE; returns to AUTO scheduling after resynchronization.
+    # Valid from PAUSE (returns to AUTO scheduling after resynchronization)
+    # and idempotent from AUTO (reports status, sends no provider input).
     # Daemon-mediated when healthy.
     ipc = _daemon_ipc_or_none(project_dir, "resume")
     if ipc:
@@ -1762,12 +1883,54 @@ def cmd_resume(project_dir: Path, as_json: bool = False) -> int:
         else:
             print(daemon_mod.format_status_text(ipc))
         return EXIT_OK
+    stored = _load_state(project_dir)
+    if stored is not None and stored.mode == "AUTO":
+        if as_json:
+            import json as json_mod
+
+            print(
+                json_mod.dumps(
+                    {
+                        "ok": True,
+                        "via": "resume",
+                        "mode": "AUTO",
+                        "changed": False,
+                        "note": "already scheduling; no change made",
+                        "coordination": None,
+                    },
+                    sort_keys=True,
+                    indent=2,
+                )
+            )
+        else:
+            print("mode is already AUTO; no change made")
+        return EXIT_OK
     return _transition(
         project_dir,
         "resume",
         "automatic scheduling resumed after reconciliation",
         as_json=as_json,
     )
+
+
+def cmd_reconcile(project_dir: Path, as_json: bool = False) -> int:
+    # Re-check supervision state now; read-only, never sends provider input.
+    return _report_manual_result(project_dir, "wake", None, as_json)
+
+
+def cmd_retry(project_dir: Path, as_json: bool = False) -> int:
+    # Resend the most recent prompt verbatim, once, via the live watcher.
+    return _report_manual_result(project_dir, "retry", None, as_json)
+
+
+def cmd_send(project_dir: Path, text: str, as_json: bool = False) -> int:
+    # Deliver operator text once, subject to the watcher's draft/PAUSE guards.
+    return _report_manual_result(project_dir, "send_message", {"text": text}, as_json)
+
+
+def cmd_switch_model(project_dir: Path, model: str, as_json: bool = False) -> int:
+    # Restart the provider session under a configured model name.
+    return _report_manual_result(project_dir, "switch_model", {"model": model}, as_json)
 
 
 def _report_live_owner(project_dir: Path, record, as_json: bool) -> None:
@@ -2811,6 +2974,10 @@ ADMIN_COMMANDS = (
     "status",
     "pause",
     "resume",
+    "reconcile",
+    "retry",
+    "send",
+    "switch-model",
     "upgrade",
 )
 
@@ -4196,6 +4363,20 @@ def main(argv: list[str] | None = None) -> int:
         "status": lambda: cmd_status(project_dir, as_json=getattr(args, "json", False)),
         "pause": lambda: cmd_pause(project_dir, as_json=getattr(args, "json", False)),
         "resume": lambda: cmd_resume(project_dir, as_json=getattr(args, "json", False)),
+        "reconcile": lambda: cmd_reconcile(
+            project_dir, as_json=getattr(args, "json", False)
+        ),
+        "retry": lambda: cmd_retry(project_dir, as_json=getattr(args, "json", False)),
+        "send": lambda: cmd_send(
+            project_dir,
+            text=getattr(args, "text", ""),
+            as_json=getattr(args, "json", False),
+        ),
+        "switch-model": lambda: cmd_switch_model(
+            project_dir,
+            model=getattr(args, "model", ""),
+            as_json=getattr(args, "json", False),
+        ),
         "start": lambda: cmd_start(
             project_dir,
             as_json=getattr(args, "json", False),

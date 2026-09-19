@@ -97,13 +97,14 @@ class PauseResumeTest(unittest.TestCase):
         self.assertEqual(stored.mode, "PAUSE")
         self.assertEqual(stored.session_id, before)
 
-    def test_resume_rejected_outside_pause(self):
-        code, _, err = run_cli(self.root, "resume")  # AUTO after init
-        self.assertNotEqual(code, 0)
-        self.assertIn("resume rejected", err)
-        st = state.read(self.root)
-        st.mode = "AUTO"
-        state.write(self.root, st)
+    def test_resume_idempotent_from_auto(self):
+        code, out, _ = run_cli(self.root, "resume")  # AUTO after init
+        self.assertEqual(code, 0)
+        self.assertIn("AUTO", out)
+        self.assertEqual(state.read(self.root).mode, "AUTO")
+
+    def test_resume_still_rejected_from_manual(self):
+        run_cli(self.root, "takeover")
         code, _, err = run_cli(self.root, "resume")
         self.assertNotEqual(code, 0)
         self.assertIn("resume rejected", err)

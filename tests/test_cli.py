@@ -209,6 +209,12 @@ class TransitionTest(unittest.TestCase):
         self.assertEqual(run_cli(self.root, "resume")[0], 0)
         self.assertEqual(self.mode(), "AUTO")
 
+    def test_resume_idempotent_from_auto(self):
+        code, out, _ = run_cli(self.root, "resume")
+        self.assertEqual(code, 0)
+        self.assertIn("already AUTO", out)
+        self.assertEqual(self.mode(), "AUTO")
+
     def test_takeover_enters_manual(self):
         run_cli(self.root, "--no-auto-install", "auto")
         self.assertEqual(run_cli(self.root, "takeover")[0], 0)
@@ -263,6 +269,55 @@ class RunAttachTest(unittest.TestCase):
         code, _, err = run_cli(self.root, "--no-auto-install", "attach")
         self.assertNotEqual(code, 0)
         self.assertIn("attach is unavailable", err)
+
+
+class RecoveryCommandsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        run_cli(self.root, "init")
+
+    def test_recovery_commands_fail_closed_without_daemon(self):
+        for argv in (
+            ("reconcile",),
+            ("retry",),
+            ("send", "--text", "hello"),
+            ("switch-model", "--model", "demo-model"),
+        ):
+            with self.subTest(argv=argv):
+                code, out, _ = run_cli(self.root, *argv)
+                self.assertNotEqual(code, 0)
+                self.assertIn("no live daemon", out)
+        # Nothing was sent and durable mode is untouched.
+        self.assertEqual(state.read(self.root).mode, "AUTO")
+
+    def test_send_and_switch_model_require_arguments(self):
+        code, _, _ = run_cli(self.root, "send")
+        self.assertEqual(code, 2)
+        code, _, _ = run_cli(self.root, "switch-model")
+        self.assertEqual(code, 2)
+
+    def test_recovery_commands_reach_admin_namespace(self):
+        for argv in (
+            ("admin", "reconcile"),
+            ("admin", "retry"),
+            ("admin", "send", "--text", "hello"),
+            ("admin", "switch-model", "--model", "demo-model"),
+        ):
+            with self.subTest(argv=argv):
+                code, out, _ = run_cli(self.root, *argv)
+                self.assertNotEqual(code, 0)
+                self.assertIn("no live daemon", out)
+
+    def test_recovery_commands_support_json(self):
+        code, out, _ = run_cli(self.root, "reconcile", "--json")
+        self.assertNotEqual(code, 0)
+        import json as json_mod
+
+        payload = json_mod.loads(out)
+        self.assertFalse(payload["ok"])
+        self.assertIn("no live daemon", payload["error"])
 
 
 if __name__ == "__main__":

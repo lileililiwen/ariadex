@@ -148,10 +148,11 @@ class HandleRequestTest(unittest.TestCase):
         self.assertIn("resync_next", reply["state"])
         self.assertIsNone(concurrency.cancellation_requested(self.root))
 
-    def test_resume_rejected_outside_pause(self):
+    def test_resume_idempotent_from_auto(self):
         reply = daemon.handle_request(self.root, "resume")
-        self.assertFalse(reply["ok"])
+        self.assertTrue(reply["ok"], reply)
         self.assertEqual(state.read(self.root).mode, "AUTO")
+        self.assertIn("resync_next", reply["state"])
 
     def test_stop_marks_stopping_without_deleting_work(self):
         handoff_before = (handoff_path(self.root)).read_text()

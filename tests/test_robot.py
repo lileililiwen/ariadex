@@ -212,6 +212,43 @@ class ClassifyTest(unittest.TestCase):
         )
         self.assertEqual(robot_mod.classify_capture("opencode", capture), "waiting")
 
+    def test_change_identifier_with_quota_word_is_not_waiting(self) -> None:
+        capture = (
+            "- platform-notify-rate-quota is next when you're ready.\n"
+            "\n"
+            "▣  Build · test-model · 5m 14s\n"
+            "\n"
+            "┃\n"
+            "┃  Build · test-model\n"
+        )
+        self.assertNotEqual(
+            robot_mod.classify_capture("opencode", capture, input_ready=True),
+            "waiting",
+        )
+
+    def test_quota_word_joined_to_identifier_is_not_waiting(self) -> None:
+        for surface in (
+            "myquota exceeded yesterday\nAsk anything · tab agents\n> ",
+            "quotas are documented\nAsk anything · tab agents\n> ",
+        ):
+            with self.subTest(surface=surface):
+                self.assertNotEqual(
+                    robot_mod.classify_capture("opencode", surface, input_ready=True),
+                    "waiting",
+                )
+
+    def test_genuine_quota_phrasing_still_waits(self) -> None:
+        for surface in (
+            "rate limit reached, try again later",
+            "API rate-limit exceeded for this account",
+            "you are out of credits for today",
+            "insufficient credits to continue",
+        ):
+            with self.subTest(surface=surface):
+                self.assertEqual(
+                    robot_mod.classify_capture("opencode", surface), "waiting"
+                )
+
     def test_unknown_provider_never_finishes(self) -> None:
         self.assertEqual(robot_mod.classify_capture("wat", READY_OPENCODE), "unknown")
 

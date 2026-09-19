@@ -514,8 +514,12 @@ The normal lifecycle is:
 
 Quota and rate-limit responses are recoverable waiting states. Ariadex sends
 no further prompt while the provider reports the limit, giving the operator
-time to switch the model or credentials; watching resumes when a usable ready
-surface returns.
+time to run `ariadex switch-model --model <name>` (or the widget Switch
+control); watching resumes when a usable ready surface returns. `ariadex
+reconcile`, `ariadex retry`, and `ariadex send --text ...` recover or
+re-check without the widget. `ariadex resume` is idempotent: from `PAUSE` it
+returns to `AUTO` after resynchronization, from `AUTO` it reports status
+without sending provider input.
 
 `AUTO` means Ariadex may schedule and send provider input through its
 configured agent adapter and tmux session. Provider text alone never proves
@@ -604,6 +608,10 @@ unresolved or blocked work. Nothing is ever silently discarded.
 | `uninstall [--purge] [--yes] [--json]` | Remove owned integration; state kept |
 | `admin doctor`     | Diagnose prerequisites, ownership, widget, and scheduling state |
 | `admin status`     | Inspect the managed runtime without changing it                 |
+| `reconcile [--json]` | Re-check supervision state now without sending provider input |
+| `retry [--json]` | Resend the most recent prompt verbatim, once                      |
+| `send --text T [--json]` | Send operator text once into the current conversation     |
+| `switch-model --model M [--json]` | Restart the provider session under a configured model |
 | `admin recover`    | Reconcile stale or uncertain runtime state                       |
 | `admin logs ...`   | Bounded diagnostic log inspection                                |
 | `admin export-logs ...` | Bounded diagnostic log inspection                         |

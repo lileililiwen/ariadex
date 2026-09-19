@@ -679,6 +679,13 @@ def handle_request(
             return build_response(
                 False, daemon_status_view(project_dir), error=f"resync refused: {exc}"
             )
+        if stored.mode == "AUTO":
+            # Idempotent resume: already scheduling, so report the resync
+            # without touching the mode and without provider input.
+            concurrency_mod.clear_cancellation(project_dir)
+            view = daemon_status_view(project_dir)
+            view["resync_next"] = report.next_action
+            return build_response(True, view)
         try:
             mode = control_mod.transition(stored.mode, "AUTO", via="resume")
         except control_mod.TransitionError as exc:
